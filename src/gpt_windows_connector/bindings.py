@@ -5,43 +5,38 @@ import os
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
-
-BindingScope = Literal["project", "conversation"]
 
 
 @dataclass(frozen=True)
-class WorkspaceBinding:
-    scope: BindingScope
-    scope_id: str
+class ProjectBinding:
+    project_id: str
     workspace: str
-    node_id: str | None = None
+    node_id: str
+    name: str | None = None
 
 
 class BindingStore:
-    """Persistent project/conversation -> workspace binding store.
+    """Persistent project -> Windows node + workspace bindings.
 
-    Conversation bindings override project bindings. The store is intentionally
-    independent from any specific AI vendor; callers provide stable project and
-    conversation IDs from their client/session context.
+    This intentionally has no conversation binding layer. Every chat inside the
+    same AI project is expected to resolve through the same project binding.
     """
 
     def __init__(self, path: str | Path | None = None) -> None:
-        default = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "gpt-windows-connector" / "bindings.json"
+        default = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "gpt-windows-connector" / "projects.json"
         self.path = Path(path or os.environ.get("GWC_BINDINGS_FILE", default)).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         if not self.path.exists():
-            self._write({"version": 1, "project": {}, "conversation": {}})
+            self._write({"version": 1, "projects": {}})
 
     def _read(self) -> dict:
         with self._lock:
             try:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
             except (FileNotFoundError, json.JSONDecodeError):
-                data = {"version": 1, "project": {}, "conversation": {}}
-            data.setdefault("project", {})
-            data.setdefault("conversation", {})
+                data = {"version": 1, "projects": {}}
+            data.setdefault("projects", {})
             return data
 
     def _write(self, data: dict) -> None:
@@ -50,54 +45,33 @@ class BindingStore:
             tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(self.path)
 
-    @staticmethod
-    def _validate_workspace(workspace: str | Path) -> Path:
-        resolved = Path(workspace).expanduser().resolve()
-        if not resolved.exists() or not resolved.is_dir():
-            raise ValueError(f"Workspace does not exist or is not a directory: {resolved}")
-        return resolved
-
-    def set(self, scope: BindingScope, scope_id: str, workspace: str | Path, node_id: str | None = None) -> WorkspaceBinding:
-        if scope not in ("project", "conversation"):
-            raise ValueError("scope must be 'project' or 'conversation'")
-        scope_id = scope_id.strip()
-        if not scope_id:
-            raise ValueError("scope_id is required")
-        resolved = self._validate_workspace(workspace)
-        binding = WorkspaceBinding(scope=scope, scope_id=scope_id, workspace=str(resolved), node_id=node_id or None)
+    def set(self, project_id: str, node_id: str, workspace: str, name: str | None = None) -> ProjectBinding:
+        project_id = project_id.strip()
+        node_id = node_id.strip()
+        workspace = workspace.strip()
+        if not project_id:
+            raise ValueError("project_id is required")
+        if not node_id:
+            raise ValueError("node_id is required")
+        if not workspace:
+            raise ValueError("workspace is required")
+        binding = ProjectBinding(project_id=project_id, node_id=node_id, workspace=workspace, name=name or None)
         data = self._read()
-        data[scope][scope_id] = asdict(binding)
+        data["projects"][project_id] = asdict(binding)
         self._write(data)
         return binding
 
-    def get(self, scope: BindingScope, scope_id: str) -> WorkspaceBinding | None:
-        data = self._read()
-        raw = data.get(scope, {}).get(scope_id)
-        return WorkspaceBinding(**raw) if raw else None
+    def get(self, project_id: str) -> ProjectBinding | None:
+        raw = self._read().get("projects", {}).get(project_id)
+        return ProjectBinding(**raw) if raw else None
 
-    def remove(self, scope: BindingScope, scope_id: str) -> bool:
+    def remove(self, project_id: str) -> bool:
         data = self._read()
-        existed = scope_id in data.get(scope, {})
+        existed = project_id in data.get("projects", {})
         if existed:
-            del data[scope][scope_id]
+            del data["projects"][project_id]
             self._write(data)
         return existed
 
-    def list(self, scope: BindingScope | None = None) -> list[WorkspaceBinding]:
-        data = self._read()
-        scopes = (scope,) if scope else ("project", "conversation")
-        result: list[WorkspaceBinding] = []
-        for current_scope in scopes:
-            for raw in data.get(current_scope, {}).values():
-                result.append(WorkspaceBinding(**raw))
-        return result
-
-    def resolve(self, project_id: str | None = None, conversation_id: str | None = None) -> WorkspaceBinding | None:
-        """Resolve the active binding with conversation > project precedence."""
-        if conversation_id:
-            binding = self.get("conversation", conversation_id)
-            if binding:
-                return binding
-        if project_id:
-            return self.get("project", project_id)
-        return None
+    def list(self) -> list[ProjectBinding]:
+        return [ProjectBinding(**raw) for raw in self._read().get("projects", {}).values()]
