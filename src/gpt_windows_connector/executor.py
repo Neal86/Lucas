@@ -5,16 +5,19 @@ from pathlib import Path
 
 from . import browser, computer, files, git_tools, processes, shell
 from .config import validate_workspace
+from .permissions import NodePolicy
 
 
 class Executor:
-    def __init__(self, allowed_roots: tuple[Path, ...]) -> None:
+    def __init__(self, allowed_roots: tuple[Path, ...], permission_level: str = "operate") -> None:
         self.allowed_roots = allowed_roots
+        self.policy = NodePolicy(permission_level)
 
     def workspace(self, raw: str) -> Path:
         return validate_workspace(self.allowed_roots, raw)
 
     async def call(self, method: str, params: dict) -> object:
+        self.policy.authorize(method)
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
         sync = {
