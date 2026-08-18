@@ -17,7 +17,6 @@ class Executor:
     async def call(self, method: str, params: dict) -> object:
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
-
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
             "files.list": lambda: files.list_files(workspace, **p),
@@ -34,14 +33,18 @@ class Executor:
             "process.start": lambda: processes.start_process(workspace, **p),
             "process.poll": lambda: processes.poll_process(**p),
             "process.stop": lambda: processes.stop_process(**p),
+            "process.list": lambda: processes.list_managed_processes(),
             "git.status": lambda: git_tools.status(workspace),
             "git.diff": lambda: git_tools.diff(workspace, **p),
             "git.log": lambda: git_tools.log(workspace, **p),
             "git.branch": lambda: git_tools.branch(workspace),
+            "git.branch_create": lambda: git_tools.branch_create(workspace, **p),
+            "git.branch_switch": lambda: git_tools.branch_switch(workspace, **p),
             "git.add": lambda: git_tools.add(workspace, **p),
             "git.commit": lambda: git_tools.commit(workspace, **p),
             "git.pull": lambda: git_tools.pull(workspace, **p),
             "git.push": lambda: git_tools.push(workspace, **p),
+            "git.show": lambda: git_tools.show(workspace, **p),
             "computer.info": lambda: computer.system_info(),
             "computer.processes": lambda: computer.list_processes(**p),
             "computer.launch": lambda: computer.launch_app(**p),
@@ -60,7 +63,6 @@ class Executor:
         }
         if method in sync:
             return await asyncio.to_thread(sync[method])
-
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
             "browser.launch_persistent": browser.launch_persistent,
