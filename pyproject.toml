@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gpt-windows-connector"
-version = "1.1.0"
-description = "Multi-user remote Windows execution MCP for ChatGPT, Claude, Gemini and other MCP clients"
+version = "1.2.0"
+description = "Multi-user remote Windows execution MCP with VPS web dashboard for ChatGPT, Claude, Gemini and other MCP clients"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -31,7 +31,7 @@ dependencies = [
 dev = ["pytest>=8.3,<9"]
 
 [project.scripts]
-gwc-gateway = "gpt_windows_connector.gateway:main"
+gwc-gateway = "gpt_windows_connector.webapp:main"
 gwc-node = "gpt_windows_connector.node:main"
 
 [tool.hatch.build.targets.wheel]
