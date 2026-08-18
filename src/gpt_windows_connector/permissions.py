@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 READ_METHODS = {
-    "workspace.info",
+    "workspace.info", "workspace.browse",
     "files.list", "files.read", "files.search", "files.stat",
     "git.status", "git.diff", "git.log", "git.branch", "git.show",
     "process.poll", "process.list",
