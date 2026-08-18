@@ -81,15 +81,66 @@ class NodeConnection:
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+@dataclass
+class ControlLock:
+    project_id: str
+    expires_at: float
+
+
 class NodeRegistry:
     def __init__(self) -> None:
         self.nodes: dict[str, NodeConnection] = {}
+        self.control_locks: dict[str, ControlLock] = {}
 
     def list(self) -> list[dict]:
-        return [
-            {"node_id": n.node_id, "name": n.name, "permission_level": n.permission_level, "online": True, "last_seen": n.last_seen}
-            for n in self.nodes.values()
-        ]
+        now = time.time()
+        out = []
+        for node in self.nodes.values():
+            lock = self.control_locks.get(node.node_id)
+            if lock and lock.expires_at <= now:
+                self.control_locks.pop(node.node_id, None)
+                lock = None
+            out.append({
+                "node_id": node.node_id,
+                "name": node.name,
+                "permission_level": node.permission_level,
+                "online": True,
+                "last_seen": node.last_seen,
+                "control_project": lock.project_id if lock else None,
+                "control_expires_at": lock.expires_at if lock else None,
+            })
+        return out
+
+    def acquire_control(self, node_id: str, project_id: str, ttl_seconds: int = 120) -> dict:
+        if node_id not in self.nodes:
+            raise RuntimeError(f"Node is offline: {node_id}")
+        now = time.time()
+        ttl_seconds = max(15, min(ttl_seconds, 1800))
+        current = self.control_locks.get(node_id)
+        if current and current.expires_at > now and current.project_id != project_id:
+            raise RuntimeError(f"Node {node_id} is controlled by project {current.project_id}")
+        lock = ControlLock(project_id=project_id, expires_at=now + ttl_seconds)
+        self.control_locks[node_id] = lock
+        return {"node_id": node_id, "project_id": project_id, "expires_at": lock.expires_at}
+
+    def release_control(self, node_id: str, project_id: str) -> dict:
+        current = self.control_locks.get(node_id)
+        if current and current.project_id == project_id:
+            self.control_locks.pop(node_id, None)
+            return {"released": True, "node_id": node_id, "project_id": project_id}
+        return {"released": False, "node_id": node_id, "project_id": project_id}
+
+    def control_status(self, node_id: str) -> dict:
+        now = time.time()
+        current = self.control_locks.get(node_id)
+        if current and current.expires_at <= now:
+            self.control_locks.pop(node_id, None)
+            current = None
+        return {
+            "node_id": node_id,
+            "project_id": current.project_id if current else None,
+            "expires_at": current.expires_at if current else None,
+        }
 
     async def rpc(self, node_id: str, method: str, params: dict, timeout: float = 180.0) -> Any:
         node = self.nodes.get(node_id)
@@ -137,9 +188,14 @@ async def _project_rpc(project_id: str, method: str, params: dict | None = None,
     return await registry.rpc(binding.node_id, method, payload)
 
 
+def _desktop_lock(project_id: str, ttl_seconds: int = 120) -> None:
+    binding = _binding(project_id)
+    registry.acquire_control(binding.node_id, project_id, ttl_seconds)
+
+
 mcp = FastMCP(
     "GPT Windows Connector",
-    instructions="Remote Windows execution layer. Project bindings are the only workspace context: project_id -> Windows node + workspace.",
+    instructions="Remote Windows execution layer. Project bindings are the only workspace context: project_id -> Windows node + workspace. No conversation binding is used.",
     stateless_http=True,
     json_response=True,
 )
@@ -150,8 +206,9 @@ async def project_bind(project_id: str, node_id: str, workspace: str, name: str 
     """Bind one AI project to one online Windows node and workspace folder."""
     if node_id not in registry.nodes:
         raise RuntimeError(f"Node is offline: {node_id}")
-    await registry.rpc(node_id, "workspace.info", {"workspace": workspace})
-    return bindings.set(project_id, node_id, workspace, name).__dict__
+    verified = await registry.rpc(node_id, "workspace.info", {"workspace": workspace})
+    normalized = str(verified["path"])
+    return bindings.set(project_id, node_id, normalized, name).__dict__
 
 
 @mcp.tool()
@@ -170,6 +227,9 @@ def project_list() -> list[dict]:
 @mcp.tool()
 def project_unbind(project_id: str) -> dict:
     """Remove a project binding."""
+    item = bindings.get(project_id)
+    if item:
+        registry.release_control(item.node_id, project_id)
     return {"removed": bindings.remove(project_id)}
 
 
@@ -186,6 +246,27 @@ def node_pair(node_id: str, name: str | None = None, ttl_seconds: int = 600) -> 
 def node_list() -> list[dict]:
     """List currently connected Windows nodes."""
     return registry.list()
+
+
+@mcp.tool()
+def control_acquire(project_id: str, ttl_seconds: int = 120) -> dict:
+    """Reserve the project's Windows node for browser/desktop interaction."""
+    binding = _binding(project_id)
+    return registry.acquire_control(binding.node_id, project_id, ttl_seconds)
+
+
+@mcp.tool()
+def control_release(project_id: str) -> dict:
+    """Release the project's browser/desktop control reservation."""
+    binding = _binding(project_id)
+    return registry.release_control(binding.node_id, project_id)
+
+
+@mcp.tool()
+def control_status(project_id: str) -> dict:
+    """Return browser/desktop control ownership for the project's node."""
+    binding = _binding(project_id)
+    return registry.control_status(binding.node_id)
 
 
 @mcp.tool()
@@ -214,7 +295,7 @@ async def process_tool(project_id: str, action: str, params: dict | None = None)
     """Long-running process actions: start, poll, stop, list."""
     if action not in {"start", "poll", "stop", "list"}:
         raise ValueError(f"Unsupported process action: {action}")
-    return await _project_rpc(project_id, f"process.{action}", params, include_workspace=action == "start")
+    return await _project_rpc(project_id, f"process.{action}", params, include_workspace=True)
 
 
 @mcp.tool()
@@ -232,8 +313,9 @@ async def browser_tool(project_id: str, action: str, params: dict | None = None)
     allowed = {"connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
-    binding = _binding(project_id)
-    return await registry.rpc(binding.node_id, f"browser.{action}", params or {})
+    if action not in {"pages", "inspect", "screenshot"}:
+        _desktop_lock(project_id)
+    return await _project_rpc(project_id, f"browser.{action}", params, include_workspace=True)
 
 
 @mcp.tool()
@@ -242,8 +324,9 @@ async def computer_tool(project_id: str, action: str, params: dict | None = None
     allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")
-    binding = _binding(project_id)
-    return await registry.rpc(binding.node_id, f"computer.{action}", params or {})
+    if action not in {"info", "processes", "windows", "screenshot", "clipboard_get"}:
+        _desktop_lock(project_id)
+    return await _project_rpc(project_id, f"computer.{action}", params, include_workspace=True)
 
 
 async def health(_: Request):
