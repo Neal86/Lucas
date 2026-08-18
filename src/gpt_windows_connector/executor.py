@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from . import browser, computer, files, git_tools, processes, shell
-from .config import validate_workspace
+from .config import resolve_in_workspace, validate_workspace
 from .permissions import NodePolicy
 
 
@@ -34,9 +34,9 @@ class Executor:
             "files.delete": lambda: files.delete_path(workspace, **p),
             "shell.run": lambda: shell.run_powershell(workspace, **p),
             "process.start": lambda: processes.start_process(workspace, **p),
-            "process.poll": lambda: processes.poll_process(**p),
-            "process.stop": lambda: processes.stop_process(**p),
-            "process.list": lambda: processes.list_managed_processes(),
+            "process.poll": lambda: processes.poll_process(workspace=workspace, **p),
+            "process.stop": lambda: processes.stop_process(workspace=workspace, **p),
+            "process.list": lambda: processes.list_managed_processes(workspace=workspace),
             "git.status": lambda: git_tools.status(workspace),
             "git.diff": lambda: git_tools.diff(workspace, **p),
             "git.log": lambda: git_tools.log(workspace, **p),
@@ -66,6 +66,13 @@ class Executor:
         }
         if method in sync:
             return await asyncio.to_thread(sync[method])
+
+        if method == "browser.upload":
+            if workspace is None:
+                raise PermissionError("browser.upload requires a project workspace")
+            paths = p.get("paths") or []
+            p["paths"] = [str(resolve_in_workspace(workspace, path)) for path in paths]
+
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
             "browser.launch_persistent": browser.launch_persistent,
