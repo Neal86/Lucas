@@ -309,22 +309,22 @@ async def git_tool(project_id: str, action: str, params: dict | None = None) -> 
 
 @mcp.tool()
 async def browser_tool(project_id: str, action: str, params: dict | None = None) -> object:
-    """Playwright actions on the project's Windows node."""
-    allowed = {"connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "screenshot", "close"}
+    """Browser actions on the project's Windows node."""
+    allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
-    if action not in {"pages", "inspect", "screenshot"}:
+    if action not in {"discover", "pages", "inspect", "screenshot"}:
         _desktop_lock(project_id)
     return await _project_rpc(project_id, f"browser.{action}", params, include_workspace=True)
 
 
 @mcp.tool()
 async def computer_tool(project_id: str, action: str, params: dict | None = None) -> object:
-    """Windows desktop actions on the project's node."""
-    allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set"}
+    """Windows desktop and UI Automation actions on the project's node."""
+    allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set", "ui_elements", "ui_click", "ui_set_text"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")
-    if action not in {"info", "processes", "windows", "screenshot", "clipboard_get"}:
+    if action not in {"info", "processes", "windows", "screenshot", "clipboard_get", "ui_elements"}:
         _desktop_lock(project_id)
     return await _project_rpc(project_id, f"computer.{action}", params, include_workspace=True)
 
