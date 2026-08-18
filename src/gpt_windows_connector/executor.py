@@ -48,6 +48,7 @@ class Executor:
             "git.pull": lambda: git_tools.pull(workspace, **p),
             "git.push": lambda: git_tools.push(workspace, **p),
             "git.show": lambda: git_tools.show(workspace, **p),
+            "browser.discover": lambda: browser.discover_browsers(),
             "computer.info": lambda: computer.system_info(),
             "computer.processes": lambda: computer.list_processes(**p),
             "computer.launch": lambda: computer.launch_app(**p),
@@ -72,6 +73,10 @@ class Executor:
                 raise PermissionError("browser.upload requires a project workspace")
             paths = p.get("paths") or []
             p["paths"] = [str(resolve_in_workspace(workspace, path)) for path in paths]
+        elif method == "browser.download":
+            if workspace is None:
+                raise PermissionError("browser.download requires a project workspace")
+            p["save_path"] = str(resolve_in_workspace(workspace, p["save_path"]))
 
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
@@ -84,6 +89,7 @@ class Executor:
             "browser.type": browser.type_text,
             "browser.select": browser.select_option,
             "browser.upload": browser.upload,
+            "browser.download": browser.download,
             "browser.screenshot": browser.screenshot,
             "browser.close": browser.close,
         }
