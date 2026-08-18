@@ -10,11 +10,49 @@ from .permissions import NodePolicy
 
 class Executor:
     def __init__(self, allowed_roots: tuple[Path, ...], permission_level: str = "operate") -> None:
-        self.allowed_roots = allowed_roots
+        self.allowed_roots = tuple(root.resolve() for root in allowed_roots)
         self.policy = NodePolicy(permission_level)
 
     def workspace(self, raw: str) -> Path:
         return validate_workspace(self.allowed_roots, raw)
+
+    def browse_workspaces(self, path: str | None = None) -> dict:
+        if not path:
+            roots = []
+            for root in self.allowed_roots:
+                if root.exists() and root.is_dir():
+                    roots.append({"name": root.name or root.anchor or str(root), "path": str(root)})
+            return {"path": None, "parent": None, "roots": roots, "directories": []}
+
+        current = validate_workspace(self.allowed_roots, path)
+        directories: list[dict] = []
+        try:
+            children = sorted(current.iterdir(), key=lambda item: item.name.lower())
+        except OSError as exc:
+            raise PermissionError(f"Unable to browse folder: {current}") from exc
+        for child in children:
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    directories.append({"name": child.name, "path": str(child.resolve())})
+            except OSError:
+                continue
+
+        parent = None
+        candidate_parent = current.parent
+        if candidate_parent != current:
+            for root in self.allowed_roots:
+                try:
+                    candidate_parent.relative_to(root)
+                    parent = str(candidate_parent)
+                    break
+                except ValueError:
+                    continue
+        return {
+            "path": str(current),
+            "parent": parent,
+            "roots": [],
+            "directories": directories[:1000],
+        }
 
     async def call(self, method: str, params: dict) -> object:
         self.policy.authorize(method)
@@ -22,6 +60,7 @@ class Executor:
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
+            "workspace.browse": lambda: self.browse_workspaces(**p),
             "files.list": lambda: files.list_files(workspace, **p),
             "files.read": lambda: files.read_text(workspace, **p),
             "files.write": lambda: files.write_text(workspace, **p),
