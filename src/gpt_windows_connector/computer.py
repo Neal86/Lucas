@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import subprocess
+import time
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -88,6 +89,7 @@ def type_text(text: str, interval: float = 0.0) -> dict:
         try:
             pyperclip.copy(text)
             gui.hotkey("ctrl", "v")
+            time.sleep(0.08)
         finally:
             pyperclip.copy(previous)
         mode = "clipboard"
@@ -139,3 +141,74 @@ def activate_window(title_re: str) -> dict:
     window = Desktop(backend="uia").window(title_re=title_re)
     window.set_focus()
     return {"title": window.window_text(), "handle": int(window.handle)}
+
+
+def ui_elements(title_re: str | None = None, limit: int = 500) -> list[dict]:
+    from pywinauto import Desktop
+    desktop = Desktop(backend="uia")
+    roots = [desktop.window(title_re=title_re)] if title_re else desktop.windows()
+    out: list[dict] = []
+    for root in roots:
+        try:
+            elements = [root, *root.descendants()]
+        except Exception:
+            continue
+        for element in elements:
+            try:
+                info = element.element_info
+                rect = element.rectangle()
+                out.append({
+                    "name": element.window_text(),
+                    "control_type": getattr(info, "control_type", None),
+                    "automation_id": getattr(info, "automation_id", None),
+                    "class_name": getattr(info, "class_name", None),
+                    "handle": int(element.handle) if element.handle else None,
+                    "rect": [rect.left, rect.top, rect.right, rect.bottom],
+                    "enabled": element.is_enabled(),
+                    "visible": element.is_visible(),
+                })
+            except Exception:
+                continue
+            if len(out) >= max(1, min(limit, 5000)):
+                return out
+    return out
+
+
+def _find_element(title_re: str, name: str | None = None, automation_id: str | None = None, control_type: str | None = None):
+    from pywinauto import Desktop
+    window = Desktop(backend="uia").window(title_re=title_re)
+    kwargs = {}
+    if name is not None:
+        kwargs["title"] = name
+    if automation_id is not None:
+        kwargs["auto_id"] = automation_id
+    if control_type is not None:
+        kwargs["control_type"] = control_type
+    if not kwargs:
+        raise ValueError("At least one of name, automation_id, or control_type is required")
+    return window.child_window(**kwargs).wrapper_object()
+
+
+def ui_click(title_re: str, name: str | None = None, automation_id: str | None = None, control_type: str | None = None) -> dict:
+    element = _find_element(title_re, name, automation_id, control_type)
+    try:
+        element.invoke()
+        mode = "invoke"
+    except Exception:
+        element.click_input()
+        mode = "click_input"
+    return {"name": element.window_text(), "mode": mode}
+
+
+def ui_set_text(title_re: str, text: str, name: str | None = None, automation_id: str | None = None, control_type: str | None = None) -> dict:
+    element = _find_element(title_re, name, automation_id, control_type)
+    element.set_focus()
+    try:
+        element.set_edit_text(text)
+        mode = "set_edit_text"
+    except Exception:
+        element.click_input()
+        hotkey(["ctrl", "a"])
+        type_text(text)
+        mode = "keyboard"
+    return {"name": element.window_text(), "characters": len(text), "mode": mode}
