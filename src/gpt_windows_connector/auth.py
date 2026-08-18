@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
-import hmac
 import json
 import secrets
 import sqlite3
@@ -120,23 +119,26 @@ class AuthStore:
             raise ValueError("Google account did not provide required identity fields")
         email = email.strip().lower()
         now = time.time()
+        user_id: str
         with self._connect() as db:
             row = db.execute("SELECT * FROM users WHERE google_sub=?", (sub,)).fetchone()
             if row:
-                db.execute("UPDATE users SET name=?,picture=?,updated_at=? WHERE id=?", (name, picture, now, row["id"]))
-                return self.get_user(row["id"])
-            row = db.execute("SELECT * FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
-            if row:
-                db.execute(
-                    "UPDATE users SET google_sub=?, provider='google', name=COALESCE(?,name), picture=COALESCE(?,picture), updated_at=? WHERE id=?",
-                    (sub, name, picture, now, row["id"]),
-                )
-                return self.get_user(row["id"])
-            user_id = uuid.uuid4().hex
-            db.execute(
-                "INSERT INTO users(id,email,name,picture,provider,google_sub,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (user_id, email, name, picture, "google", sub, now, now),
-            )
+                user_id = str(row["id"])
+                db.execute("UPDATE users SET name=?,picture=?,updated_at=? WHERE id=?", (name, picture, now, user_id))
+            else:
+                row = db.execute("SELECT * FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
+                if row:
+                    user_id = str(row["id"])
+                    db.execute(
+                        "UPDATE users SET google_sub=?, provider='google', name=COALESCE(?,name), picture=COALESCE(?,picture), updated_at=? WHERE id=?",
+                        (sub, name, picture, now, user_id),
+                    )
+                else:
+                    user_id = uuid.uuid4().hex
+                    db.execute(
+                        "INSERT INTO users(id,email,name,picture,provider,google_sub,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
+                        (user_id, email, name, picture, "google", sub, now, now),
+                    )
         return self.get_user(user_id)
 
     def get_user(self, user_id: str) -> User:
