@@ -39,6 +39,7 @@ class NodeSettings:
     node_token: str | None
     state_file: Path
     allowed_roots: tuple[Path, ...]
+    permission_level: str
 
     @classmethod
     def from_env(cls) -> "NodeSettings":
@@ -54,6 +55,9 @@ class NodeSettings:
             )
         ).expanduser().resolve()
         state_file.parent.mkdir(parents=True, exist_ok=True)
+        permission_level = os.environ.get("GWC_PERMISSION_LEVEL", "operate").strip().lower()
+        if permission_level not in {"read", "operate", "admin"}:
+            raise RuntimeError("GWC_PERMISSION_LEVEL must be read, operate, or admin")
         return cls(
             node_id=node_id,
             node_name=node_name,
@@ -62,6 +66,7 @@ class NodeSettings:
             node_token=os.environ.get("GWC_NODE_TOKEN") or None,
             state_file=state_file,
             allowed_roots=roots,
+            permission_level=permission_level,
         )
 
 
