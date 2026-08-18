@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,40 @@ class BrowserSession:
 
 _SESSIONS: dict[str, BrowserSession] = {}
 _LOCK = asyncio.Lock()
+
+
+def discover_browsers() -> list[dict]:
+    """Discover common Chromium browsers and profile directories on Windows."""
+    env = os.environ
+    candidates = [
+        ("chrome", Path(env.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe", Path(env.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"),
+        ("chrome", Path(env.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe", Path(env.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"),
+        ("chrome", Path(env.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe", Path(env.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data"),
+        ("edge", Path(env.get("PROGRAMFILES(X86)", "")) / "Microsoft/Edge/Application/msedge.exe", Path(env.get("LOCALAPPDATA", "")) / "Microsoft/Edge/User Data"),
+        ("edge", Path(env.get("PROGRAMFILES", "")) / "Microsoft/Edge/Application/msedge.exe", Path(env.get("LOCALAPPDATA", "")) / "Microsoft/Edge/User Data"),
+        ("ixbrowser", Path(env.get("LOCALAPPDATA", "")) / "ixbrowser/ixbrowser.exe", Path(env.get("LOCALAPPDATA", "")) / "ixbrowser"),
+    ]
+    seen: set[str] = set()
+    out: list[dict] = []
+    for name, executable, user_data in candidates:
+        if not executable or not executable.exists():
+            continue
+        key = str(executable.resolve()).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        profiles: list[str] = []
+        if user_data.exists() and user_data.is_dir():
+            for child in user_data.iterdir():
+                if child.is_dir() and (child.name == "Default" or child.name.startswith("Profile ")):
+                    profiles.append(child.name)
+        out.append({
+            "name": name,
+            "executable_path": str(executable.resolve()),
+            "user_data_dir": str(user_data.resolve()) if user_data.exists() else str(user_data),
+            "profiles": profiles,
+        })
+    return out
 
 
 async def connect_cdp(endpoint: str = "http://127.0.0.1:9222") -> dict:
@@ -37,6 +72,7 @@ async def launch_persistent(user_data_dir: str, executable_path: str | None = No
             user_data_dir=str(Path(user_data_dir).expanduser().resolve()),
             executable_path=executable_path,
             headless=headless,
+            accept_downloads=True,
         )
         session_id = uuid.uuid4().hex
         _SESSIONS[session_id] = BrowserSession(context=context, playwright=pw)
@@ -108,6 +144,17 @@ async def select_option(session_id: str, selector: str, value: str, page_index: 
 async def upload(session_id: str, selector: str, paths: list[str], page_index: int = 0) -> dict:
     await _page(session_id, page_index).locator(selector).first.set_input_files(paths)
     return {"selector": selector, "files": paths}
+
+
+async def download(session_id: str, selector: str, save_path: str, page_index: int = 0) -> dict:
+    page = _page(session_id, page_index)
+    destination = Path(save_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    async with page.expect_download() as info:
+        await page.locator(selector).first.click()
+    item = await info.value
+    await item.save_as(str(destination))
+    return {"path": str(destination), "suggested_filename": item.suggested_filename}
 
 
 async def screenshot(session_id: str, page_index: int = 0, full_page: bool = False) -> dict:
