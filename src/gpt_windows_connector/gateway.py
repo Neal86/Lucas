@@ -12,6 +12,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -193,11 +194,18 @@ def _desktop_lock(project_id: str, ttl_seconds: int = 120) -> None:
     registry.acquire_control(binding.node_id, project_id, ttl_seconds)
 
 
+transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=list(settings.allowed_hosts),
+    allowed_origins=list(settings.allowed_origins),
+)
+
 mcp = FastMCP(
     "GPT Windows Connector",
     instructions="Remote Windows execution layer. Project bindings are the only workspace context: project_id -> Windows node + workspace. No conversation binding is used.",
     stateless_http=True,
     json_response=True,
+    transport_security=transport_security,
 )
 
 
@@ -330,7 +338,12 @@ async def computer_tool(project_id: str, action: str, params: dict | None = None
 
 
 async def health(_: Request):
-    return JSONResponse({"ok": True, "nodes": len(registry.nodes), "projects": len(bindings.list())})
+    return JSONResponse({
+        "ok": True,
+        "nodes": len(registry.nodes),
+        "projects": len(bindings.list()),
+        "mcp_endpoint": f"{settings.public_base_url}/mcp",
+    })
 
 
 async def node_websocket(websocket: WebSocket):
@@ -397,7 +410,11 @@ async def lifespan(app: Starlette):
 
 
 app = Starlette(
-    routes=[Route("/health", health, methods=["GET"]), WebSocketRoute("/ws/node", node_websocket), Mount("/", app=mcp_app)],
+    routes=[
+        Route("/health", health, methods=["GET"]),
+        WebSocketRoute("/ws/node", node_websocket),
+        Mount("/", app=mcp_app),
+    ],
     lifespan=lifespan,
 )
 app = BearerMiddleware(app, settings.admin_token)
