@@ -64,6 +64,9 @@ class Executor:
             "computer.scroll": lambda: computer.scroll(**p),
             "computer.clipboard_get": lambda: computer.clipboard_get(),
             "computer.clipboard_set": lambda: computer.clipboard_set(**p),
+            "computer.ui_elements": lambda: computer.ui_elements(**p),
+            "computer.ui_click": lambda: computer.ui_click(**p),
+            "computer.ui_set_text": lambda: computer.ui_set_text(**p),
         }
         if method in sync:
             return await asyncio.to_thread(sync[method])
