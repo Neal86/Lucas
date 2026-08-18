@@ -4,20 +4,29 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gpt-windows-connector"
-version = "0.1.0"
-description = "Universal Windows MCP connector for local files, shell, Git, processes, browser and desktop automation"
+version = "1.0.0"
+description = "Remote Windows execution MCP for ChatGPT, Claude, Gemini and other MCP clients"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [
-  { name = "Neal Wang" }
-]
+authors = [{ name = "Neal Wang" }]
 dependencies = [
-  "mcp>=1.12.0"
+  "mcp>=1.12,<2",
+  "starlette>=0.47,<1",
+  "uvicorn>=0.35,<1",
+  "websockets>=15,<16",
+  "pydantic>=2.11,<3",
+  "psutil>=7,<8",
+  "playwright>=1.54,<2",
+  "pyautogui>=0.9.54; platform_system == 'Windows'",
+  "pyperclip>=1.9; platform_system == 'Windows'",
+  "pywinauto>=0.6.9; platform_system == 'Windows'",
+  "pywin32>=311; platform_system == 'Windows'",
 ]
 
 [project.scripts]
-gpt-windows-connector = "gpt_windows_connector.server:main"
+gwc-gateway = "gpt_windows_connector.gateway:main"
+gwc-node = "gpt_windows_connector.node:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt_windows_connector"]
