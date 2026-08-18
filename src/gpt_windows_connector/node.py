@@ -41,14 +41,14 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             "name": settings.node_name,
             "node_token": token,
             "pairing_code": settings.pairing_code,
+            "permission_level": settings.permission_level,
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
             raise RuntimeError(welcome.get("error") or "Gateway rejected node")
         if welcome.get("node_token"):
             _save_token(settings, welcome["node_token"])
-        log.info("Connected as %s (%s)", settings.node_name, settings.node_id)
-
+        log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         while True:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=15)
@@ -70,7 +70,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
 
 async def run_node() -> None:
     settings = NodeSettings.from_env()
-    executor = Executor(settings.allowed_roots)
+    executor = Executor(settings.allowed_roots, settings.permission_level)
     delay = 1.0
     while True:
         try:
