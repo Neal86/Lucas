@@ -10,6 +10,7 @@ from pathlib import Path
 @dataclass
 class ManagedProcess:
     process: subprocess.Popen[str]
+    workspace: Path
     stdout: list[str] = field(default_factory=list)
     stderr: list[str] = field(default_factory=list)
 
@@ -35,7 +36,17 @@ def _command(command: str, shell_type: str) -> list[str]:
     raise ValueError("shell_type must be 'powershell' or 'cmd'")
 
 
+def _get(process_id: str, workspace: Path | None = None) -> ManagedProcess:
+    managed = _PROCESSES.get(process_id)
+    if managed is None:
+        raise KeyError(f"Unknown process_id: {process_id}")
+    if workspace is not None and managed.workspace != workspace.resolve():
+        raise PermissionError("Process belongs to a different project workspace")
+    return managed
+
+
 def start_process(workspace: Path, command: str, shell_type: str = "powershell") -> dict:
+    workspace = workspace.resolve()
     proc = subprocess.Popen(
         _command(command, shell_type),
         cwd=workspace,
@@ -48,7 +59,7 @@ def start_process(workspace: Path, command: str, shell_type: str = "powershell")
         shell=False,
     )
     process_id = uuid.uuid4().hex
-    managed = ManagedProcess(proc)
+    managed = ManagedProcess(proc, workspace)
     with _LOCK:
         _PROCESSES[process_id] = managed
     threading.Thread(target=_drain, args=(proc.stdout, managed.stdout), daemon=True).start()
@@ -56,10 +67,8 @@ def start_process(workspace: Path, command: str, shell_type: str = "powershell")
     return {"process_id": process_id, "pid": proc.pid, "shell": shell_type}
 
 
-def poll_process(process_id: str, stdout_cursor: int = 0, stderr_cursor: int = 0, max_lines: int = 500) -> dict:
-    managed = _PROCESSES.get(process_id)
-    if managed is None:
-        raise KeyError(f"Unknown process_id: {process_id}")
+def poll_process(process_id: str, workspace: Path | None = None, stdout_cursor: int = 0, stderr_cursor: int = 0, max_lines: int = 500) -> dict:
+    managed = _get(process_id, workspace)
     max_lines = max(1, min(max_lines, 5000))
     stdout_cursor = max(0, stdout_cursor)
     stderr_cursor = max(0, stderr_cursor)
@@ -78,10 +87,8 @@ def poll_process(process_id: str, stdout_cursor: int = 0, stderr_cursor: int = 0
     }
 
 
-def stop_process(process_id: str) -> dict:
-    managed = _PROCESSES.get(process_id)
-    if managed is None:
-        raise KeyError(f"Unknown process_id: {process_id}")
+def stop_process(process_id: str, workspace: Path | None = None) -> dict:
+    managed = _get(process_id, workspace)
     if managed.process.poll() is None:
         managed.process.terminate()
         try:
@@ -89,12 +96,14 @@ def stop_process(process_id: str) -> dict:
         except subprocess.TimeoutExpired:
             managed.process.kill()
             managed.process.wait(timeout=5)
-    return poll_process(process_id)
+    return poll_process(process_id, workspace)
 
 
-def list_managed_processes() -> list[dict]:
+def list_managed_processes(workspace: Path | None = None) -> list[dict]:
     result = []
     for process_id, managed in list(_PROCESSES.items()):
+        if workspace is not None and managed.workspace != workspace.resolve():
+            continue
         code = managed.process.poll()
         result.append({"process_id": process_id, "pid": managed.process.pid, "running": code is None, "exit_code": code})
     return result
