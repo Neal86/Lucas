@@ -8,8 +8,8 @@ READ_METHODS = {
     "files.list", "files.read", "files.search", "files.stat",
     "git.status", "git.diff", "git.log", "git.branch", "git.show",
     "process.poll", "process.list",
-    "computer.info", "computer.processes", "computer.windows", "computer.screenshot", "computer.clipboard_get",
-    "browser.pages", "browser.inspect", "browser.screenshot",
+    "computer.info", "computer.processes", "computer.windows", "computer.screenshot", "computer.clipboard_get", "computer.ui_elements",
+    "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot",
 }
 
 ADMIN_ONLY = {"files.delete", "git.push"}
