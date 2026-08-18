@@ -1,0 +1,17 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      GWC_HOST: 0.0.0.0
+      GWC_PORT: 8787
+      GWC_DATA_DIR: /data
+      GWC_ADMIN_TOKEN: ${GWC_ADMIN_TOKEN:-}
+      GWC_PUBLIC_BASE_URL: ${GWC_PUBLIC_BASE_URL:-http://localhost:8787}
+    volumes:
+      - gwc_data:/data
+
+volumes:
+  gwc_data:
