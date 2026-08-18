@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -19,25 +20,25 @@ def _transport_allowlists(public_base_url: str) -> tuple[tuple[str, ...], tuple[
     hostname = parsed.hostname
     if not hostname:
         raise RuntimeError(f"GWC_PUBLIC_BASE_URL must be an absolute URL: {public_base_url}")
-
     host = parsed.netloc
     origin = f"{parsed.scheme}://{parsed.netloc}"
-    hosts = {
-        host,
-        hostname,
-        f"{hostname}:*",
-        "127.0.0.1:*",
-        "localhost:*",
-        "[::1]:*",
-    }
-    origins = {
-        origin,
-        f"{parsed.scheme}://{hostname}:*",
-        "http://127.0.0.1:*",
-        "http://localhost:*",
-        "http://[::1]:*",
-    }
+    hosts = {host, hostname, f"{hostname}:*", "127.0.0.1:*", "localhost:*", "[::1]:*"}
+    origins = {origin, f"{parsed.scheme}://{hostname}:*", "http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"}
     return tuple(sorted(hosts)), tuple(sorted(origins))
+
+
+def _persistent_secret(data_dir: Path, env_name: str, filename: str) -> str:
+    value = os.environ.get(env_name, "").strip()
+    if value:
+        return value
+    path = data_dir / filename
+    if path.exists():
+        value = path.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    value = secrets.token_urlsafe(48)
+    path.write_text(value, encoding="utf-8")
+    return value
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,12 @@ class GatewaySettings:
     data_dir: Path
     allowed_hosts: tuple[str, ...]
     allowed_origins: tuple[str, ...]
+    jwt_secret: str
+    jwt_ttl_seconds: int
+    google_client_id: str | None
+    google_client_secret: str | None
+    google_redirect_uri: str | None
+    auth_success_url: str | None
 
     @classmethod
     def from_env(cls) -> "GatewaySettings":
@@ -58,6 +65,11 @@ class GatewaySettings:
         default_hosts, default_origins = _transport_allowlists(public_base_url)
         allowed_hosts = _split_csv(os.environ.get("GWC_ALLOWED_HOSTS", "")) or default_hosts
         allowed_origins = _split_csv(os.environ.get("GWC_ALLOWED_ORIGINS", "")) or default_origins
+        google_client_id = os.environ.get("GWC_GOOGLE_CLIENT_ID", "").strip() or None
+        google_client_secret = os.environ.get("GWC_GOOGLE_CLIENT_SECRET", "").strip() or None
+        google_redirect_uri = os.environ.get("GWC_GOOGLE_REDIRECT_URI", "").strip() or None
+        if google_client_id and google_client_secret and not google_redirect_uri:
+            google_redirect_uri = f"{public_base_url}/auth/google/callback"
         return cls(
             host=os.environ.get("GWC_HOST", "0.0.0.0"),
             port=int(os.environ.get("GWC_PORT", "8787")),
@@ -66,6 +78,12 @@ class GatewaySettings:
             data_dir=data_dir,
             allowed_hosts=allowed_hosts,
             allowed_origins=allowed_origins,
+            jwt_secret=_persistent_secret(data_dir, "GWC_JWT_SECRET", "jwt-secret.txt"),
+            jwt_ttl_seconds=int(os.environ.get("GWC_JWT_TTL_SECONDS", str(60 * 60 * 24 * 30))),
+            google_client_id=google_client_id,
+            google_client_secret=google_client_secret,
+            google_redirect_uri=google_redirect_uri,
+            auth_success_url=os.environ.get("GWC_AUTH_SUCCESS_URL", "").strip() or None,
         )
 
 
