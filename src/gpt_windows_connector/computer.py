@@ -4,7 +4,6 @@ import base64
 import io
 import json
 import subprocess
-from pathlib import Path
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -79,8 +78,20 @@ def drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.2, button: str 
 
 
 def type_text(text: str, interval: float = 0.0) -> dict:
-    _gui().write(text, interval=max(0.0, interval))
-    return {"characters": len(text)}
+    gui = _gui()
+    if text.isascii():
+        gui.write(text, interval=max(0.0, interval))
+        mode = "keyboard"
+    else:
+        import pyperclip
+        previous = pyperclip.paste()
+        try:
+            pyperclip.copy(text)
+            gui.hotkey("ctrl", "v")
+        finally:
+            pyperclip.copy(previous)
+        mode = "clipboard"
+    return {"characters": len(text), "mode": mode}
 
 
 def hotkey(keys: list[str]) -> dict:
