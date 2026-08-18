@@ -14,7 +14,7 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -74,6 +74,7 @@ _pairings: dict[str, dict] = {}
 class NodeConnection:
     node_id: str
     name: str
+    permission_level: str
     websocket: WebSocket
     last_seen: float = field(default_factory=time.time)
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
@@ -86,7 +87,7 @@ class NodeRegistry:
 
     def list(self) -> list[dict]:
         return [
-            {"node_id": n.node_id, "name": n.name, "online": True, "last_seen": n.last_seen}
+            {"node_id": n.node_id, "name": n.name, "permission_level": n.permission_level, "online": True, "last_seen": n.last_seen}
             for n in self.nodes.values()
         ]
 
@@ -95,8 +96,7 @@ class NodeRegistry:
         if not node:
             raise RuntimeError(f"Node is offline: {node_id}")
         request_id = uuid.uuid4().hex
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
+        future = asyncio.get_running_loop().create_future()
         node.pending[request_id] = future
         try:
             async with node.send_lock:
@@ -139,15 +139,18 @@ async def _project_rpc(project_id: str, method: str, params: dict | None = None,
 
 mcp = FastMCP(
     "GPT Windows Connector",
-    instructions="Remote Windows execution layer. Bind a project to a Windows node/workspace, then use the project_id for all operations.",
+    instructions="Remote Windows execution layer. Project bindings are the only workspace context: project_id -> Windows node + workspace.",
     stateless_http=True,
     json_response=True,
 )
 
 
 @mcp.tool()
-def project_bind(project_id: str, node_id: str, workspace: str, name: str | None = None) -> dict:
-    """Bind one AI project to one Windows node and workspace folder."""
+async def project_bind(project_id: str, node_id: str, workspace: str, name: str | None = None) -> dict:
+    """Bind one AI project to one online Windows node and workspace folder."""
+    if node_id not in registry.nodes:
+        raise RuntimeError(f"Node is offline: {node_id}")
+    await registry.rpc(node_id, "workspace.info", {"workspace": workspace})
     return bindings.set(project_id, node_id, workspace, name).__dict__
 
 
@@ -193,7 +196,7 @@ async def workspace_info(project_id: str) -> dict:
 
 @mcp.tool()
 async def files_tool(project_id: str, action: str, params: dict | None = None) -> object:
-    """File operations. Actions: list, read, write, patch, search, stat, mkdir, move, copy, delete."""
+    """File actions: list, read, write, patch, search, stat, mkdir, move, copy, delete."""
     allowed = {"list", "read", "write", "patch", "search", "stat", "mkdir", "move", "copy", "delete"}
     if action not in allowed:
         raise ValueError(f"Unsupported files action: {action}")
@@ -208,24 +211,24 @@ async def shell_run(project_id: str, command: str, timeout: int = 120, shell_typ
 
 @mcp.tool()
 async def process_tool(project_id: str, action: str, params: dict | None = None) -> dict:
-    """Manage long-running project processes. Actions: start, poll, stop."""
-    if action not in {"start", "poll", "stop"}:
+    """Long-running process actions: start, poll, stop, list."""
+    if action not in {"start", "poll", "stop", "list"}:
         raise ValueError(f"Unsupported process action: {action}")
-    include_workspace = action == "start"
-    return await _project_rpc(project_id, f"process.{action}", params, include_workspace=include_workspace)
+    return await _project_rpc(project_id, f"process.{action}", params, include_workspace=action == "start")
 
 
 @mcp.tool()
 async def git_tool(project_id: str, action: str, params: dict | None = None) -> dict:
-    """Git operations. Actions: status, diff, log, branch, add, commit, pull, push."""
-    if action not in {"status", "diff", "log", "branch", "add", "commit", "pull", "push"}:
+    """Git actions: status, diff, log, branch, branch_create, branch_switch, add, commit, pull, push, show."""
+    allowed = {"status", "diff", "log", "branch", "branch_create", "branch_switch", "add", "commit", "pull", "push", "show"}
+    if action not in allowed:
         raise ValueError(f"Unsupported git action: {action}")
     return await _project_rpc(project_id, f"git.{action}", params)
 
 
 @mcp.tool()
 async def browser_tool(project_id: str, action: str, params: dict | None = None) -> object:
-    """Playwright browser operations on the project's Windows node."""
+    """Playwright actions on the project's Windows node."""
     allowed = {"connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
@@ -235,7 +238,7 @@ async def browser_tool(project_id: str, action: str, params: dict | None = None)
 
 @mcp.tool()
 async def computer_tool(project_id: str, action: str, params: dict | None = None) -> object:
-    """Windows desktop operations on the project's node."""
+    """Windows desktop actions on the project's node."""
     allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")
@@ -256,7 +259,11 @@ async def node_websocket(websocket: WebSocket):
             await websocket.close(code=4400)
             return
         node_id = str(hello.get("node_id", "")).strip()
+        if not node_id:
+            await websocket.close(code=4400)
+            return
         name = str(hello.get("name") or node_id)
+        permission_level = str(hello.get("permission_level") or "operate")
         supplied_token = hello.get("node_token")
         pairing_code = hello.get("pairing_code")
         expected_token = await auth_store.token_for(node_id)
@@ -273,7 +280,7 @@ async def node_websocket(websocket: WebSocket):
             await websocket.send_json({"type": "welcome", "ok": False, "error": "pairing or node token required"})
             await websocket.close(code=4401)
             return
-        connection = NodeConnection(node_id=node_id, name=name, websocket=websocket)
+        connection = NodeConnection(node_id=node_id, name=name, permission_level=permission_level, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):
@@ -307,11 +314,7 @@ async def lifespan(app: Starlette):
 
 
 app = Starlette(
-    routes=[
-        Route("/health", health, methods=["GET"]),
-        WebSocketRoute("/ws/node", node_websocket),
-        Mount("/", app=mcp_app),
-    ],
+    routes=[Route("/health", health, methods=["GET"]), WebSocketRoute("/ws/node", node_websocket), Mount("/", app=mcp_app)],
     lifespan=lifespan,
 )
 app = BearerMiddleware(app, settings.admin_token)
