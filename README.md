@@ -1,314 +1,230 @@
 # GPT Windows Connector
 
-Remote-first, model-independent Windows execution MCP for ChatGPT, Claude, Gemini, and other MCP-compatible AI clients.
+Remote-first, multi-user Windows execution MCP for ChatGPT, Claude, Gemini, and other MCP-compatible AI clients.
 
-It exposes project files, shell, long-running processes, Git, browser automation, and Windows desktop/UI Automation without calling Codex, Claude Code, or Gemini CLI internally.
+The product exposes local project files, Shell, long-running processes, Git, browser automation, and Windows desktop/UI Automation through a VPS Gateway. Codex, Claude Code, and Gemini CLI are not used as an execution layer.
 
-## Product model
-
-All AI ↔ Windows traffic goes through the VPS Gateway. Windows nodes never need a public inbound port.
+## Final architecture
 
 ```text
 ChatGPT / Claude / Gemini / other Remote-MCP client
                     |
-                    | HTTPS / Remote MCP
+                    | HTTPS / MCP
                     v
-                 VPS Gateway
+              VPS Gateway
+          account / projects / logs
                     |
                     | WSS
                     v
-               Windows Node
+              Windows Node
                     |
-      +-------------+-------------+
-      |             |             |
- files/workspace  shell/process   git
-      |             |             |
-      +------- browser/computer --+
+        files / shell / git / browser / desktop
 ```
 
-The connector is multi-user. The unique project binding key is:
+All AI-to-Windows traffic is relayed through the VPS. A Windows computer makes an outbound WSS connection and does not require a public inbound port.
+
+## User experience
+
+1. Open the VPS Gateway website.
+2. Register with email/password or sign in with Google.
+3. Pair a Windows computer from **Windows Nodes**.
+4. Create a project from **Projects**.
+5. Select an online Windows computer.
+6. Browse that computer's allowed folder tree and select a workspace.
+7. Connect the Remote MCP endpoint to the AI client using the same account.
+8. The AI uses the project ID; the VPS resolves the correct user, Windows Node, and workspace automatically.
+
+There is intentionally **no conversation binding**.
 
 ```text
 (user_id, project_id)
         |
         +-- node_id
-        `-- workspace folder
+        `-- workspace
 ```
 
-Different users may use the same `project_id` without seeing each other's project, node, or workspace. There is intentionally **no conversation binding**.
+## Built-in VPS dashboard
+
+Running `gwc-gateway` serves both the web dashboard and Remote MCP endpoint.
+
+Dashboard sections:
+
+- **Dashboard** — project/node/activity overview
+- **Projects** — project → Windows computer → folder bindings
+- **Windows Nodes** — online/offline nodes and one-time pairing codes
+- **Activity Logs** — user-scoped audit history with filters
+- **Account & Security** — account/provider and security information
+
+The folder picker never reads the VPS filesystem. It requests directory information from the selected Windows Node through the VPS WebSocket and only exposes directories inside `GWC_ALLOWED_ROOTS`.
 
 ## Authentication
 
-### Email registration/login
+Supported login methods:
 
-Register:
+- Email/password registration and login
+- Google OAuth 2.0 / OpenID Connect
+- JWT access tokens for MCP/API clients
+- HttpOnly login cookie for the built-in web dashboard
 
-```http
-POST /auth/register
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "a-password-at-least-10-characters",
-  "name": "User"
-}
-```
-
-Login:
-
-```http
-POST /auth/login
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "a-password-at-least-10-characters"
-}
-```
-
-Both return a JWT access token and also set an HttpOnly session cookie. Use the returned token for Remote MCP:
-
-```http
-Authorization: Bearer YOUR_ACCESS_TOKEN
-```
-
-Current user:
-
-```http
-GET /auth/me
-```
-
-Passwords are hashed with Argon2. JWTs are signed by the VPS Gateway. If `GWC_JWT_SECRET` is not supplied, the gateway generates a persistent secret in `GWC_DATA_DIR/jwt-secret.txt`.
+Passwords are hashed with Argon2. User/project/node/audit data is stored in the VPS `gateway.db` SQLite database. If `GWC_JWT_SECRET` is omitted, a random secret is generated once and persisted under `GWC_DATA_DIR`.
 
 ### Google login
 
-Configure a Google OAuth **Web application** and set:
+Create a Google OAuth Web application and configure:
 
 ```text
-GWC_GOOGLE_CLIENT_ID
-GWC_GOOGLE_CLIENT_SECRET
+GWC_GOOGLE_CLIENT_ID=...
+GWC_GOOGLE_CLIENT_SECRET=...
 GWC_GOOGLE_REDIRECT_URI=https://gwc.example.com/auth/google/callback
 ```
 
-Start login at:
+If `GWC_GOOGLE_REDIRECT_URI` is omitted while client ID/secret are present, the gateway derives it from `GWC_PUBLIC_BASE_URL`. Google login returns to the built-in dashboard by default.
 
-```text
-https://gwc.example.com/auth/google/start
+## Project binding and folder picker
+
+The Windows Node advertises only configured allowed roots:
+
+```powershell
+$env:GWC_ALLOWED_ROOTS = "G:\;D:\Projects"
 ```
 
-The gateway uses Google's authorization-code flow with `openid email profile`, exchanges the returned code on the VPS, reads the authenticated Google profile from Google's OpenID Connect UserInfo endpoint, and creates or links the local user by email.
-
-Optional:
+The VPS dashboard can browse:
 
 ```text
-GWC_AUTH_SUCCESS_URL=https://your-web-ui.example.com/login/callback
+Office-PC
+├─ G:\
+│  ├─ NiceC-WMS
+│  ├─ OpenAkita
+│  └─ PartyGame
+└─ D:\Projects
+   └─ another-project
 ```
 
-If configured, the callback redirects there with the access token in the URL fragment. Otherwise the callback returns JSON containing the token.
+A selected project binding is persisted on the VPS:
 
-## Multi-user isolation
+```text
+user_id + "NiceC-WMS"
+  -> Office-PC
+  -> G:\NiceC-WMS
+```
 
-Each authenticated user gets independent:
+The Node validates the selected folder before the Gateway saves it. Paths outside allowed roots are rejected.
 
-- projects
-- project bindings
-- Windows nodes
-- node pairing codes/tokens
-- desktop/browser control locks
-- audit entries
+## MCP tools
 
-A user cannot bind or operate another user's node. The same project name can exist under multiple users safely.
+### Projects and nodes
 
-## Project binding
+- `project_bind`
+- `project_get`
+- `project_list`
+- `project_unbind`
+- `node_pair`
+- `node_list`
+- `control_acquire`
+- `control_status`
+- `control_release`
 
-- `project_bind(project_id, node_id, workspace, name?)`
-- `project_get(project_id)`
-- `project_list()`
-- `project_unbind(project_id)`
-
-The gateway resolves the authenticated user automatically, so MCP tools still only need `project_id`; the actual lookup is `(user_id, project_id)`.
-
-A workspace is verified against the live Windows node before it is saved.
-
-## Files
+### Files
 
 `files_tool(project_id, action, params)` supports:
 
-- `list`
-- `read`
-- `write`
-- `patch` — exact-match safe patching
-- `search`
-- `stat`
-- `mkdir`
-- `move`
-- `copy`
-- `delete`
+- list
+- read
+- write
+- patch
+- search
+- stat
+- mkdir
+- move
+- copy
+- delete
 
-Direct file paths are sandboxed inside the bound workspace.
+Direct file operations are sandboxed inside the project's bound workspace.
 
-## Shell
+### Shell and processes
 
-`shell_run(project_id, command, timeout, shell_type)` supports PowerShell and CMD, returning stdout, stderr and exit code.
+- `shell_run` — PowerShell/CMD, stdout/stderr/exit code, timeout
+- `process_tool` — start/poll/stop/list with incremental output cursors
 
-## Long-running processes
+### Git
 
-`process_tool(project_id, action, params)` supports:
+`git_tool` supports status, diff, log, branch, branch create/switch, add, commit, pull, push, and show.
 
-- `start`
-- `poll`
-- `stop`
-- `list`
-- incremental stdout/stderr cursors
+### Browser
 
-Use it for dev servers, builds, tests, Docker commands and other long tasks.
+`browser_tool` supports browser discovery, CDP attach, persistent profile launch, tabs/pages, navigation, DOM inspection, click/type/select, workspace-scoped upload/download, screenshots, and close.
 
-## Git
+### Windows desktop
 
-`git_tool(project_id, action, params)` supports:
+`computer_tool` supports system/process information, application launch, window listing/activation, screenshots, mouse/keyboard, clipboard, and Windows UI Automation inspection/click/text entry.
 
-- `status`
-- `diff`
-- `log`
-- `branch`
-- `branch_create`
-- `branch_switch`
-- `add`
-- `commit`
-- `pull`
-- `push`
-- `show`
+## Activity Logs
 
-## Browser
+The VPS writes user-scoped audit events to `gateway.db`. The dashboard exposes only the authenticated user's records. Sensitive fields such as passwords, access tokens, authorization headers, cookies, clipboard data, and full content values are redacted by the UI API.
 
-`browser_tool(project_id, action, params)` uses Playwright:
+## Multi-node and control locking
 
-- `discover` — common Chrome / Edge / iXBrowser installs and profiles
-- `connect_cdp`
-- `launch_persistent`
-- `pages`
-- `new_page`
-- `navigate`
-- `inspect`
-- `click`
-- `type`
-- `select`
-- `upload` — source restricted to the project workspace
-- `download` — destination restricted to the project workspace
-- `screenshot`
-- `close`
-
-Browser CDP remains local to the Windows node. The AI never connects directly to the Windows machine; commands/results are relayed through the VPS Gateway.
-
-## Windows desktop / UI Automation
-
-`computer_tool(project_id, action, params)` supports:
-
-- system/process information
-- launch applications
-- list/activate windows
-- screenshots
-- mouse click/move/drag/scroll
-- keyboard input, key presses, hotkeys
-- Unicode text input using clipboard fallback
-- clipboard read/write
-- `ui_elements`
-- `ui_click`
-- `ui_set_text`
-
-Screenshots and desktop results are returned Windows Node → VPS Gateway → AI client.
-
-## Multi-node
-
-One VPS Gateway can serve many users and many Windows PCs:
+One account can have multiple Windows computers:
 
 ```text
-VPS Gateway
-├── User A
-│   ├── Office-PC
-│   └── Home-PC
-└── User B
-    └── Warehouse-PC
+Gateway
+├─ Office-PC
+├─ Warehouse-PC
+└─ Home-PC
 ```
 
-Each project independently selects one of the authenticated user's nodes and a workspace on that node.
-
-## Desktop/browser control lock
-
-Projects can read files/Git independently, but interactive browser/desktop control is protected by a per-node lease:
-
-- `control_acquire(project_id, ttl_seconds?)`
-- `control_status(project_id)`
-- `control_release(project_id)`
-
-Mutating browser/desktop operations automatically acquire or refresh the lease.
-
-## Pairing and reconnect
-
-A logged-in user creates a one-time pairing code:
-
-- `node_pair(node_id, name?, ttl_seconds?)`
-- `node_list()`
-
-The pairing code is tied to that user. On first connection the VPS Gateway issues a persistent random node token and records the node owner. The Windows node stores the token locally, reconnects automatically with exponential backoff, and sends heartbeats.
+Interactive browser/desktop operations use a per-node project lease so two projects do not fight over the same mouse/window.
 
 ## Permission levels
 
-Set `GWC_PERMISSION_LEVEL` on each Windows node:
+Set on each Windows Node:
 
-- `read` — inspection/read tools only
-- `operate` — normal coding and automation operations
-- `admin` — additionally permits direct `files.delete` and `git.push`
+```text
+GWC_PERMISSION_LEVEL=read | operate | admin
+```
 
-Default: `operate`.
+- `read`: inspection/read methods only
+- `operate`: normal coding and automation
+- `admin`: also allows direct file deletion and Git push
 
-`GWC_ALLOWED_ROOTS` restricts which folders may become project workspaces.
+`GWC_ALLOWED_ROOTS` is a hard boundary for direct connector file operations and workspace selection. Shell commands still run with the normal Windows account permissions, so use a dedicated low-privilege Windows user or VM when strong OS-level isolation is required.
 
-**Important:** `shell_run` and long-running shell processes execute with the Windows account's normal OS permissions. `GWC_ALLOWED_ROOTS` is a hard boundary for the connector's direct file tools and project selection, not an OS-level PowerShell sandbox. Use a dedicated Windows account/VM for strong machine-level isolation.
+## Install Gateway on VPS
 
-## Gateway install
+Python 3.11+:
 
-Requires Python 3.11+.
-
-```powershell
+```bash
 git clone https://github.com/Neal86/gpt-windows-connector.git
 cd gpt-windows-connector
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -e .
 ```
 
-Gateway configuration:
+Configure:
 
-```powershell
-$env:GWC_HOST = "0.0.0.0"
-$env:GWC_PORT = "8787"
-$env:GWC_DATA_DIR = ".\data"
-$env:GWC_PUBLIC_BASE_URL = "https://gwc.example.com"
-$env:GWC_JWT_SECRET = "replace-with-a-long-random-secret"
+```bash
+export GWC_HOST=0.0.0.0
+export GWC_PORT=8787
+export GWC_DATA_DIR=./data
+export GWC_PUBLIC_BASE_URL=https://gwc.example.com
 gwc-gateway
 ```
 
-Endpoints:
+Public endpoints:
 
 ```text
-Remote MCP:        https://gwc.example.com/mcp
-Node WebSocket:    wss://gwc.example.com/ws/node
-Health:            https://gwc.example.com/health
-Email register:    https://gwc.example.com/auth/register
-Email login:       https://gwc.example.com/auth/login
-Google login:      https://gwc.example.com/auth/google/start
-Google callback:   https://gwc.example.com/auth/google/callback
-Current user:      https://gwc.example.com/auth/me
+Dashboard:   https://gwc.example.com/
+Remote MCP:  https://gwc.example.com/mcp
+Node WSS:    wss://gwc.example.com/ws/node
+Health:      https://gwc.example.com/health
 ```
 
-`GWC_PUBLIC_BASE_URL` automatically creates the MCP Host/Origin allowlist used by DNS-rebinding protection. For non-standard reverse-proxy setups, override with comma-separated `GWC_ALLOWED_HOSTS` and `GWC_ALLOWED_ORIGINS`.
+A Dockerfile and `docker-compose.yml` are included. Put HTTPS/WSS in front of the service in production.
 
-A Dockerfile and `docker-compose.yml` are included for the VPS Gateway. Use HTTPS/WSS at the public reverse proxy.
+## Install Windows Node
 
-## Windows node
-
-Install the same package on Windows and create a pairing code after logging in through the VPS Gateway.
+Install the package on Windows, create a one-time pairing code from the VPS dashboard, then run:
 
 ```powershell
 $env:GWC_NODE_ID = "Office-PC"
@@ -320,71 +236,30 @@ $env:GWC_PERMISSION_LEVEL = "operate"
 gwc-node
 ```
 
-After first pairing, the node token is persisted under the current user's local application-data directory.
+After successful pairing, the Gateway issues a persistent random node token. The Node stores it in the current user's local app-data directory and reconnects automatically with heartbeat + exponential backoff.
 
-## Bind a project
+## Security
 
-After `Office-PC` is online:
-
-```text
-project_bind(
-  project_id="NiceC-WMS",
-  node_id="Office-PC",
-  workspace="G:\\NiceC-WMS",
-  name="NiceC-WMS"
-)
-```
-
-Then:
-
-```text
-files_tool("NiceC-WMS", "search", {"query": "login"})
-shell_run("NiceC-WMS", "npm run build")
-git_tool("NiceC-WMS", "diff")
-```
-
-The authenticated user is inferred from the JWT; no `user_id` parameter is exposed to the model tools.
+- Use HTTPS/WSS in production.
+- Restrict `GWC_ALLOWED_ROOTS`.
+- Prefer `read` or `operate`; grant `admin` only when necessary.
+- Treat JWTs and persistent node tokens as secrets.
+- Run the Windows Node under a dedicated Windows account where practical.
+- The MCP Python SDK is pinned to `>=1.27.2,<2` and explicit Host/Origin transport security is enabled.
+- The Windows Node is outbound-only; do not expose local CDP, Shell, or Node ports publicly.
 
 ## Intended coding loop
 
 ```text
-read/search code
-      -> patch/write
-      -> run build/test
-      -> inspect errors
-      -> patch again
-      -> git diff/status
-      -> commit/push when permitted
+AI -> VPS -> Windows Node
+   read/search code
+   -> patch/write
+   -> build/test
+   -> inspect errors
+   -> patch again
+   -> git diff/status
+   -> commit/push when permitted
+   -> VPS -> AI
 ```
 
-No tool invokes Codex, Claude Code, or Gemini CLI.
-
-## Security
-
-This software can execute commands and control a Windows desktop.
-
-- All AI ↔ Windows traffic should go through the VPS Gateway.
-- Use HTTPS/WSS for remote deployment.
-- Use a strong persistent `GWC_JWT_SECRET`.
-- Configure Google OAuth redirect URIs exactly.
-- Restrict `GWC_ALLOWED_ROOTS`.
-- Prefer `read`/`operate`; use `admin` only when required.
-- Run Windows nodes under dedicated low-privilege Windows users when practical.
-- Treat JWTs and persistent node tokens as secrets.
-- Do not expose Windows-node services directly to the public internet.
-
-The project pins MCP Python SDK `>=1.27.2,<2` and enables explicit Host/Origin transport-security allowlists for the public MCP hostname.
-
-## Storage
-
-The VPS Gateway stores multi-user state in:
-
-```text
-GWC_DATA_DIR/gateway.db
-```
-
-SQLite tables include users, OAuth state, project bindings, node ownership/tokens, and audit logs. JWT signing material is stored separately in `GWC_DATA_DIR/jwt-secret.txt` when not supplied through `GWC_JWT_SECRET`.
-
-## Windows-MCP upstream reference
-
-This repository remains independent from CursorTouch/Windows-MCP. Windows-MCP is not required at runtime.
+The repository remains independent from CursorTouch/Windows-MCP. Windows-MCP is not required at runtime.
