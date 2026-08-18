@@ -83,7 +83,7 @@ class GatewaySettings:
             google_client_id=google_client_id,
             google_client_secret=google_client_secret,
             google_redirect_uri=google_redirect_uri,
-            auth_success_url=os.environ.get("GWC_AUTH_SUCCESS_URL", "").strip() or None,
+            auth_success_url=os.environ.get("GWC_AUTH_SUCCESS_URL", "").strip() or public_base_url,
         )
 
 
