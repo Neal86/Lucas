@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gpt-windows-connector"
+version = "0.1.0"
+description = "Universal Windows MCP connector for local files, shell, Git, processes, browser and desktop automation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Neal Wang" }
+]
+dependencies = [
+  "mcp>=1.12.0"
+]
+
+[project.scripts]
+gpt-windows-connector = "gpt_windows_connector.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gpt_windows_connector"]
