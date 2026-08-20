@@ -33,6 +33,7 @@ dev = ["pytest>=8.3,<9"]
 [project.scripts]
 gwc-gateway = "gpt_windows_connector.server:main"
 gwc-node = "gpt_windows_connector.node:main"
+lucas-node = "gpt_windows_connector.node:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt_windows_connector"]
