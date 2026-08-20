@@ -2,8 +2,8 @@ services:
   gateway:
     build: .
     restart: unless-stopped
-    ports:
-      - "8787:8787"
+    expose:
+      - "8787"
     environment:
       GWC_HOST: 0.0.0.0
       GWC_PORT: 8787
