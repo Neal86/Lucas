@@ -150,14 +150,12 @@ async def api_pair_node(request: Request):
     user = _auth_user(request)
     body = await request.json()
     node_id = str(body.get("node_id", "")).strip()
-    name = str(body.get("name") or node_id).strip()
-    if not node_id:
-        return JSONResponse({"error": "node_id is required"}, status_code=400)
+    name = str(body.get("name") or node_id or "Windows PC").strip()
     ttl = max(60, min(int(body.get("ttl_seconds", 600)), 3600))
     code = f"{secrets.randbelow(1_000_000):06d}"
-    gateway._pairings[code] = {"node_id": node_id, "name": name, "owner_user_id": user.id, "expires": time.time() + ttl}
-    gateway.auth.audit(user.id, "node.pair_code", node_id)
-    return JSONResponse({"node_id": node_id, "name": name, "pairing_code": code, "expires_in": ttl})
+    gateway._pairings[code] = {"node_id": node_id or None, "name": name, "owner_user_id": user.id, "expires": time.time() + ttl}
+    gateway.auth.audit(user.id, "node.pair_code", node_id or "pending")
+    return JSONResponse({"node_id": node_id or None, "name": name, "pairing_code": code, "expires_in": ttl})
 
 
 async def api_folders(request: Request):
