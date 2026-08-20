@@ -11,6 +11,20 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$Venv = Join-Path $InstallDir "runtime"
+$ConfigFile = Join-Path $InstallDir "node-config.json"
+$StateFile = Join-Path $InstallDir "node-state.json"
+$HasSavedToken = $false
+if (Test-Path $StateFile) {
+  try {
+    $SavedState = Get-Content -Raw -Path $StateFile | ConvertFrom-Json
+    $HasSavedToken = -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_token)
+  } catch {
+    $HasSavedToken = $false
+  }
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "          LUCAS WINDOWS NODE" -ForegroundColor Cyan
@@ -18,10 +32,10 @@ Write-Host "   Connect this PC to your Lucas AI" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-if ([string]::IsNullOrWhiteSpace($PairingCode)) {
+if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
   $PairingCode = Read-Host "Lucas pairing code"
 }
-if ([string]::IsNullOrWhiteSpace($PairingCode)) {
+if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
   throw "A Lucas pairing code is required. Generate one from Lucas > Windows Nodes."
 }
 
