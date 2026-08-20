@@ -4,6 +4,18 @@ services:
     restart: unless-stopped
     expose:
       - "8787"
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.lucas-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.lucas-http.entrypoints=http
+      - traefik.http.routers.lucas-http.rule=Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-http.middlewares=lucas-redirect
+      - traefik.http.routers.lucas-https.entrypoints=https
+      - traefik.http.routers.lucas-https.rule=Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-https.tls=true
+      - traefik.http.routers.lucas-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.lucas-https.service=lucas-gateway
+      - traefik.http.services.lucas-gateway.loadbalancer.server.port=8787
     environment:
       GWC_HOST: 0.0.0.0
       GWC_PORT: 8787
