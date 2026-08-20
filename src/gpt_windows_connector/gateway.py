@@ -478,7 +478,7 @@ async def node_websocket(websocket: WebSocket):
         owner_user_id = str(record["owner_user_id"]) if authorized and record else None
         if not authorized and pairing_code:
             pairing = _pairings.get(str(pairing_code))
-            if pairing and pairing["node_id"] == node_id and pairing["expires"] >= time.time():
+            if pairing and (not pairing.get("node_id") or pairing["node_id"] == node_id) and pairing["expires"] >= time.time():
                 owner_user_id = pairing["owner_user_id"]
                 issued_token = secrets.token_urlsafe(32)
                 await auth_store.save(node_id, owner_user_id, name, issued_token)
