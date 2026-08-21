@@ -211,6 +211,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             "node_token": token,
             "pairing_code": settings.pairing_code,
             "permission_level": settings.permission_level,
+            "allowed_roots": [str(path) for path in settings.allowed_roots],
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
@@ -221,6 +222,22 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             if config.get("pairing_code"):
                 config["pairing_code"] = None
                 _save_config(config)
+        server_config = welcome.get("config")
+        if isinstance(server_config, dict):
+            config = _load_config()
+            changed = False
+            for key in ("node_name", "permission_level"):
+                value = server_config.get(key)
+                if value is not None and config.get(key) != value:
+                    config[key] = value
+                    changed = True
+            roots = server_config.get("allowed_roots")
+            if isinstance(roots, list) and roots and config.get("allowed_roots") != roots:
+                config["allowed_roots"] = roots
+                changed = True
+            if changed:
+                _save_config(config)
+                raise RuntimeError("Lucas web configuration updated; reconnecting")
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         while True:
             try:
@@ -232,20 +249,53 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             if message.get("type") != "request":
                 continue
             request_id = message.get("id")
+            method = message.get("method", "")
+            params = message.get("params") or {}
+            if method == "node.configure":
+                try:
+                    config = _load_config()
+                    name = str(params.get("node_name") or config.get("node_name") or settings.node_name).strip()
+                    permission = str(params.get("permission_level") or config.get("permission_level") or "operate").strip().lower()
+                    roots = [str(Path(item).expanduser().resolve()) for item in (params.get("allowed_roots") or config.get("allowed_roots") or []) if str(item).strip()]
+                    if permission not in {"read", "operate", "admin"}:
+                        raise ValueError("permission_level must be read, operate, or admin")
+                    if not roots or any(not Path(item).is_dir() for item in roots):
+                        raise ValueError("Every allowed folder must exist on this Windows PC")
+                    config.update({"node_name": name, "permission_level": permission, "allowed_roots": roots})
+                    _save_config(config)
+                    response = {"type": "response", "id": request_id, "ok": True, "result": {"node_name": name, "permission_level": permission, "allowed_roots": roots}}
+                    await ws.send(json.dumps(response, ensure_ascii=False))
+                    raise RuntimeError("Lucas web configuration applied; reconnecting")
+                except RuntimeError:
+                    raise
+                except Exception as exc:
+                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
+                    continue
+            if method == "node.logs":
+                try:
+                    limit = max(20, min(int(params.get("limit", 200)), 1000))
+                    lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:] if LOG_FILE.exists() else []
+                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": True, "result": {"lines": lines}}, ensure_ascii=False))
+                except Exception as exc:
+                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
+                continue
             try:
-                result = await executor.call(message.get("method", ""), message.get("params") or {})
+                result = await executor.call(method, params)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
             except Exception as exc:
-                log.exception("Execution failed: %s", message.get("method"))
+                log.exception("Execution failed: %s", method)
                 response = {"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
             await ws.send(json.dumps(response, ensure_ascii=False))
 
 
-async def run_node(settings: NodeSettings) -> None:
-    executor = Executor(settings.allowed_roots, settings.permission_level)
+async def run_node() -> None:
     delay = 1.0
     while True:
         try:
+            config = _load_config()
+            _apply_config(config)
+            settings = NodeSettings.from_env()
+            executor = Executor(settings.allowed_roots, settings.permission_level)
             await _serve_connection(settings, executor)
             delay = 1.0
         except asyncio.CancelledError:
@@ -262,19 +312,16 @@ def main() -> None:
     args = parser.parse_args()
     _setup_logging()
     config = _load_config()
-    if args.configure or not config:
-        configured = _configure_gui(config)
-        if configured is None:
-            if not config:
-                log.info("Setup cancelled; no saved configuration exists.")
-                return
-        else:
-            config = configured
+    if not config:
+        settings = NodeSettings.from_env()
+        config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "pairing_code": settings.pairing_code, "permission_level": settings.permission_level, "allowed_roots": [str(path) for path in settings.allowed_roots]}
+        _save_config(config)
+    if args.configure:
+        log.info("Local setup UI is disabled. Manage this node from the Lucas web dashboard.")
     _apply_config(config)
-    settings = NodeSettings.from_env()
     log.info("Lucas Node starting. config=%s log=%s", CONFIG_FILE, LOG_FILE)
     try:
-        asyncio.run(run_node(settings))
+        asyncio.run(run_node())
     except KeyboardInterrupt:
         log.info("Lucas Node stopped by user.")
 

@@ -89,6 +89,11 @@ class NodeAuthStore:
                 )
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(nodes)").fetchall()}
+            if "permission_level" not in columns:
+                db.execute("ALTER TABLE nodes ADD COLUMN permission_level TEXT NOT NULL DEFAULT 'operate'")
+            if "allowed_roots" not in columns:
+                db.execute("ALTER TABLE nodes ADD COLUMN allowed_roots TEXT NOT NULL DEFAULT '[]'")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -101,15 +106,28 @@ class NodeAuthStore:
             row = db.execute("SELECT * FROM nodes WHERE node_id=?", (node_id,)).fetchone()
         return dict(row) if row else None
 
-    async def save(self, node_id: str, owner_user_id: str, name: str, token: str) -> None:
+    async def save(self, node_id: str, owner_user_id: str, name: str, token: str, permission_level: str = "operate", allowed_roots: list[str] | None = None) -> None:
+        roots_json = json.dumps(allowed_roots or [])
         with self._connect() as db:
             db.execute(
                 """
-                INSERT INTO nodes(node_id,owner_user_id,name,token,updated_at) VALUES(?,?,?,?,?)
-                ON CONFLICT(node_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,name=excluded.name,token=excluded.token,updated_at=excluded.updated_at
+                INSERT INTO nodes(node_id,owner_user_id,name,token,updated_at,permission_level,allowed_roots) VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(node_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,name=excluded.name,token=excluded.token,updated_at=excluded.updated_at,permission_level=excluded.permission_level,allowed_roots=excluded.allowed_roots
                 """,
-                (node_id, owner_user_id, name, token, time.time()),
+                (node_id, owner_user_id, name, token, time.time(), permission_level, roots_json),
             )
+
+    async def update_config(self, node_id: str, owner_user_id: str, name: str, permission_level: str, allowed_roots: list[str]) -> dict:
+        with self._connect() as db:
+            cur = db.execute("UPDATE nodes SET name=?,permission_level=?,allowed_roots=?,updated_at=? WHERE node_id=? AND owner_user_id=?", (name, permission_level, json.dumps(allowed_roots), time.time(), node_id, owner_user_id))
+            if cur.rowcount != 1:
+                raise PermissionError("Node not found or not owned by this account")
+        return await self.record_for(node_id)
+
+    async def delete(self, node_id: str, owner_user_id: str) -> bool:
+        with self._connect() as db:
+            cur = db.execute("DELETE FROM nodes WHERE node_id=? AND owner_user_id=?", (node_id, owner_user_id))
+            return cur.rowcount == 1
 
 
 auth_store = NodeAuthStore(db_path)
@@ -122,6 +140,7 @@ class NodeConnection:
     owner_user_id: str
     name: str
     permission_level: str
+    allowed_roots: list[str]
     websocket: WebSocket
     last_seen: float = field(default_factory=time.time)
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
@@ -154,6 +173,7 @@ class NodeRegistry:
                 "node_id": node.node_id,
                 "name": node.name,
                 "permission_level": node.permission_level,
+                "allowed_roots": node.allowed_roots,
                 "online": True,
                 "last_seen": node.last_seen,
                 "control_project": lock.project_id if lock else None,
@@ -323,7 +343,7 @@ transport_security = TransportSecuritySettings(
 )
 
 mcp = FastMCP(
-    "GPT Windows Connector",
+    "Lucas",
     instructions="Multi-user remote Windows execution layer. Every authenticated user has isolated projects and nodes. Project bindings are the only workspace context: (user_id, project_id) -> Windows node + workspace. No conversation binding is used.",
     stateless_http=True,
     json_response=True,
@@ -470,6 +490,7 @@ async def node_websocket(websocket: WebSocket):
             return
         name = str(hello.get("name") or node_id)
         permission_level = str(hello.get("permission_level") or "operate")
+        hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         supplied_token = hello.get("node_token")
         pairing_code = hello.get("pairing_code")
         record = await auth_store.record_for(node_id)
@@ -481,20 +502,31 @@ async def node_websocket(websocket: WebSocket):
             if pairing and (not pairing.get("node_id") or pairing["node_id"] == node_id) and pairing["expires"] >= time.time():
                 owner_user_id = pairing["owner_user_id"]
                 issued_token = secrets.token_urlsafe(32)
-                await auth_store.save(node_id, owner_user_id, name, issued_token)
+                await auth_store.save(node_id, owner_user_id, str(pairing.get("name") or name), issued_token, "operate", hello_roots)
                 _pairings.pop(str(pairing_code), None)
                 authorized = True
+                record = await auth_store.record_for(node_id)
         if not authorized or not owner_user_id:
             await websocket.send_json({"type": "welcome", "ok": False, "error": "pairing or node token required"})
             await websocket.close(code=4401)
             return
-        connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=name, permission_level=permission_level, websocket=websocket)
+        record = record or await auth_store.record_for(node_id)
+        if record:
+            name = str(record.get("name") or name)
+            permission_level = str(record.get("permission_level") or permission_level)
+            try:
+                allowed_roots = json.loads(record.get("allowed_roots") or "[]")
+            except json.JSONDecodeError:
+                allowed_roots = hello_roots
+        else:
+            allowed_roots = hello_roots
+        connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
-        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token})
+        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "config": {"node_name": name, "permission_level": permission_level, "allowed_roots": allowed_roots}})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
