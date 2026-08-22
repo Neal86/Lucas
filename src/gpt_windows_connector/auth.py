@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import os
 import secrets
 import sqlite3
 import time
@@ -117,6 +118,9 @@ class AuthStore:
                 );
                 """
             )
+            configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip().lower()
+            if configured_admin:
+                db.execute("UPDATE users SET role='super_admin' WHERE email=? COLLATE NOCASE", (configured_admin,))
             if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
                 first = db.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
                 if first:
