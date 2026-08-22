@@ -48,7 +48,7 @@ class OAuthProvider:
         now = time.time()
         with self.db() as db:
             db.execute("DELETE FROM oauth_requests WHERE expires_at<?", (now,)); db.execute("DELETE FROM oauth_codes WHERE expires_at<?", (now,))
-            db.execute("DELETE FROM oauth_refresh_tokens WHERE expires_at<? OR revoked_at IS NOT NULL", (now,))
+            db.execute("DELETE FROM oauth_refresh_tokens WHERE expires_at<? OR (revoked_at IS NOT NULL AND revoked_at<?)", (now, now-30))
 
     async def as_meta(self, _):
         return JSONResponse({"issuer":self.base,"authorization_endpoint":f"{self.base}/oauth/authorize","token_endpoint":f"{self.base}/oauth/token","registration_endpoint":f"{self.base}/oauth/register","response_types_supported":["code"],"grant_types_supported":["authorization_code","refresh_token"],"code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none"],"scopes_supported":list(self.SCOPES)})
@@ -139,11 +139,12 @@ class OAuthProvider:
             with self.db() as db: r=db.execute("SELECT * FROM oauth_codes WHERE code_hash=?",(ch,)).fetchone()
             if not r or float(r["expires_at"])<time.time() or str(r["client_id"])!=cid or f.get("redirect_uri","")!=str(r["redirect_uri"]) or not self.pkce(f.get("code_verifier",""),str(r["code_challenge"])): return JSONResponse({"error":"invalid_grant"},400)
             with self.db() as db: db.execute("DELETE FROM oauth_codes WHERE code_hash=?",(ch,))
-            u=self.auth.get_user(str(r["user_id"])); scope=str(r["scope"]); self.auth.audit(u.id,"oauth.token",cid); return JSONResponse(self.tokens(u,cid,scope,"offline_access" in scope.split()),headers={"Cache-Control":"no-store","Pragma":"no-cache"})
+            u=self.auth.get_user(str(r["user_id"])); scope=str(r["scope"]); self.auth.audit(u.id,"oauth.token",cid); return JSONResponse(self.tokens(u,cid,scope,True),headers={"Cache-Control":"no-store","Pragma":"no-cache"})
         if grant=="refresh_token":
             th=self.h(f.get("refresh_token",""))
             with self.db() as db: r=db.execute("SELECT * FROM oauth_refresh_tokens WHERE token_hash=?",(th,)).fetchone()
-            if not r or r["revoked_at"] is not None or float(r["expires_at"])<time.time() or str(r["client_id"])!=cid: return JSONResponse({"error":"invalid_grant"},400)
+            now=time.time()
+            if not r or float(r["expires_at"])<now or str(r["client_id"])!=cid or (r["revoked_at"] is not None and now-float(r["revoked_at"])>30): return JSONResponse({"error":"invalid_grant"},400)
             scope=str(r["scope"]); requested=f.get("scope","").strip()
             if requested and not set(requested.split()).issubset(set(scope.split())): return JSONResponse({"error":"invalid_scope"},400)
             if requested: scope=requested
