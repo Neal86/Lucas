@@ -118,7 +118,7 @@ class AuthStore:
                 );
                 """
             )
-            configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "mrwanghp668@gmail.com").strip().lower()
+            configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip().lower()
             if configured_admin:
                 db.execute("UPDATE users SET role='super_admin' WHERE email=? COLLATE NOCASE", (configured_admin,))
             if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
