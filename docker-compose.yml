@@ -20,7 +20,7 @@ services:
       GWC_HOST: 0.0.0.0
       GWC_PORT: 8787
       GWC_DATA_DIR: /data
-      GWC_PUBLIC_BASE_URL: ${GWC_PUBLIC_BASE_URL:-https://lucas.autozon.xyz}
+      GWC_PUBLIC_BASE_URL: https://lucas.autozon.xyz
       GWC_JWT_SECRET: ${GWC_JWT_SECRET:-}
       GWC_JWT_TTL_SECONDS: ${GWC_JWT_TTL_SECONDS:-2592000}
       GWC_GOOGLE_CLIENT_ID: ${GWC_GOOGLE_CLIENT_ID:-}
