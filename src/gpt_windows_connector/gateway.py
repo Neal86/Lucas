@@ -29,14 +29,12 @@ from .auth import (
     reset_current_user,
     set_current_user,
 )
-from .bindings import BindingStore
 from .config import GatewaySettings
 from .oauth import OAuthProvider
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
-bindings = BindingStore(db_path)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 
 
@@ -156,7 +154,7 @@ class NodeConnection:
 @dataclass
 class ControlLock:
     owner_user_id: str
-    project_id: str
+    context_id: str
     expires_at: float
 
 
@@ -182,7 +180,7 @@ class NodeRegistry:
                 "allowed_roots": node.allowed_roots,
                 "online": True,
                 "last_seen": node.last_seen,
-                "control_project": lock.project_id if lock else None,
+                "control_context": lock.context_id if lock else None,
                 "control_expires_at": lock.expires_at if lock else None,
             })
         return out
@@ -195,23 +193,23 @@ class NodeRegistry:
             raise PermissionError("Node does not belong to the authenticated user")
         return node
 
-    def acquire_control(self, node_id: str, user_id: str, project_id: str, ttl_seconds: int = 120) -> dict:
+    def acquire_control(self, node_id: str, user_id: str, context_id: str, ttl_seconds: int = 120) -> dict:
         self.require_owned(node_id, user_id)
         now = time.time()
         ttl_seconds = max(15, min(ttl_seconds, 1800))
         current = self.control_locks.get(node_id)
-        if current and current.expires_at > now and (current.owner_user_id != user_id or current.project_id != project_id):
-            raise RuntimeError(f"Node {node_id} is controlled by another project")
-        lock = ControlLock(owner_user_id=user_id, project_id=project_id, expires_at=now + ttl_seconds)
+        if current and current.expires_at > now and (current.owner_user_id != user_id or current.context_id != context_id):
+            raise RuntimeError(f"Node {node_id} is controlled by another AI context")
+        lock = ControlLock(owner_user_id=user_id, context_id=context_id, expires_at=now + ttl_seconds)
         self.control_locks[node_id] = lock
-        return {"node_id": node_id, "project_id": project_id, "expires_at": lock.expires_at}
+        return {"node_id": node_id, "context": context_id, "expires_at": lock.expires_at}
 
-    def release_control(self, node_id: str, user_id: str, project_id: str) -> dict:
+    def release_control(self, node_id: str, user_id: str, context_id: str) -> dict:
         current = self.control_locks.get(node_id)
-        if current and current.owner_user_id == user_id and current.project_id == project_id:
+        if current and current.owner_user_id == user_id and current.context_id == context_id:
             self.control_locks.pop(node_id, None)
-            return {"released": True, "node_id": node_id, "project_id": project_id}
-        return {"released": False, "node_id": node_id, "project_id": project_id}
+            return {"released": True, "node_id": node_id, "context": context_id}
+        return {"released": False, "node_id": node_id, "context": context_id}
 
     def control_status(self, node_id: str, user_id: str) -> dict:
         self.require_owned(node_id, user_id)
@@ -222,7 +220,7 @@ class NodeRegistry:
             current = None
         return {
             "node_id": node_id,
-            "project_id": current.project_id if current and current.owner_user_id == user_id else None,
+            "context": current.context_id if current and current.owner_user_id == user_id else None,
             "expires_at": current.expires_at if current and current.owner_user_id == user_id else None,
         }
 
@@ -259,27 +257,27 @@ def _user():
     return current_user(required=True)
 
 
-def _binding(project_id: str):
+async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True):
     user = _user()
-    binding = bindings.get(user.id, project_id)
-    if not binding:
-        raise RuntimeError(f"Project is not bound: {project_id}")
-    return user, binding
-
-
-async def _project_rpc(project_id: str, method: str, params: dict | None = None, include_workspace: bool = True):
-    user, binding = _binding(project_id)
+    registry.require_owned(node_id, user.id)
+    workspace = str(workspace or "").strip()
+    if not workspace:
+        raise ValueError("workspace is required and must be inside an Allowed folder")
+    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    resolved_workspace = str(verified["path"])
     payload = dict(params or {})
     if include_workspace:
-        payload["workspace"] = binding.workspace
-    result = await registry.rpc(binding.node_id, user.id, method, payload)
-    auth.audit(user.id, method, project_id, {"node_id": binding.node_id})
+        payload["workspace"] = resolved_workspace
+    result = await registry.rpc(node_id, user.id, method, payload)
+    auth.audit(user.id, method, resolved_workspace, {"node_id": node_id})
     return result
 
 
-def _desktop_lock(project_id: str, ttl_seconds: int = 120) -> None:
-    user, binding = _binding(project_id)
-    registry.acquire_control(binding.node_id, user.id, project_id, ttl_seconds)
+async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) -> None:
+    user = _user()
+    registry.require_owned(node_id, user.id)
+    await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
 async def auth_register(request: Request):
@@ -350,7 +348,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote Windows execution layer. Every authenticated user has isolated projects and nodes. Project bindings are the only workspace context: (user_id, project_id) -> Windows node + workspace. No conversation binding is used.",
+    instructions="Multi-user remote Windows execution layer. AI clients select an owned Windows node and an explicit workspace path. Every workspace is validated by the Windows Node against its Allowed folders before execution. ChatGPT Projects or other AI-side project contexts may store node_id and workspace; Lucas does not maintain a separate project binding layer.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -358,37 +356,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-async def project_bind(project_id: str, node_id: str, workspace: str, name: str | None = None) -> dict:
+def node_list() -> list[dict]:
     user = _user()
-    registry.require_owned(node_id, user.id)
-    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
-    binding = bindings.set(user.id, project_id, node_id, str(verified["path"]), name)
-    auth.audit(user.id, "project.bind", project_id, {"node_id": node_id, "workspace": binding.workspace})
-    return binding.__dict__
-
-
-@mcp.tool()
-def project_get(project_id: str) -> dict | None:
-    user = _user()
-    item = bindings.get(user.id, project_id)
-    return item.__dict__ if item else None
-
-
-@mcp.tool()
-def project_list() -> list[dict]:
-    user = _user()
-    return [item.__dict__ for item in bindings.list(user.id)]
-
-
-@mcp.tool()
-def project_unbind(project_id: str) -> dict:
-    user = _user()
-    item = bindings.get(user.id, project_id)
-    if item:
-        registry.release_control(item.node_id, user.id, project_id)
-    removed = bindings.remove(user.id, project_id)
-    auth.audit(user.id, "project.unbind", project_id)
-    return {"removed": removed}
+    return registry.list(user.id)
 
 
 @mcp.tool()
@@ -402,80 +372,77 @@ def node_pair(node_id: str, name: str | None = None, ttl_seconds: int = 600) -> 
 
 
 @mcp.tool()
-def node_list() -> list[dict]:
+async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) -> dict:
     user = _user()
-    return registry.list(user.id)
+    registry.require_owned(node_id, user.id)
+    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    return registry.acquire_control(node_id, user.id, str(verified["path"]), ttl_seconds)
 
 
 @mcp.tool()
-def control_acquire(project_id: str, ttl_seconds: int = 120) -> dict:
-    user, binding = _binding(project_id)
-    return registry.acquire_control(binding.node_id, user.id, project_id, ttl_seconds)
+def control_release(node_id: str, workspace: str) -> dict:
+    user = _user()
+    registry.require_owned(node_id, user.id)
+    return registry.release_control(node_id, user.id, workspace)
 
 
 @mcp.tool()
-def control_release(project_id: str) -> dict:
-    user, binding = _binding(project_id)
-    return registry.release_control(binding.node_id, user.id, project_id)
+def control_status(node_id: str) -> dict:
+    user = _user()
+    return registry.control_status(node_id, user.id)
 
 
 @mcp.tool()
-def control_status(project_id: str) -> dict:
-    user, binding = _binding(project_id)
-    return registry.control_status(binding.node_id, user.id)
+async def workspace_info(node_id: str, workspace: str) -> dict:
+    return await _node_rpc(node_id, workspace, "workspace.info", {"workspace": workspace}, include_workspace=False)
 
 
 @mcp.tool()
-async def workspace_info(project_id: str) -> dict:
-    return await _project_rpc(project_id, "workspace.info")
-
-
-@mcp.tool()
-async def files_tool(project_id: str, action: str, params: dict | None = None) -> object:
+async def files_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
     allowed = {"list", "read", "write", "patch", "search", "stat", "mkdir", "move", "copy", "delete"}
     if action not in allowed:
         raise ValueError(f"Unsupported files action: {action}")
-    return await _project_rpc(project_id, f"files.{action}", params)
+    return await _node_rpc(node_id, workspace, f"files.{action}", params)
 
 
 @mcp.tool()
-async def shell_run(project_id: str, command: str, timeout: int = 120, shell_type: str = "powershell") -> dict:
-    return await _project_rpc(project_id, "shell.run", {"command": command, "timeout": timeout, "shell_type": shell_type})
+async def shell_run(node_id: str, workspace: str, command: str, timeout: int = 120, shell_type: str = "powershell") -> dict:
+    return await _node_rpc(node_id, workspace, "shell.run", {"command": command, "timeout": timeout, "shell_type": shell_type})
 
 
 @mcp.tool()
-async def process_tool(project_id: str, action: str, params: dict | None = None) -> dict:
+async def process_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> dict:
     if action not in {"start", "poll", "stop", "list"}:
         raise ValueError(f"Unsupported process action: {action}")
-    return await _project_rpc(project_id, f"process.{action}", params, include_workspace=True)
+    return await _node_rpc(node_id, workspace, f"process.{action}", params)
 
 
 @mcp.tool()
-async def git_tool(project_id: str, action: str, params: dict | None = None) -> dict:
+async def git_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> dict:
     allowed = {"status", "diff", "log", "branch", "branch_create", "branch_switch", "add", "commit", "pull", "push", "show"}
     if action not in allowed:
         raise ValueError(f"Unsupported git action: {action}")
-    return await _project_rpc(project_id, f"git.{action}", params)
+    return await _node_rpc(node_id, workspace, f"git.{action}", params)
 
 
 @mcp.tool()
-async def browser_tool(project_id: str, action: str, params: dict | None = None) -> object:
+async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
     allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     if action not in {"discover", "pages", "inspect", "screenshot"}:
-        _desktop_lock(project_id)
-    return await _project_rpc(project_id, f"browser.{action}", params, include_workspace=True)
+        await _desktop_lock(node_id, workspace)
+    return await _node_rpc(node_id, workspace, f"browser.{action}", params)
 
 
 @mcp.tool()
-async def computer_tool(project_id: str, action: str, params: dict | None = None) -> object:
+async def computer_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
     allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set", "ui_elements", "ui_click", "ui_set_text"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")
     if action not in {"info", "processes", "windows", "screenshot", "clipboard_get", "ui_elements"}:
-        _desktop_lock(project_id)
-    return await _project_rpc(project_id, f"computer.{action}", params, include_workspace=True)
+        await _desktop_lock(node_id, workspace)
+    return await _node_rpc(node_id, workspace, f"computer.{action}", params)
 
 
 async def health(_: Request):
