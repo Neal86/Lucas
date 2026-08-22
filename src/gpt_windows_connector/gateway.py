@@ -512,12 +512,17 @@ async def node_websocket(websocket: WebSocket):
             return
         record = record or await auth_store.record_for(node_id)
         if record:
+            try:
+                stored_roots = json.loads(record.get("allowed_roots") or "[]")
+            except json.JSONDecodeError:
+                stored_roots = []
+            if authorized and not stored_roots and hello_roots:
+                await auth_store.update_config(node_id, owner_user_id, str(record.get("name") or name), permission_level, hello_roots)
+                record = await auth_store.record_for(node_id) or record
+                stored_roots = hello_roots
             name = str(record.get("name") or name)
             permission_level = str(record.get("permission_level") or permission_level)
-            try:
-                allowed_roots = json.loads(record.get("allowed_roots") or "[]")
-            except json.JSONDecodeError:
-                allowed_roots = hello_roots
+            allowed_roots = stored_roots or hello_roots
         else:
             allowed_roots = hello_roots
         connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)

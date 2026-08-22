@@ -104,6 +104,7 @@ async def download_lucas_node(_: Request):
         "/app/scripts/install-node.ps1",
         media_type="application/octet-stream",
         filename="Lucas-Node.ps1",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
     )
 
 
@@ -112,6 +113,7 @@ async def download_lucas_launcher(_: Request):
         "/app/scripts/Lucas-Node.bat",
         media_type="application/octet-stream",
         filename="Lucas-Node.bat",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"},
     )
 
 

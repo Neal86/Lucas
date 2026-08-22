@@ -69,9 +69,16 @@ if (-not (Test-Path (Join-Path $Venv "Scripts\python.exe"))) {
 }
 
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
+$PyVersionOk = (& $VenvPython -c "import sys; print('1' if sys.version_info >= (3, 11) else '0')").Trim()
+if ($PyVersionOk -ne "1") { throw "Lucas Node requires Python 3.11 or newer." }
 Write-Host "[Lucas] Installing/updating Lucas Node..." -ForegroundColor Yellow
 & $VenvPython -m pip install --disable-pip-version-check --upgrade pip | Out-Null
-& $VenvPython -m pip install --disable-pip-version-check --upgrade "https://github.com/Neal86/Lucas/archive/refs/heads/main.zip"
+if ($LASTEXITCODE -ne 0) { throw "Failed to update pip." }
+& $VenvPython -m pip uninstall --disable-pip-version-check -y gpt-windows-connector | Out-Null
+& $VenvPython -m pip install --disable-pip-version-check --no-cache-dir "https://github.com/Neal86/Lucas/archive/refs/heads/main.zip"
+if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
+$InstalledVersion = (& $VenvPython -c "import importlib.metadata; print(importlib.metadata.version('gpt-windows-connector'))").Trim()
+Write-Host "[Lucas] Installed Lucas Node $InstalledVersion" -ForegroundColor Green
 
 $MachineGuid = ""
 try {
@@ -81,13 +88,22 @@ try {
 }
 $NodeId = (("{0}-{1}" -f $env:COMPUTERNAME, $MachineGuid.Substring(0, [Math]::Min(12, $MachineGuid.Length))).ToLower() -replace '[^a-z0-9._-]', '-')
 
+$ExistingConfig = $null
+if (Test-Path $ConfigFile) {
+  try { $ExistingConfig = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json } catch { $ExistingConfig = $null }
+}
+if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_id)) { $NodeId = [string]$ExistingConfig.node_id }
+$ConfigNodeName = if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_name)) { [string]$ExistingConfig.node_name } else { $NodeName }
+$ConfigPermission = if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.permission_level)) { [string]$ExistingConfig.permission_level } else { $Permission }
+$ConfigRoots = @($AllowedRoot)
+if ($ExistingConfig -and $ExistingConfig.allowed_roots -and @($ExistingConfig.allowed_roots).Count -gt 0) { $ConfigRoots = @($ExistingConfig.allowed_roots | ForEach-Object { [string]$_ }) }
 $Config = [ordered]@{
   gateway_ws_url = $GatewayUrl.TrimEnd('/')
   node_id = $NodeId
-  node_name = $NodeName
-  pairing_code = $PairingCode.Trim()
-  permission_level = $Permission
-  allowed_roots = @($AllowedRoot)
+  node_name = $ConfigNodeName
+  pairing_code = if ($HasSavedToken) { $null } else { $PairingCode.Trim() }
+  permission_level = $ConfigPermission
+  allowed_roots = $ConfigRoots
 }
 $Config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
 
@@ -96,15 +112,15 @@ $env:GWC_NODE_ID = $Config.node_id
 $env:GWC_NODE_NAME = $Config.node_name
 $env:GWC_PAIRING_CODE = $Config.pairing_code
 $env:GWC_PERMISSION_LEVEL = $Config.permission_level
-$env:GWC_ALLOWED_ROOTS = $AllowedRoot
+$env:GWC_ALLOWED_ROOTS = ($Config.allowed_roots -join [System.IO.Path]::PathSeparator)
 $env:GWC_NODE_STATE = $StateFile
 
 Write-Host ""
 Write-Host "[Lucas] Ready" -ForegroundColor Green
-Write-Host "  Node:      $NodeName"
-Write-Host "  Gateway:   $GatewayUrl"
-Write-Host "  Folder:    $AllowedRoot"
-Write-Host "  Permission:$Permission"
+Write-Host "  Node:      $($Config.node_name)"
+Write-Host "  Gateway:   $($Config.gateway_ws_url)"
+Write-Host "  Folder(s): $($Config.allowed_roots -join '; ')"
+Write-Host "  Permission:$($Config.permission_level)"
 Write-Host ""
 Write-Host "[Lucas] Connecting... Keep this window open." -ForegroundColor Green
 Write-Host "Press Ctrl+C to stop Lucas Node. Run this script again anytime to re-pair or update."
