@@ -78,12 +78,57 @@ class AuthStore:
                 );
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+            if "role" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+            if "status" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+            if "last_login_at" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN last_login_at REAL")
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    user_id TEXT PRIMARY KEY,
+                    plan TEXT NOT NULL DEFAULT 'free',
+                    status TEXT NOT NULL DEFAULT 'inactive',
+                    billing_provider TEXT,
+                    billing_customer_id TEXT,
+                    started_at REAL,
+                    ends_at REAL,
+                    updated_at REAL NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS usage_daily (
+                    user_id TEXT NOT NULL,
+                    day TEXT NOT NULL,
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    operation_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    error_count INTEGER NOT NULL DEFAULT 0,
+                    execution_seconds REAL NOT NULL DEFAULT 0,
+                    bytes_in INTEGER NOT NULL DEFAULT 0,
+                    bytes_out INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(user_id, day)
+                );
+                CREATE TABLE IF NOT EXISTS login_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    provider TEXT,
+                    created_at REAL NOT NULL
+                );
+                """
+            )
+            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
+                first = db.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
+                if first:
+                    db.execute("UPDATE users SET role='super_admin' WHERE id=?", (first["id"],))
 
     @staticmethod
     def _user(row: sqlite3.Row) -> User:
         return User(
             id=row["id"], email=row["email"], name=row["name"], picture=row["picture"],
             provider=row["provider"], created_at=float(row["created_at"]),
+            role=(row["role"] if "role" in row.keys() else "user"),
+            status=(row["status"] if "status" in row.keys() else "active"),
         )
 
     def register(self, email: str, password: str, name: str | None = None) -> User:
@@ -110,11 +155,17 @@ class AuthStore:
             row = db.execute("SELECT * FROM users WHERE email=? COLLATE NOCASE", (email.strip(),)).fetchone()
         if not row or not row["password_hash"]:
             raise PermissionError("Invalid email or password")
+        if (row["status"] if "status" in row.keys() else "active") != "active":
+            raise PermissionError("Account is disabled")
         try:
             _passwords.verify(row["password_hash"], password)
         except VerifyMismatchError as exc:
             raise PermissionError("Invalid email or password") from exc
-        return self._user(row)
+        now = time.time()
+        with self._connect() as db:
+            db.execute("UPDATE users SET last_login_at=?,updated_at=? WHERE id=?", (now, now, row["id"]))
+            db.execute("INSERT INTO login_sessions(user_id,provider,created_at) VALUES(?,?,?)", (row["id"], "email", now))
+        return self.get_user(str(row["id"]))
 
     def google_login(self, *, sub: str, email: str, name: str | None, picture: str | None) -> User:
         if not sub or not email:
@@ -148,7 +199,10 @@ class AuthStore:
             row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not row:
             raise KeyError("User not found")
-        return self._user(row)
+        user = self._user(row)
+        if user.status != "active":
+            raise PermissionError("Account is disabled")
+        return user
 
     def issue_token(self, user: User, ttl_seconds: int | None = None) -> str:
         now = int(time.time())
