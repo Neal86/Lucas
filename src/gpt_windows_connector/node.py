@@ -239,53 +239,77 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 _save_config(config)
                 raise RuntimeError("Lucas web configuration updated; reconnecting")
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
-        while True:
-            try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=15)
-            except asyncio.TimeoutError:
-                await ws.send(json.dumps({"type": "heartbeat", "time": time.time()}))
-                continue
-            message = json.loads(raw)
-            if message.get("type") != "request":
-                continue
-            request_id = message.get("id")
-            method = message.get("method", "")
-            params = message.get("params") or {}
-            if method == "node.configure":
-                try:
-                    config = _load_config()
-                    name = str(params.get("node_name") or config.get("node_name") or settings.node_name).strip()
-                    permission = str(params.get("permission_level") or config.get("permission_level") or "operate").strip().lower()
-                    roots = [str(Path(item).expanduser().resolve()) for item in (params.get("allowed_roots") or config.get("allowed_roots") or []) if str(item).strip()]
-                    if permission not in {"read", "operate", "admin"}:
-                        raise ValueError("permission_level must be read, operate, or admin")
-                    if not roots or any(not Path(item).is_dir() for item in roots):
-                        raise ValueError("Every allowed folder must exist on this Windows PC")
-                    config.update({"node_name": name, "permission_level": permission, "allowed_roots": roots})
-                    _save_config(config)
-                    response = {"type": "response", "id": request_id, "ok": True, "result": {"node_name": name, "permission_level": permission, "allowed_roots": roots}}
-                    await ws.send(json.dumps(response, ensure_ascii=False))
-                    raise RuntimeError("Lucas web configuration applied; reconnecting")
-                except RuntimeError:
-                    raise
-                except Exception as exc:
-                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
-                    continue
-            if method == "node.logs":
-                try:
-                    limit = max(20, min(int(params.get("limit", 200)), 1000))
-                    lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:] if LOG_FILE.exists() else []
-                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": True, "result": {"lines": lines}}, ensure_ascii=False))
-                except Exception as exc:
-                    await ws.send(json.dumps({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
-                continue
+        send_lock = asyncio.Lock()
+        request_tasks: set[asyncio.Task[None]] = set()
+
+        async def send_json(payload: dict[str, object]) -> None:
+            async with send_lock:
+                await ws.send(json.dumps(payload, ensure_ascii=False))
+
+        async def execute_request(request_id: object, method: str, params: dict) -> None:
             try:
                 result = await executor.call(method, params)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 log.exception("Execution failed: %s", method)
                 response = {"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
-            await ws.send(json.dumps(response, ensure_ascii=False))
+            try:
+                await send_json(response)
+            except Exception:
+                log.exception("Failed sending response for %s", method)
+
+        try:
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=15)
+                except asyncio.TimeoutError:
+                    await send_json({"type": "heartbeat", "time": time.time()})
+                    continue
+                message = json.loads(raw)
+                if message.get("type") != "request":
+                    continue
+                request_id = message.get("id")
+                method = message.get("method", "")
+                params = message.get("params") or {}
+                if method == "node.configure":
+                    try:
+                        config = _load_config()
+                        name = str(params.get("node_name") or config.get("node_name") or settings.node_name).strip()
+                        permission = str(params.get("permission_level") or config.get("permission_level") or "operate").strip().lower()
+                        roots = [str(Path(item).expanduser().resolve()) for item in (params.get("allowed_roots") or config.get("allowed_roots") or []) if str(item).strip()]
+                        if permission not in {"read", "operate", "admin"}:
+                            raise ValueError("permission_level must be read, operate, or admin")
+                        if not roots or any(not Path(item).is_dir() for item in roots):
+                            raise ValueError("Every allowed folder must exist on this Windows PC")
+                        config.update({"node_name": name, "permission_level": permission, "allowed_roots": roots})
+                        _save_config(config)
+                        response = {"type": "response", "id": request_id, "ok": True, "result": {"node_name": name, "permission_level": permission, "allowed_roots": roots}}
+                        await send_json(response)
+                        raise RuntimeError("Lucas web configuration applied; reconnecting")
+                    except RuntimeError:
+                        raise
+                    except Exception as exc:
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                        continue
+                if method == "node.logs":
+                    try:
+                        limit = max(20, min(int(params.get("limit", 200)), 1000))
+                        lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:] if LOG_FILE.exists() else []
+                        await send_json({"type": "response", "id": request_id, "ok": True, "result": {"lines": lines}})
+                    except Exception as exc:
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+
+                task = asyncio.create_task(execute_request(request_id, method, params), name=f"lucas:{method}:{request_id}")
+                request_tasks.add(task)
+                task.add_done_callback(request_tasks.discard)
+        finally:
+            if request_tasks:
+                for task in request_tasks:
+                    task.cancel()
+                await asyncio.gather(*request_tasks, return_exceptions=True)
 
 
 async def run_node() -> None:
