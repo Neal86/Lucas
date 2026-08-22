@@ -148,6 +148,9 @@ class AuthStore:
                 )
         except sqlite3.IntegrityError as exc:
             raise ValueError("Email is already registered") from exc
+        with self._connect() as db:
+            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
+                db.execute("UPDATE users SET role='super_admin' WHERE id=?", (user_id,))
         return self.get_user(user_id)
 
     def login(self, email: str, password: str) -> User:
@@ -192,6 +195,9 @@ class AuthStore:
                         "INSERT INTO users(id,email,name,picture,provider,google_sub,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
                         (user_id, email, name, picture, "google", sub, now, now),
                     )
+        with self._connect() as db:
+            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
+                db.execute("UPDATE users SET role='super_admin' WHERE id=?", (user_id,))
         return self.get_user(user_id)
 
     def get_user(self, user_id: str) -> User:
@@ -232,6 +238,16 @@ class AuthStore:
             db.execute("DELETE FROM oauth_states WHERE state_hash=?", (digest,))
         if not row or float(row["expires_at"]) < time.time():
             raise PermissionError("Invalid or expired OAuth state")
+
+    def record_request(self, user_id: str) -> None:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        with self._connect() as db:
+            db.execute("INSERT INTO usage_daily(user_id,day,request_count) VALUES(?,?,1) ON CONFLICT(user_id,day) DO UPDATE SET request_count=request_count+1", (user_id, day))
+
+    def record_operation(self, user_id: str, success: bool, duration_seconds: float) -> None:
+        day = time.strftime("%Y-%m-%d", time.gmtime())
+        with self._connect() as db:
+            db.execute("INSERT INTO usage_daily(user_id,day,operation_count,success_count,error_count,execution_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET operation_count=operation_count+1,success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count,execution_seconds=execution_seconds+excluded.execution_seconds", (user_id, day, 1, 1 if success else 0, 0 if success else 1, max(0.0, duration_seconds)))
 
     def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None) -> None:
         with self._connect() as db:

@@ -70,6 +70,8 @@ class AuthMiddleware:
                 headers["WWW-Authenticate"] = f'Bearer resource_metadata="{settings.public_base_url}/.well-known/oauth-protected-resource", scope="lucas"'
             await JSONResponse({"error": "authentication_required"}, status_code=401, headers=headers)(scope, receive, send)
             return
+        if path.startswith("/mcp"):
+            auth.record_request(user.id)
         ctx = set_current_user(user)
         try:
             await self.app(scope, receive, send)
@@ -268,8 +270,17 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     payload = dict(params or {})
     if include_workspace:
         payload["workspace"] = resolved_workspace
-    result = await registry.rpc(node_id, user.id, method, payload)
-    auth.audit(user.id, method, resolved_workspace, {"node_id": node_id})
+    started = time.monotonic()
+    try:
+        result = await registry.rpc(node_id, user.id, method, payload)
+    except Exception as exc:
+        duration = time.monotonic() - started
+        auth.record_operation(user.id, False, duration)
+        auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
+        raise
+    duration = time.monotonic() - started
+    auth.record_operation(user.id, True, duration)
+    auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
     return result
 
 
