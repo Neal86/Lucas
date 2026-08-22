@@ -55,8 +55,10 @@ async def dashboard(request: Request):
             ops_today = db.execute("SELECT COUNT(*) n FROM audit_logs WHERE created_at>=? AND action NOT LIKE 'auth.%'", (day,)).fetchone()["n"]
             ops_30d = db.execute("SELECT COUNT(*) n FROM audit_logs WHERE created_at>=? AND action NOT LIKE 'auth.%'", (month,)).fetchone()["n"]
             paid = db.execute("SELECT COUNT(*) n FROM subscriptions WHERE status='active' AND plan!='free'").fetchone()["n"]
+            usage = db.execute("SELECT COALESCE(SUM(request_count),0) requests,COALESCE(SUM(operation_count),0) operations,COALESCE(SUM(success_count),0) success,COALESCE(SUM(error_count),0) errors,COALESCE(SUM(execution_seconds),0) seconds FROM usage_daily WHERE day>=date('now','-30 day')").fetchone()
             recent = db.execute("SELECT a.created_at,a.action,a.target,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 12").fetchall()
-        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": ops_30d, "paid_users": paid, "recent": [dict(r) for r in recent]})
+        total_done = int(usage["success"] or 0) + int(usage["errors"] or 0)
+        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(usage["operations"] or ops_30d), "requests_30d": int(usage["requests"] or 0), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
     except Exception as exc: return _error(exc)
 
 
@@ -119,12 +121,14 @@ async def usage(request: Request):
         _admin(request); since=time.time()-30*86400
         with _db() as db:
             rows=db.execute("SELECT action,COUNT(*) n FROM audit_logs WHERE created_at>=? GROUP BY action ORDER BY n DESC",(since,)).fetchall()
-            daily=db.execute("SELECT date(created_at,'unixepoch') day,COUNT(*) n FROM audit_logs WHERE created_at>=? GROUP BY day ORDER BY day",(since,)).fetchall()
+            daily=db.execute("SELECT day,SUM(request_count) requests,SUM(operation_count) operations,SUM(success_count) success,SUM(error_count) errors,SUM(execution_seconds) seconds FROM usage_daily WHERE day>=date('now','-30 day') GROUP BY day ORDER BY day").fetchall()
+            totals=db.execute("SELECT COALESCE(SUM(request_count),0) requests,COALESCE(SUM(operation_count),0) operations,COALESCE(SUM(success_count),0) success,COALESCE(SUM(error_count),0) errors,COALESCE(SUM(execution_seconds),0) seconds FROM usage_daily WHERE day>=date('now','-30 day')").fetchone()
             top_users=db.execute("SELECT u.email,COUNT(*) n FROM audit_logs a JOIN users u ON u.id=a.user_id WHERE a.created_at>=? GROUP BY a.user_id ORDER BY n DESC LIMIT 20",(since,)).fetchall()
         groups=Counter()
         for r in rows:
             a=r["action"]; groups[a.split('.')[0] if '.' in a else a]+=r["n"]
-        return JSONResponse({"operations_30d": sum(r["n"] for r in rows), "by_tool": dict(groups), "by_action": [dict(r) for r in rows], "daily": [dict(r) for r in daily], "top_users": [dict(r) for r in top_users]})
+        done=int(totals["success"] or 0)+int(totals["errors"] or 0)
+        return JSONResponse({"requests_30d":int(totals["requests"] or 0),"operations_30d":int(totals["operations"] or 0),"execution_seconds_30d":float(totals["seconds"] or 0),"success_rate":round((int(totals["success"] or 0)/done*100),2) if done else 100.0, "errors_30d":int(totals["errors"] or 0), "by_tool": dict(groups), "by_action": [dict(r) for r in rows], "daily": [dict(r) for r in daily], "top_users": [dict(r) for r in top_users]})
     except Exception as exc: return _error(exc)
 
 
