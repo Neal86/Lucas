@@ -111,7 +111,7 @@ def _configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     ttk.Button(buttons, text="Add folder", command=add_root).pack(fill="x", pady=(0, 6))
     ttk.Button(buttons, text="Remove", command=remove_root).pack(fill="x")
 
-    status = ttk.Label(frame, text="Configuration is stored locally in %LOCALAPPDATA%\Lucas.")
+    status = ttk.Label(frame, text=r"Configuration is stored locally in %LOCALAPPDATA%\Lucas.")
     status.pack(anchor="w", pady=(8, 12))
 
     def save() -> None:

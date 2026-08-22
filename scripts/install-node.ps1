@@ -97,11 +97,13 @@ $ConfigNodeName = if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([st
 $ConfigPermission = if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.permission_level)) { [string]$ExistingConfig.permission_level } else { $Permission }
 $ConfigRoots = @($AllowedRoot)
 if ($ExistingConfig -and $ExistingConfig.allowed_roots -and @($ExistingConfig.allowed_roots).Count -gt 0) { $ConfigRoots = @($ExistingConfig.allowed_roots | ForEach-Object { [string]$_ }) }
+$ConfigPairingCode = $null
+if (-not $HasSavedToken) { $ConfigPairingCode = $PairingCode.Trim() }
 $Config = [ordered]@{
   gateway_ws_url = $GatewayUrl.TrimEnd('/')
   node_id = $NodeId
   node_name = $ConfigNodeName
-  pairing_code = if ($HasSavedToken) { $null } else { $PairingCode.Trim() }
+  pairing_code = $ConfigPairingCode
   permission_level = $ConfigPermission
   allowed_roots = $ConfigRoots
 }
