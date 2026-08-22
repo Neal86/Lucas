@@ -30,6 +30,8 @@ class User:
     picture: str | None
     provider: str
     created_at: float
+    role: str = "user"
+    status: str = "active"
 
 
 class AuthStore:
