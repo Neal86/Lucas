@@ -148,9 +148,10 @@ class AuthStore:
             raise KeyError("User not found")
         return self._user(row)
 
-    def issue_token(self, user: User) -> str:
+    def issue_token(self, user: User, ttl_seconds: int | None = None) -> str:
         now = int(time.time())
-        payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + self.jwt_ttl_seconds, "iss": "gpt-windows-connector"}
+        ttl = self.jwt_ttl_seconds if ttl_seconds is None else max(60, min(int(ttl_seconds), self.jwt_ttl_seconds))
+        payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector"}
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
 
     def verify_token(self, token: str) -> User:

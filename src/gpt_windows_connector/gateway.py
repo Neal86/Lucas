@@ -31,11 +31,13 @@ from .auth import (
 )
 from .bindings import BindingStore
 from .config import GatewaySettings
+from .oauth import OAuthProvider
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
 bindings = BindingStore(db_path)
+oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 
 
 class AuthMiddleware:
@@ -51,7 +53,8 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("path") in self.PUBLIC_PATHS:
+        path = scope.get("path", "")
+        if scope["type"] != "http" or path in self.PUBLIC_PATHS or path.startswith("/oauth/") or path.startswith("/.well-known/"):
             await self.app(scope, receive, send)
             return
         request = Request(scope, receive=receive)
@@ -64,7 +67,10 @@ class AuthMiddleware:
         try:
             user = auth.verify_token(token or "")
         except Exception:
-            await JSONResponse({"error": "authentication_required"}, status_code=401)(scope, receive, send)
+            headers = {}
+            if path.startswith("/mcp"):
+                headers["WWW-Authenticate"] = f'Bearer resource_metadata="{settings.public_base_url}/.well-known/oauth-protected-resource", scope="lucas"'
+            await JSONResponse({"error": "authentication_required"}, status_code=401, headers=headers)(scope, receive, send)
             return
         ctx = set_current_user(user)
         try:
@@ -561,6 +567,14 @@ async def lifespan(app: Starlette):
 
 app = Starlette(
     routes=[
+        Route("/.well-known/oauth-authorization-server", oauth.as_meta, methods=["GET"]),
+        Route("/.well-known/oauth-protected-resource", oauth.resource_meta, methods=["GET"]),
+        Route("/.well-known/oauth-protected-resource/mcp", oauth.resource_meta, methods=["GET"]),
+        Route("/oauth/register", oauth.register, methods=["POST"]),
+        Route("/oauth/authorize", oauth.authorize, methods=["GET"]),
+        Route("/oauth/authorize/login", oauth.authorize_login, methods=["POST"]),
+        Route("/oauth/authorize/decision", oauth.authorize_decision, methods=["POST"]),
+        Route("/oauth/token", oauth.token, methods=["POST"]),
         Route("/health", health, methods=["GET"]),
         Route("/auth/register", auth_register, methods=["POST"]),
         Route("/auth/login", auth_login, methods=["POST"]),
