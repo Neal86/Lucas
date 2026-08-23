@@ -318,6 +318,7 @@ async def api_logs(request: Request):
 
 routes = [
     Route("/", home, methods=["GET"]),
+    Route("/dashboard", dashboard, methods=["GET"]),
     Route("/download/Lucas-Node.ps1", download_lucas_node, methods=["GET"]),
     Route("/download/Lucas-Node.bat", download_lucas_launcher, methods=["GET"]),
     Route("/api/logout", api_logout, methods=["POST"]),
