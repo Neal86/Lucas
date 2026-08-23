@@ -27,8 +27,8 @@ services:
       GWC_GOOGLE_CLIENT_SECRET: ${GWC_GOOGLE_CLIENT_SECRET:-}
       GWC_GOOGLE_REDIRECT_URI: ${GWC_GOOGLE_REDIRECT_URI:-}
       GWC_AUTH_SUCCESS_URL: ${GWC_AUTH_SUCCESS_URL:-}
-      GWC_ALLOWED_HOSTS: ${GWC_ALLOWED_HOSTS:-lucasmcp.com,lucasmcp.com:*,localhost:*,127.0.0.1:*}
-      GWC_ALLOWED_ORIGINS: ${GWC_ALLOWED_ORIGINS:-https://lucasmcp.com,https://lucasmcp.com:*,http://localhost:*,http://127.0.0.1:*}
+      GWC_ALLOWED_HOSTS: ${GWC_ALLOWED_HOSTS:-lucasmcp.com,lucasmcp.com:*,lucas.autozon.xyz,lucas.autozon.xyz:*,localhost:*,127.0.0.1:*}
+      GWC_ALLOWED_ORIGINS: ${GWC_ALLOWED_ORIGINS:-https://lucasmcp.com,https://lucasmcp.com:*,https://lucas.autozon.xyz,https://lucas.autozon.xyz:*,http://localhost:*,http://127.0.0.1:*}
     volumes:
       - gwc_data:/data
 
