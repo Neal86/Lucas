@@ -116,8 +116,50 @@ def _db() -> sqlite3.Connection:
     return db
 
 
+def _landing_html() -> str:
+    css_marker = '/* Lucas public landing */'
+    css_start = DASHBOARD_HTML.index(css_marker)
+    css_end = DASHBOARD_HTML.index('</style>', css_start)
+    landing_css = DASHBOARD_HTML[css_start:css_end]
+    section_start = DASHBOARD_HTML.index('<section id="landing" class="landing">')
+    section_end = DASHBOARD_HTML.index('\n<div id="auth"', section_start)
+    landing = DASHBOARD_HTML[section_start:section_end]
+    landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\'/dashboard\'"')
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="theme-color" content="#05070d" />
+<meta name="description" content="Lucas connects any MCP-compatible AI to any computer with secure, token-free execution." />
+<title>Lucas — Any AI. Any Computer.</title>
+<style>
+*{{box-sizing:border-box}}html{{scroll-behavior:smooth;background:#05070d}}body{{margin:0;background:#05070d}}button{{font:inherit}}
+{landing_css}
+</style>
+</head>
+<body>{landing}</body>
+</html>"""
+
+
+def _dashboard_html() -> str:
+    html = DASHBOARD_HTML
+    css_marker = '/* Lucas public landing */'
+    css_start = html.index(css_marker)
+    css_end = html.index('</style>', css_start)
+    html = html[:css_start] + html[css_end:]
+    section_start = html.index('<section id="landing" class="landing">')
+    section_end = html.index('\n<div id="auth"', section_start)
+    html = html[:section_start] + html[section_end + 1:]
+    return html
+
+
 async def home(_: Request):
-    return HTMLResponse(DASHBOARD_HTML)
+    return HTMLResponse(_landing_html())
+
+
+async def dashboard(_: Request):
+    return HTMLResponse(_dashboard_html())
 
 
 async def download_lucas_node(_: Request):
