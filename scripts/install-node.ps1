@@ -1,5 +1,5 @@
 param(
-  [string]$GatewayUrl = "wss://lucas.autozon.xyz/ws/node",
+  [string]$GatewayUrl = "wss://lucasmcp.com/ws/node",
   [string]$PairingCode = "",
   [string]$NodeName = "$env:COMPUTERNAME",
   [string]$AllowedRoot = "$env:USERPROFILE",
@@ -54,7 +54,7 @@ if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
   $PairingCode = Read-Host "Lucas pairing code"
 }
 if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
-  throw "A Lucas pairing code is required. Generate one from Lucas > Windows Nodes."
+  throw "A Lucas pairing code is required. Generate one from Lucas > Computer Nodes."
 }
 
 $PythonCommand = $null
@@ -167,7 +167,7 @@ Write-Host "  Gateway:   $($Config.gateway_ws_url)"
 Write-Host "  Permission:$($Config.permission_level)"
 Write-Host ""
 Write-Host "[Lucas] Connecting..." -ForegroundColor Green
-Write-Host "After pairing, manage this computer from Lucas > Windows Nodes."
+Write-Host "After pairing, manage this computer from Lucas > Computer Nodes."
 Write-Host "Press Ctrl+C to stop the local node process."
 Write-Host ""
 

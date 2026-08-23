@@ -8,10 +8,10 @@ services:
       - traefik.enable=true
       - traefik.http.middlewares.lucas-redirect.redirectscheme.scheme=https
       - traefik.http.routers.lucas-http.entrypoints=http
-      - traefik.http.routers.lucas-http.rule=Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-http.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`)
       - traefik.http.routers.lucas-http.middlewares=lucas-redirect
       - traefik.http.routers.lucas-https.entrypoints=https
-      - traefik.http.routers.lucas-https.rule=Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-https.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`)
       - traefik.http.routers.lucas-https.tls=true
       - traefik.http.routers.lucas-https.tls.certresolver=letsencrypt
       - traefik.http.routers.lucas-https.service=lucas-gateway
@@ -20,7 +20,7 @@ services:
       GWC_HOST: 0.0.0.0
       GWC_PORT: 8787
       GWC_DATA_DIR: /data
-      GWC_PUBLIC_BASE_URL: https://lucas.autozon.xyz
+      GWC_PUBLIC_BASE_URL: https://lucasmcp.com
       GWC_JWT_SECRET: ${GWC_JWT_SECRET:-}
       GWC_JWT_TTL_SECONDS: ${GWC_JWT_TTL_SECONDS:-2592000}
       GWC_GOOGLE_CLIENT_ID: ${GWC_GOOGLE_CLIENT_ID:-}
