@@ -237,7 +237,10 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 changed = True
             if changed:
                 _save_config(config)
-                raise RuntimeError("Lucas web configuration updated; reconnecting")
+                configured_roots = config.get("allowed_roots") or [str(path) for path in settings.allowed_roots]
+                executor.allowed_roots = tuple(Path(item).expanduser().resolve() for item in configured_roots if str(item).strip())
+                executor.policy = type(executor.policy)(str(config.get("permission_level") or settings.permission_level))
+                log.info("Applied Lucas web configuration without reconnecting")
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         send_lock = asyncio.Lock()
         request_tasks: set[asyncio.Task[None]] = set()
@@ -285,9 +288,12 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                             raise ValueError("Every allowed folder must exist on this Windows PC")
                         config.update({"node_name": name, "permission_level": permission, "allowed_roots": roots})
                         _save_config(config)
+                        executor.allowed_roots = tuple(Path(item).expanduser().resolve() for item in roots)
+                        executor.policy = type(executor.policy)(permission)
                         response = {"type": "response", "id": request_id, "ok": True, "result": {"node_name": name, "permission_level": permission, "allowed_roots": roots}}
                         await send_json(response)
-                        raise RuntimeError("Lucas web configuration applied; reconnecting")
+                        log.info("Applied Lucas web configuration without reconnecting")
+                        continue
                     except RuntimeError:
                         raise
                     except Exception as exc:
