@@ -8,10 +8,10 @@ services:
       - traefik.enable=true
       - traefik.http.middlewares.lucas-redirect.redirectscheme.scheme=https
       - traefik.http.routers.lucas-http.entrypoints=http
-      - traefik.http.routers.lucas-http.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-http.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`) || Host(`lucas.autozon.xyz`)
       - traefik.http.routers.lucas-http.middlewares=lucas-redirect
       - traefik.http.routers.lucas-https.entrypoints=https
-      - traefik.http.routers.lucas-https.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`)
+      - traefik.http.routers.lucas-https.rule=Host(`lucasmcp.com`) || Host(`lucas.autozon.xyz`) || Host(`lucas.autozon.xyz`)
       - traefik.http.routers.lucas-https.tls=true
       - traefik.http.routers.lucas-https.tls.certresolver=letsencrypt
       - traefik.http.routers.lucas-https.service=lucas-gateway
