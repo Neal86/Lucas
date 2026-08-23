@@ -308,11 +308,11 @@ async def api_ai_connections(request: Request):
     user = _auth_user(request)
     with _db() as db:
         rows = db.execute(
-            """SELECT DISTINCT c.client_id,c.client_name,c.created_at
+            """SELECT c.client_id,c.client_name,c.created_at
                FROM oauth_clients c
-               JOIN oauth_refresh_tokens r ON r.client_id=c.client_id
-              WHERE r.user_id=? AND r.revoked_at IS NULL
-              ORDER BY c.created_at DESC""",
+               JOIN oauth_client_users cu ON cu.client_id=c.client_id
+              WHERE cu.user_id=?
+              ORDER BY cu.authorized_at DESC,c.created_at DESC""",
             (user.id,),
         ).fetchall()
     return JSONResponse({"clients": [{"client_id": r["client_id"], "client_name": r["client_name"], "created_at": r["created_at"]} for r in rows]})

@@ -31,7 +31,9 @@ class OAuthProvider:
             CREATE TABLE IF NOT EXISTS oauth_requests(request_id TEXT PRIMARY KEY,client_id TEXT NOT NULL,redirect_uri TEXT NOT NULL,state TEXT,scope TEXT NOT NULL,code_challenge TEXT NOT NULL,expires_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS oauth_codes(code_hash TEXT PRIMARY KEY,client_id TEXT NOT NULL,user_id TEXT NOT NULL,redirect_uri TEXT NOT NULL,scope TEXT NOT NULL,code_challenge TEXT NOT NULL,expires_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS oauth_refresh_tokens(token_hash TEXT PRIMARY KEY,client_id TEXT NOT NULL,user_id TEXT NOT NULL,scope TEXT NOT NULL,expires_at REAL NOT NULL,revoked_at REAL);
+            CREATE TABLE IF NOT EXISTS oauth_client_users(client_id TEXT NOT NULL,user_id TEXT NOT NULL,authorized_at REAL NOT NULL,PRIMARY KEY(client_id,user_id));
             """)
+            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) SELECT client_id,user_id,MIN(expires_at-7776000) FROM oauth_refresh_tokens GROUP BY client_id,user_id")
 
     async def form(self, request: Request) -> dict[str, str]:
         raw = (await request.body()).decode("utf-8", "replace")
@@ -114,6 +116,7 @@ class OAuthProvider:
             return self.err(uri,"access_denied",state)
         code=secrets.token_urlsafe(32)
         with self.db() as db:
+            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
             db.execute("INSERT INTO oauth_codes VALUES(?,?,?,?,?,?,?)",(self.h(code),r["client_id"],u.id,uri,r["scope"],r["code_challenge"],time.time()+300)); db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
         self.auth.audit(u.id,"oauth.authorize",str(r["client_id"]),{"scope":str(r["scope"])}); q={"code":code}; q.update({"state":state} if state else {}); return RedirectResponse(uri+("&" if "?" in uri else "?")+urlencode(q),302)
 
