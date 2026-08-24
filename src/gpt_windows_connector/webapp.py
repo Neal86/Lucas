@@ -160,8 +160,14 @@ def _dashboard_html() -> str:
     return html
 
 
-async def home(_: Request):
-    return HTMLResponse(_landing_html())
+async def home(request: Request):
+    html = _landing_html()
+    try:
+        _auth_user(request)
+        html = html.replace('Sign in <span>→</span>', 'Dashboard <span>→</span>', 1)
+    except Exception:
+        pass
+    return HTMLResponse(html)
 
 
 async def dashboard(_: Request):

@@ -341,10 +341,7 @@ async def auth_google_callback(request: Request):
         user = auth.google_login(sub=str(info.get("sub", "")), email=str(info.get("email", "")), name=info.get("name"), picture=info.get("picture"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.google_login")
-        if settings.auth_success_url:
-            response = RedirectResponse(f"{settings.auth_success_url}#access_token={quote(token)}", status_code=302)
-        else:
-            response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
+        response = RedirectResponse("/dashboard", status_code=302)
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
         return response
     except Exception as exc:
