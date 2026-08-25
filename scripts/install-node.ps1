@@ -96,13 +96,20 @@ if (-not (Test-Path $VenvPython)) {
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) { throw "Failed to create the Lucas Python runtime." }
 }
 
-if (Test-Path $TrayPidFile) {
-  try {
-    $TrayPid = [int](Get-Content -Raw -Path $TrayPidFile).Trim()
-    Stop-Process -Id $TrayPid -Force -ErrorAction SilentlyContinue
-  } catch {}
+# Stop every old Lucas tray/node process, including the base-Python child processes
+# created behind venv launchers. Leaving those children alive causes duplicate tray
+# agents and stale local status after upgrades.
+$LucasRuntimePattern = [regex]::Escape((Join-Path $InstallDir "runtime"))
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+  $CommandLine = [string]$_.CommandLine
+  $CommandLine -and (
+    $CommandLine -match 'gpt_windows_connector\.tray' -or
+    (($CommandLine -match $LucasRuntimePattern) -and ($CommandLine -match 'lucas-node\.exe|gwc-node\.exe|gpt_windows_connector\.node'))
+  )
+} | ForEach-Object {
+  try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
 }
-Get-Process -Name "lucas-node","gwc-node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Remove-Item -Force -ErrorAction SilentlyContinue $TrayPidFile
 
 Write-Host "[Lucas] Installing the latest Lucas Node..." -ForegroundColor Yellow
 & $VenvPython -m pip install --disable-pip-version-check --upgrade pip | Out-Null
@@ -187,11 +194,12 @@ Write-Host "[Lucas] Installing background startup..." -ForegroundColor Green
 if (-not (Test-Path $VenvPythonw)) { throw "Lucas background launcher was not installed correctly." }
 
 $TaskAction = New-ScheduledTaskAction -Execute $VenvPythonw -Argument "-m gpt_windows_connector.tray"
-$TaskTrigger = New-ScheduledTaskTrigger -AtLogOn
+$TaskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $TaskSettings = New-ScheduledTaskSettingsSet `
   -StartWhenAvailable `
   -AllowStartIfOnBatteries `
   -DontStopIfGoingOnBatteries `
+  -DontStopOnIdleEnd `
   -RestartCount 999 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
   -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
