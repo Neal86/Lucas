@@ -21,6 +21,7 @@ STATUS_FILE = CONFIG_DIR / "node-status.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
 TRAY_LOG_FILE = CONFIG_DIR / "lucas-tray.log"
 PID_FILE = CONFIG_DIR / "lucas-tray.pid"
+STATUS_STALE_SECONDS = 45.0
 
 log = logging.getLogger("lucas.tray")
 
@@ -35,7 +36,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _save_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(path)
 
@@ -70,10 +71,19 @@ def _setup_logging() -> None:
 def _message_box(text: str, title: str = APP_NAME, flags: int = 0x40) -> int:
     try:
         import ctypes
-
         return int(ctypes.windll.user32.MessageBoxW(None, text, title, flags))
     except Exception:
         return 0
+
+
+def _status_label(status: str) -> str:
+    return {
+        "Online": "●  Online",
+        "Connecting": "◐  Connecting…",
+        "Reconnecting": "↻  Reconnecting…",
+        "Disconnected": "○  Disconnected",
+        "Offline": "○  Offline",
+    }.get(status, f"○  {status or 'Offline'}")
 
 
 class LucasTray:
@@ -86,6 +96,8 @@ class LucasTray:
         self._icon: Any = None
         self._last_icon_state = ""
         self._last_menu_state = ""
+        self._ever_online = False
+        self._restart_attempts = 0
 
     def _node_executable(self) -> Path:
         scripts = Path(sys.executable).resolve().parent
@@ -101,15 +113,11 @@ class LucasTray:
                 return
             executable = self._node_executable()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self._process = subprocess.Popen(
-                [str(executable)],
-                cwd=str(CONFIG_DIR),
-                creationflags=flags,
-                close_fds=True,
-            )
-            self._status = "Connecting"
+            self._process = subprocess.Popen([str(executable)], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            self._status = "Reconnecting" if self._ever_online else "Connecting"
             self._detail = ""
-            log.info("Started Lucas Node pid=%s", self._process.pid)
+            self._restart_attempts += 1
+            log.info("Started Lucas Node pid=%s attempt=%s", self._process.pid, self._restart_attempts)
 
     def _stop_node(self) -> None:
         with self._lock:
@@ -137,7 +145,7 @@ class LucasTray:
         if enabled:
             self._set_connection_enabled(False)
             self._stop_node()
-            self._status = "Offline"
+            self._status = "Disconnected"
             self._detail = "Disconnected by user"
             self._write_local_status()
         else:
@@ -154,6 +162,7 @@ class LucasTray:
     def _reconnect(self, icon: Any = None, item: Any = None) -> None:
         self._set_connection_enabled(True)
         self._stop_node()
+        self._status = "Reconnecting"
         try:
             self._spawn_node()
         except Exception as exc:
@@ -166,12 +175,9 @@ class LucasTray:
     def _toggle_startup(self, icon: Any = None, item: Any = None) -> None:
         config = _load_config()
         enabled = not _startup_enabled(config)
-        command = ["schtasks", "/Change", "/TN", TASK_NAME, "/ENABLE" if enabled else "/DISABLE"]
         completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ["schtasks", "/Change", "/TN", TASK_NAME, "/ENABLE" if enabled else "/DISABLE"],
+            capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
             message = (completed.stderr or completed.stdout or "Could not update Windows startup task.").strip()
@@ -199,15 +205,10 @@ class LucasTray:
         try:
             import tkinter as tk
             from tkinter import simpledialog
-
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
-            code = simpledialog.askstring(
-                "Re-pair Lucas",
-                "Generate a new pairing code in Lucas > Computer Nodes,\nthen enter it here:",
-                parent=root,
-            )
+            code = simpledialog.askstring("Re-pair Lucas", "Generate a new pairing code in Lucas > Computer Nodes,\nthen enter it here:", parent=root)
             root.destroy()
         except Exception as exc:
             log.exception("Could not open re-pair dialog")
@@ -245,14 +246,7 @@ class LucasTray:
 
     def _write_local_status(self) -> None:
         try:
-            _save_json(
-                STATUS_FILE,
-                {
-                    "status": self._status,
-                    "detail": self._detail,
-                    "time": time.time(),
-                },
-            )
+            _save_json(STATUS_FILE, {"status": self._status, "detail": self._detail, "time": time.time(), "source": "tray"})
         except Exception:
             log.exception("Could not write tray status")
 
@@ -265,34 +259,42 @@ class LucasTray:
             with self._lock:
                 if self._process is process:
                     self._process = None
-            self._status = "Reconnecting" if _connection_enabled(_load_config()) else "Offline"
+            self._status = "Reconnecting" if _connection_enabled(_load_config()) else "Disconnected"
             self._detail = f"Node exited with code {exit_code}"
+            log.warning("Lucas Node exited unexpectedly with code %s", exit_code)
             return
+
         status = _load_json(STATUS_FILE)
-        try:
-            status_pid = int(status.get("pid") or 0)
-        except (TypeError, ValueError):
-            status_pid = 0
-        if status_pid != process.pid:
-            return
         value = str(status.get("status") or "").strip()
+        try:
+            status_time = float(status.get("time") or 0.0)
+        except (TypeError, ValueError):
+            status_time = 0.0
+        age = time.time() - status_time if status_time else float("inf")
+        if age > STATUS_STALE_SECONDS:
+            if self._status == "Online":
+                self._status = "Reconnecting"
+                self._detail = "Waiting for node heartbeat"
+            return
         if value in {"Online", "Connecting", "Offline", "Reconnecting"}:
             self._status = value
             self._detail = str(status.get("detail") or "")
+            if value == "Online":
+                self._ever_online = True
+                self._restart_attempts = 0
 
     def _make_icon(self, status: str) -> Any:
         from PIL import Image, ImageDraw, ImageFont
-
         palette = {
             "Online": (33, 180, 92, 255),
             "Connecting": (245, 166, 35, 255),
             "Reconnecting": (245, 166, 35, 255),
+            "Disconnected": (120, 126, 137, 255),
             "Offline": (120, 126, 137, 255),
         }
         image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        fill = palette.get(status, palette["Offline"])
-        draw.rounded_rectangle((5, 5, 59, 59), radius=14, fill=fill)
+        draw.rounded_rectangle((5, 5, 59, 59), radius=14, fill=palette.get(status, palette["Offline"]))
         try:
             font = ImageFont.truetype("segoeuib.ttf", 37)
         except OSError:
@@ -305,38 +307,43 @@ class LucasTray:
         if icon is None:
             return
         config = _load_config()
-        menu_state = f"{_connection_enabled(config)}:{_startup_enabled(config)}:{self._status}"
+        menu_state = f"{_connection_enabled(config)}:{_startup_enabled(config)}:{self._status}:{self._detail}"
         if force or self._last_icon_state != self._status:
             icon.icon = self._make_icon(self._status)
-            icon.title = f"Lucas Node - {self._status}"
+            icon.title = f"Lucas • {self._status}"
             self._last_icon_state = self._status
         if force or self._last_menu_state != menu_state:
-            icon.update_menu()
+            try:
+                icon.update_menu()
+            except Exception:
+                log.exception("Could not refresh tray menu")
             self._last_menu_state = menu_state
 
     def _supervise(self) -> None:
         while not self._stop.wait(1.0):
-            config = _load_config()
-            enabled = _connection_enabled(config)
-            if enabled:
-                process = self._process
-                if process is None or process.poll() is not None:
-                    self._status = "Reconnecting" if process is not None else "Connecting"
-                    try:
-                        self._spawn_node()
-                    except Exception as exc:
-                        self._status = "Offline"
-                        self._detail = str(exc)
-                        log.warning("Node launch failed; retrying: %s", exc)
-                self._read_node_status()
-            else:
-                self._status = "Offline"
-                self._detail = "Disconnected by user"
-            self._refresh_icon()
+            try:
+                config = _load_config()
+                enabled = _connection_enabled(config)
+                if enabled:
+                    process = self._process
+                    if process is None or process.poll() is not None:
+                        self._status = "Reconnecting" if self._ever_online else "Connecting"
+                        try:
+                            self._spawn_node()
+                        except Exception as exc:
+                            self._status = "Offline"
+                            self._detail = str(exc)
+                            log.warning("Node launch failed; retrying: %s", exc)
+                    self._read_node_status()
+                else:
+                    self._status = "Disconnected"
+                    self._detail = "Disconnected by user"
+                self._refresh_icon()
+            except Exception:
+                log.exception("Tray supervisor iteration failed; continuing")
 
     def run(self) -> None:
         import pystray
-
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         PID_FILE.write_text(str(os.getpid()), encoding="ascii")
         config = _load_config()
@@ -345,30 +352,23 @@ class LucasTray:
         _save_config(config)
 
         menu = pystray.Menu(
-            pystray.MenuItem(lambda item: f"Lucas Node: {self._status}", lambda icon, item: None, enabled=False),
+            pystray.MenuItem("Lucas", lambda icon, item: None, enabled=False),
+            pystray.MenuItem(lambda item: _status_label(self._status), lambda icon, item: None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(
-                lambda item: "Disconnect" if _connection_enabled(_load_config()) else "Connect",
-                self._toggle_connection,
-            ),
-            pystray.MenuItem(
-                "Reconnect now",
-                self._reconnect,
-                enabled=lambda item: _connection_enabled(_load_config()),
-            ),
-            pystray.MenuItem(
-                "Launch at startup",
-                self._toggle_startup,
-                checked=lambda item: _startup_enabled(_load_config()),
-            ),
+            pystray.MenuItem(lambda item: "Disconnect" if _connection_enabled(_load_config()) else "Connect", self._toggle_connection),
+            pystray.MenuItem("Reconnect now", self._reconnect, enabled=lambda item: _connection_enabled(_load_config())),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open Lucas Dashboard", self._open_dashboard, default=True),
+            pystray.MenuItem("Launch at startup", self._toggle_startup, checked=lambda item: _startup_enabled(_load_config())),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Open Dashboard", self._open_dashboard, default=True),
             pystray.MenuItem("View logs", self._view_logs),
             pystray.MenuItem("Re-pair this computer", self._repair),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit Lucas Node", self._exit),
+            pystray.MenuItem("Exit Lucas", self._exit),
         )
-        self._icon = pystray.Icon("Lucas", self._make_icon("Connecting"), "Lucas Node - Connecting", menu)
+        initial = "Disconnected" if not _connection_enabled(config) else "Connecting"
+        self._status = initial
+        self._icon = pystray.Icon("Lucas", self._make_icon(initial), f"Lucas • {initial}", menu)
         worker = threading.Thread(target=self._supervise, name="lucas-tray-supervisor", daemon=True)
         worker.start()
         try:
@@ -386,8 +386,12 @@ def main() -> None:
     if sys.platform != "win32":
         raise SystemExit("Lucas tray is available on Windows only.")
     _setup_logging()
-    log.info("Lucas tray starting")
-    LucasTray().run()
+    log.info("Lucas tray starting pid=%s", os.getpid())
+    try:
+        LucasTray().run()
+    except Exception:
+        log.exception("Lucas tray crashed")
+        raise
 
 
 if __name__ == "__main__":
