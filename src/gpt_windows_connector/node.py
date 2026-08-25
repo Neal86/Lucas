@@ -51,7 +51,7 @@ def _write_status(status: str, detail: str = "") -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     temporary = STATUS_FILE.with_suffix(".tmp")
     temporary.write_text(
-        json.dumps({"status": status, "detail": detail, "time": time.time()}, ensure_ascii=False, indent=2),
+        json.dumps({"status": status, "detail": detail, "time": time.time(), "pid": os.getpid()}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     temporary.replace(STATUS_FILE)

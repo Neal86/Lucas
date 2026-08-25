@@ -258,14 +258,23 @@ class LucasTray:
 
     def _read_node_status(self) -> None:
         process = self._process
-        if process and process.poll() is not None:
+        if process is None:
+            return
+        if process.poll() is not None:
             exit_code = process.returncode
             with self._lock:
                 if self._process is process:
                     self._process = None
             self._status = "Reconnecting" if _connection_enabled(_load_config()) else "Offline"
             self._detail = f"Node exited with code {exit_code}"
+            return
         status = _load_json(STATUS_FILE)
+        try:
+            status_pid = int(status.get("pid") or 0)
+        except (TypeError, ValueError):
+            status_pid = 0
+        if status_pid != process.pid:
+            return
         value = str(status.get("status") or "").strip()
         if value in {"Online", "Connecting", "Offline", "Reconnecting"}:
             self._status = value
@@ -336,7 +345,7 @@ class LucasTray:
         _save_config(config)
 
         menu = pystray.Menu(
-            pystray.MenuItem(lambda item: f"Lucas Node: {self._status}", None, enabled=False),
+            pystray.MenuItem(lambda item: f"Lucas Node: {self._status}", lambda icon, item: None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(
                 lambda item: "Disconnect" if _connection_enabled(_load_config()) else "Connect",
