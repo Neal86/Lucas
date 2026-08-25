@@ -225,16 +225,10 @@ if (-not $LaunchAtStartup) {
 }
 
 Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundColor Green
-if ($LaunchAtStartup) {
-  try {
-    Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-  } catch {
-    & schtasks.exe /Run /TN $TaskName | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Failed to start the Lucas background task." }
-  }
-} else {
-  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
-}
+# Start the tray directly for the current session. The scheduled task is the
+# watchdog for future logons/restarts; starting it here can be unreliable while
+# the installer is replacing the same runtime files.
+Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
 Start-Sleep -Seconds 2
 
 Write-Host ""
