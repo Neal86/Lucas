@@ -49,9 +49,9 @@ def _save_config(config: dict[str, object]) -> None:
 
 def _write_status(status: str, detail: str = "") -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    temporary = STATUS_FILE.with_suffix(".tmp")
+    temporary = STATUS_FILE.with_name(f"{STATUS_FILE.name}.{os.getpid()}.tmp")
     temporary.write_text(
-        json.dumps({"status": status, "detail": detail, "time": time.time(), "pid": os.getpid()}, ensure_ascii=False, indent=2),
+        json.dumps({"status": status, "detail": detail, "time": time.time(), "pid": os.getpid(), "source": "node"}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     temporary.replace(STATUS_FILE)
@@ -281,7 +281,9 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                     raw = await asyncio.wait_for(ws.recv(), timeout=15)
                 except asyncio.TimeoutError:
                     await send_json({"type": "heartbeat", "time": time.time()})
+                    _write_status("Online")
                     continue
+                _write_status("Online")
                 message = json.loads(raw)
                 if message.get("type") != "request":
                     continue
