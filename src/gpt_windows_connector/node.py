@@ -22,7 +22,8 @@ APP_NAME = "Lucas"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
-DEFAULT_GATEWAY = "wss://lucas.autozon.xyz/ws/node"
+STATUS_FILE = CONFIG_DIR / "node-status.json"
+DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
 
@@ -44,6 +45,16 @@ def _save_config(config: dict[str, object]) -> None:
     temporary = CONFIG_FILE.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(CONFIG_FILE)
+
+
+def _write_status(status: str, detail: str = "") -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    temporary = STATUS_FILE.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"status": status, "detail": detail, "time": time.time()}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(STATUS_FILE)
 
 
 def _configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
@@ -242,6 +253,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 executor.policy = type(executor.policy)(str(config.get("permission_level") or settings.permission_level))
                 log.info("Applied Lucas web configuration without reconnecting")
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
+        _write_status("Online")
         send_lock = asyncio.Lock()
         request_tasks: set[asyncio.Task[None]] = set()
 
@@ -326,12 +338,14 @@ async def run_node() -> None:
             _apply_config(config)
             settings = NodeSettings.from_env()
             executor = Executor(settings.allowed_roots, settings.permission_level)
+            _write_status("Connecting")
             await _serve_connection(settings, executor)
             delay = 1.0
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             log.warning("Disconnected: %s; retrying in %.1fs", exc, delay)
+            _write_status("Reconnecting", str(exc))
             await asyncio.sleep(delay)
             delay = min(delay * 2, 30.0)
 
@@ -353,6 +367,7 @@ def main() -> None:
     try:
         asyncio.run(run_node())
     except KeyboardInterrupt:
+        _write_status("Offline", "Stopped by user")
         log.info("Lucas Node stopped by user.")
 
 
