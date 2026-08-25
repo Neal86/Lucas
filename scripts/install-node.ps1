@@ -26,6 +26,9 @@ $Venv = Join-Path $InstallDir "runtime"
 $ConfigFile = Join-Path $InstallDir "node-config.json"
 $StateFile = Join-Path $InstallDir "node-state.json"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
+$VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
+$TrayPidFile = Join-Path $InstallDir "lucas-tray.pid"
+$TaskName = "Lucas Node"
 
 $SavedState = $null
 $HasSavedToken = $false
@@ -93,6 +96,12 @@ if (-not (Test-Path $VenvPython)) {
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) { throw "Failed to create the Lucas Python runtime." }
 }
 
+if (Test-Path $TrayPidFile) {
+  try {
+    $TrayPid = [int](Get-Content -Raw -Path $TrayPidFile).Trim()
+    Stop-Process -Id $TrayPid -Force -ErrorAction SilentlyContinue
+  } catch {}
+}
 Get-Process -Name "lucas-node","gwc-node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 Write-Host "[Lucas] Installing the latest Lucas Node..." -ForegroundColor Yellow
@@ -103,7 +112,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to update pip." }
 $PackageAlreadyInstalled = ($LASTEXITCODE -eq 0)
 $PackageUrl = "https://github.com/Neal86/Lucas/archive/refs/heads/main.zip"
 if ($PackageAlreadyInstalled) {
-  & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-deps --no-cache-dir $PackageUrl
+  & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-cache-dir $PackageUrl
 } else {
   & $VenvPython -m pip install --disable-pip-version-check --no-cache-dir $PackageUrl
 }
@@ -140,6 +149,11 @@ if ($ExistingConfig -and $ExistingConfig.allowed_roots -and @($ExistingConfig.al
 }
 if ($ConfigRoots.Count -eq 0) { $ConfigRoots = @($AllowedRoot) }
 
+$ConnectionEnabled = $true
+if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled) { $ConnectionEnabled = [bool]$ExistingConfig.connection_enabled }
+$LaunchAtStartup = $true
+if ($ExistingConfig -and $null -ne $ExistingConfig.launch_at_startup) { $LaunchAtStartup = [bool]$ExistingConfig.launch_at_startup }
+
 $ConfigPairingCode = $null
 if (-not $HasSavedToken) { $ConfigPairingCode = $PairingCode.Trim() }
 $Config = [ordered]@{
@@ -149,6 +163,8 @@ $Config = [ordered]@{
   pairing_code = $ConfigPairingCode
   permission_level = $ConfigPermission
   allowed_roots = $ConfigRoots
+  connection_enabled = $ConnectionEnabled
+  launch_at_startup = $LaunchAtStartup
 }
 $Config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
 
@@ -166,13 +182,48 @@ Write-Host "  Node:      $($Config.node_name)"
 Write-Host "  Gateway:   $($Config.gateway_ws_url)"
 Write-Host "  Permission:$($Config.permission_level)"
 Write-Host ""
-Write-Host "[Lucas] Connecting..." -ForegroundColor Green
-Write-Host "After pairing, manage this computer from Lucas > Computer Nodes."
-Write-Host "Press Ctrl+C to stop the local node process."
-Write-Host ""
+Write-Host "[Lucas] Installing background startup..." -ForegroundColor Green
 
-$LucasNode = Join-Path $Venv "Scripts\lucas-node.exe"
-if (-not (Test-Path $LucasNode)) { $LucasNode = Join-Path $Venv "Scripts\gwc-node.exe" }
-if (-not (Test-Path $LucasNode)) { throw "Lucas Node launcher was not installed correctly." }
-& $LucasNode
-exit $LASTEXITCODE
+if (-not (Test-Path $VenvPythonw)) { throw "Lucas background launcher was not installed correctly." }
+
+$TaskAction = New-ScheduledTaskAction -Execute $VenvPythonw -Argument "-m gpt_windows_connector.tray"
+$TaskTrigger = New-ScheduledTaskTrigger -AtLogOn
+$TaskSettings = New-ScheduledTaskSettingsSet `
+  -StartWhenAvailable `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -RestartCount 999 `
+  -RestartInterval (New-TimeSpan -Minutes 1) `
+  -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+  -MultipleInstances IgnoreNew
+
+try {
+  Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $TaskAction `
+    -Trigger $TaskTrigger `
+    -Settings $TaskSettings `
+    -Description "Lucas Windows Node background agent" `
+    -Force | Out-Null
+} catch {
+  Write-Host "[Lucas] ScheduledTasks registration failed, using compatibility mode..." -ForegroundColor Yellow
+  $TaskCommand = "`"$VenvPythonw`" -m gpt_windows_connector.tray"
+  & schtasks.exe /Create /TN $TaskName /SC ONLOGON /TR $TaskCommand /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Failed to register Lucas startup task." }
+}
+
+if (-not $LaunchAtStartup) {
+  try { Disable-ScheduledTask -TaskName $TaskName | Out-Null } catch { & schtasks.exe /Change /TN $TaskName /DISABLE | Out-Null }
+}
+
+Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundColor Green
+Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
+Start-Sleep -Seconds 2
+
+Write-Host ""
+Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
+Write-Host "Lucas now runs in the background with a system tray icon."
+Write-Host "Use the tray icon to Connect/Disconnect, reconnect, view logs, re-pair, or change startup behavior."
+Write-Host "After reboot or sign-in, Lucas starts automatically when Launch at startup is enabled."
+Write-Host ""
+exit 0
