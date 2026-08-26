@@ -6,6 +6,7 @@ from pathlib import Path
 from . import browser, computer, files, git_tools, processes, shell
 from .config import resolve_in_workspace, validate_workspace
 from .permissions import NodePolicy
+from .path_guard import validate_command_paths, validate_launch_target
 
 
 class Executor:
@@ -58,6 +59,20 @@ class Executor:
         self.policy.authorize(method)
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
+        if method in {"shell.run", "process.start"}:
+            if workspace is None:
+                raise PermissionError(f"{method} requires a project workspace")
+            validate_command_paths(workspace, self.allowed_roots, str(p.get("command") or ""))
+        elif method == "computer.launch":
+            if workspace is None:
+                raise PermissionError("computer.launch requires a project workspace")
+            validate_launch_target(
+                workspace,
+                self.allowed_roots,
+                str(p.get("target") or ""),
+                str(p.get("arguments") or ""),
+                self.policy.level,
+            )
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
             "workspace.browse": lambda: self.browse_workspaces(**p),

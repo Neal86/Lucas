@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+import ntpath
+import re
+from pathlib import Path
+
+_WINDOWS_ABSOLUTE = re.compile(r"(?i)(?<![A-Za-z0-9_])([A-Za-z]:[\\/][^\r\n\t\"'`;|&<>]*)")
+_UNC = re.compile(r"(?<![\\])((?:\\\\|//)[^\r\n\t\"'`;|&<>]+)")
+_DRIVE_SWITCH = re.compile(r"(?i)(?:^|[;&|]\s*|\s)([A-Za-z]:)(?=\s*(?:$|[;&|]))")
+_PARENT = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)")
+
+def _windows_norm(value: str) -> str:
+    return ntpath.normcase(ntpath.normpath(value.strip().strip("\"'")))
+
+def _is_under(candidate: str, root: str) -> bool:
+    candidate_n = _windows_norm(candidate)
+    root_n = _windows_norm(root)
+    try:
+        return ntpath.commonpath([candidate_n, root_n]) == root_n
+    except ValueError:
+        return False
+
+def _allowed_strings(allowed_roots: tuple[Path, ...]) -> tuple[str, ...]:
+    return tuple(str(root) for root in allowed_roots)
+
+def validate_command_paths(workspace: Path, allowed_roots: tuple[Path, ...], command: str) -> None:
+    text = str(command or "")
+    roots = _allowed_strings(allowed_roots)
+    for match in _WINDOWS_ABSOLUTE.finditer(text):
+        candidate = match.group(1).strip()
+        if candidate and not any(_is_under(candidate, root) for root in roots):
+            raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {candidate}")
+    for match in _UNC.finditer(text):
+        candidate = match.group(1).strip()
+        if candidate and not any(_is_under(candidate, root) for root in roots):
+            raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {candidate}")
+    for match in _DRIVE_SWITCH.finditer(text):
+        drive = match.group(1).casefold()
+        if not any(ntpath.splitdrive(_windows_norm(root))[0].casefold() == drive for root in roots):
+            raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {drive}")
+    if _PARENT.search(text):
+        raise PermissionError("PATH_OUTSIDE_ALLOWED_FOLDERS: parent traversal is not allowed in shell/process commands")
+
+def validate_launch_target(workspace: Path, allowed_roots: tuple[Path, ...], target: str, arguments: str = "", permission_level: str = "operate") -> None:
+    validate_command_paths(workspace, allowed_roots, f"{target} {arguments}")
+    if permission_level == "admin":
+        return
+    base = ntpath.basename(str(target)).lower()
+    if base in {"powershell.exe", "powershell", "pwsh.exe", "pwsh", "cmd.exe", "cmd", "wsl.exe", "wsl", "bash.exe", "bash"}:
+        raise PermissionError(f"SHELL_LAUNCH_BLOCKED: {target}; use shell.run inside an Allowed Folder instead")
