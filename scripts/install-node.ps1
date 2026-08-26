@@ -21,6 +21,39 @@ function Test-Python311 {
   }
 }
 
+function Resolve-Python311 {
+  if (Get-Command py -ErrorAction SilentlyContinue) {
+    foreach ($Selector in @("-3.14", "-3.13", "-3.12", "-3.11", "-3")) {
+      if (Test-Python311 "py" @($Selector)) {
+        return [pscustomobject]@{ Command = "py"; Arguments = @($Selector) }
+      }
+    }
+  }
+
+  $PythonExe = Get-Command python -ErrorAction SilentlyContinue
+  if ($PythonExe -and $PythonExe.Source -notmatch '\\WindowsApps\\' -and (Test-Python311 $PythonExe.Source @())) {
+    return [pscustomobject]@{ Command = $PythonExe.Source; Arguments = @() }
+  }
+
+  $CandidatePaths = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python314\python.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python313\python.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\python.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\python.exe"),
+    (Join-Path $env:ProgramFiles "Python314\python.exe"),
+    (Join-Path $env:ProgramFiles "Python313\python.exe"),
+    (Join-Path $env:ProgramFiles "Python312\python.exe"),
+    (Join-Path $env:ProgramFiles "Python311\python.exe")
+  )
+  foreach ($Candidate in $CandidatePaths) {
+    if ((Test-Path $Candidate) -and (Test-Python311 $Candidate @())) {
+      return [pscustomobject]@{ Command = $Candidate; Arguments = @() }
+    }
+  }
+
+  return $null
+}
+
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $Venv = Join-Path $InstallDir "runtime"
 $ConfigFile = Join-Path $InstallDir "node-config.json"
@@ -60,23 +93,49 @@ if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
   throw "A Lucas pairing code is required. Generate one from Lucas > Computer Nodes."
 }
 
-$PythonCommand = $null
-$PythonArgs = @()
-if (Get-Command py -ErrorAction SilentlyContinue) {
-  foreach ($Selector in @("-3.13", "-3.12", "-3.11", "-3")) {
-    if (Test-Python311 "py" @($Selector)) {
-      $PythonCommand = "py"
-      $PythonArgs = @($Selector)
-      break
+$Python = Resolve-Python311
+if (-not $Python) {
+  Write-Host "[Lucas] Python 3.11+ not found. Installing automatically..." -ForegroundColor Yellow
+
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    Write-Host "[Lucas] Installing Python 3.12 with Windows Package Manager..." -ForegroundColor Yellow
+    try {
+      & winget install --id Python.Python.3.12 --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+    } catch {
+      Write-Host "[Lucas] Windows Package Manager install was unavailable; trying the direct installer..." -ForegroundColor Yellow
     }
+    Start-Sleep -Seconds 2
+    $Python = Resolve-Python311
+  }
+
+  if (-not $Python) {
+    $PythonVersion = "3.12.10"
+    $PythonInstaller = Join-Path $env:TEMP "python-$PythonVersion-amd64.exe"
+    $PythonUrl = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-amd64.exe"
+    Write-Host "[Lucas] Downloading the official Python runtime..." -ForegroundColor Yellow
+    try {
+      [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+      Invoke-WebRequest -UseBasicParsing $PythonUrl -OutFile $PythonInstaller
+      $InstallProcess = Start-Process -FilePath $PythonInstaller -ArgumentList "/quiet","InstallAllUsers=0","PrependPath=0","Include_launcher=1","Include_pip=1","Include_test=0","Include_doc=0","Shortcuts=0" -Wait -PassThru
+      if ($InstallProcess.ExitCode -ne 0) {
+        Write-Host "[Lucas] Python installer exited with code $($InstallProcess.ExitCode)." -ForegroundColor Yellow
+      }
+    } catch {
+      Write-Host "[Lucas] Automatic Python installation failed: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+      Remove-Item -Force -ErrorAction SilentlyContinue $PythonInstaller
+    }
+    $Python = Resolve-Python311
   }
 }
-if (-not $PythonCommand -and (Get-Command python -ErrorAction SilentlyContinue)) {
-  if (Test-Python311 "python" @()) { $PythonCommand = "python" }
+
+if (-not $Python) {
+  throw "Lucas could not install Python 3.11+ automatically. Check the internet connection or software-installation policy and run Lucas-Node.bat again."
 }
-if (-not $PythonCommand) {
-  throw "Python 3.11+ is required. Install Python 3.11 or newer, then run Lucas-Node.bat again."
-}
+
+$PythonCommand = [string]$Python.Command
+$PythonArgs = @($Python.Arguments)
+Write-Host "[Lucas] Python runtime ready." -ForegroundColor Green
 
 if (Test-Path $VenvPython) {
   $VenvOk = $false
