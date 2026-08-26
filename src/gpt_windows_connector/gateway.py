@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import secrets
 import sqlite3
 import time
 import uuid
+
+import httpx
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,17 +34,21 @@ from .auth import (
 )
 from .config import GatewaySettings
 from .oauth import OAuthProvider
+from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
+registration_security = RegistrationSecurity(db_path)
 
 
 class AuthMiddleware:
     PUBLIC_PATHS = {
         "/health",
         "/auth/register",
+        "/auth/verify-email",
+        "/auth/resend-verification",
         "/auth/login",
         "/auth/google/start",
         "/auth/google/callback",
@@ -291,10 +298,47 @@ async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) ->
     registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return forwarded or (request.client.host if request.client else "unknown")
+
+
+def _registration_rate_ok(request: Request, email: str, *, resend: bool = False) -> bool:
+    ip = _client_ip(request)
+    if resend:
+        return registration_security.allow(f"verify-ip:{ip}", 10, 3600) and registration_security.allow(f"verify-email:{email.lower()}", 6, 3600)
+    return registration_security.allow(f"register-ip:{ip}", 3, 600) and registration_security.allow(f"register-email:{email.lower()}", 3, 3600)
+
+
+async def _verify_turnstile(request: Request, token: str) -> bool:
+    secret = os.getenv("GWC_TURNSTILE_SECRET_KEY", "").strip()
+    if not secret:
+        return True
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", data={"secret": secret, "response": token, "remoteip": _client_ip(request)})
+            return bool(response.json().get("success"))
+    except Exception:
+        return False
+
+
 async def auth_register(request: Request):
     try:
         body = await request.json()
-        user = auth.register(body.get("email", ""), body.get("password", ""), body.get("name"))
+        email = str(body.get("email", "")).strip().lower()
+        if str(body.get("website", "")).strip():
+            return JSONResponse({"error": "Registration could not be completed"}, status_code=400)
+        if not _registration_rate_ok(request, email):
+            return JSONResponse({"error": "Too many registration attempts. Try again later."}, status_code=429)
+        if not await _verify_turnstile(request, str(body.get("turnstile_token", ""))):
+            return JSONResponse({"error": "Human verification failed"}, status_code=400)
+        if email_verification_enabled():
+            email, code = registration_security.start(email, body.get("password", ""), body.get("name"))
+            send_verification_email(email, code)
+            return JSONResponse({"verification_required": True, "email": email}, status_code=202)
+        user = auth.register(email, body.get("password", ""), body.get("name"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.register")
         response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__}, status_code=201)
@@ -302,6 +346,41 @@ async def auth_register(request: Request):
         return response
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
+async def auth_verify_email(request: Request):
+    if not email_verification_enabled():
+        return JSONResponse({"error": "Email verification is not configured"}, status_code=503)
+    try:
+        body = await request.json()
+        user_id = registration_security.verify(str(body.get("email", "")), str(body.get("code", "")))
+        user = auth.get_user(user_id)
+        token = auth.issue_token(user)
+        auth.audit(user.id, "auth.email_verified")
+        response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
+        response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
+        return response
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+async def auth_resend_verification(request: Request):
+    if not email_verification_enabled():
+        return JSONResponse({"error": "Email verification is not configured"}, status_code=503)
+    try:
+        body = await request.json()
+        email = str(body.get("email", "")).strip().lower()
+        if not _registration_rate_ok(request, email, resend=True):
+            return JSONResponse({"error": "Too many verification requests. Try again later."}, status_code=429)
+        email, code = registration_security.resend(email)
+        send_verification_email(email, code)
+        return JSONResponse({"ok": True})
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
 
 
 async def auth_login(request: Request):
@@ -552,6 +631,8 @@ app = Starlette(
         Route("/oauth/token", oauth.token, methods=["POST"]),
         Route("/health", health, methods=["GET"]),
         Route("/auth/register", auth_register, methods=["POST"]),
+        Route("/auth/verify-email", auth_verify_email, methods=["POST"]),
+        Route("/auth/resend-verification", auth_resend_verification, methods=["POST"]),
         Route("/auth/login", auth_login, methods=["POST"]),
         Route("/auth/me", auth_me, methods=["GET"]),
         Route("/auth/google/start", auth_google_start, methods=["GET"]),
