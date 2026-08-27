@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import uuid
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,12 @@ def _has_saved_token() -> bool:
         return bool(str(data.get("node_token") or "").strip()) if isinstance(data, dict) else False
     except (OSError, json.JSONDecodeError):
         return False
+
+def _app_version() -> str:
+    try:
+        return package_version("gpt-windows-connector")
+    except PackageNotFoundError:
+        return "dev"
 
 def _default_node_id() -> str:
     machine = os.environ.get("COMPUTERNAME") or socket.gethostname() or "windows-node"
@@ -130,14 +137,16 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         f=tk.Frame(parent,bg=C["card"],highlightthickness=1,highlightbackground=C["line"]); f.pack(fill="x",pady=(0,16)); return f
     def divider(parent):
         tk.Frame(parent,bg=C["line"],height=1).pack(fill="x",padx=18)
-    def row(parent,heading,desc="",control=None):
+    def row(parent,heading,desc="",control_builder=None):
         r=tk.Frame(parent,bg=C["card"]); r.pack(fill="x",padx=18,pady=13)
         r.grid_columnconfigure(0,weight=1)
         copy=tk.Frame(r,bg=C["card"]); copy.grid(row=0,column=0,sticky="ew")
         tk.Label(copy,text=heading,font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
         if desc: tk.Label(copy,text=desc,font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=560,justify="left").pack(anchor="w",pady=(3,0))
-        if control is not None:
-            control.grid(in_=r,row=0,column=1,sticky="e",padx=(22,0))
+        if control_builder is not None:
+            slot=tk.Frame(r,bg=C["card"]); slot.grid(row=0,column=1,sticky="e",padx=(22,0))
+            control=control_builder(slot)
+            if control is not None and not control.winfo_manager(): control.pack(anchor="e")
         return r
     def button(parent,text,command,primary=False,danger=False):
         bg=C["blue"] if primary else C["control"]; fg=C["white"] if primary else (C["red"] if danger else C["text"])
@@ -161,14 +170,17 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     # 常规
     wrap,body=scroll_page(); pages["常规"]=wrap
     section(body,"电脑"); c=card(body)
-    name_value=tk.Label(c,textvariable=node_name,font=(FONT,10),fg=C["muted"],bg=C["card"])
-    row(c,"电脑名称","Windows 设备名称，只读。网页中的显示名称可单独修改。",name_value); divider(c)
-    row(c,"Node ID","设备唯一标识。",tk.Label(c,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
+    row(c,"电脑名称","Windows 设备名称，只读。网页中的显示名称可单独修改。",lambda p: tk.Label(p,textvariable=node_name,font=(FONT,10),fg=C["muted"],bg=C["card"])); divider(c)
+    row(c,"Node ID","设备唯一标识。",lambda p: tk.Label(p,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
-    row(c,"Gateway","安全 WebSocket 地址。",tk.Entry(c,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
+    row(c,"Gateway","安全 WebSocket 地址。",lambda p: tk.Entry(p,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
     connection_status=tk.StringVar(value="检测中…")
-    connection_status_label=tk.Label(c,textvariable=connection_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"])
-    row(c,"连接状态","实时显示 Lucas 与 Gateway 的配对和连接状态。",connection_status_label); divider(c)
+    connection_status_label=None
+    def build_connection_status(p):
+        nonlocal connection_status_label
+        connection_status_label=tk.Label(p,textvariable=connection_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"])
+        return connection_status_label
+    row(c,"连接状态","实时显示 Lucas 与 Gateway 的配对和连接状态。",build_connection_status); divider(c)
 
     def refresh_connection_status():
         paired=_has_saved_token()
@@ -200,12 +212,20 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         try: root.after(1000,refresh_connection_status)
         except tk.TclError: pass
 
-    pairing_control=tk.Frame(c,bg=C["card"])
+    pairing_control=None
     pairing_status=tk.StringVar(value=("已配对" if _has_saved_token() else "未配对"))
-    pairing_entry=tk.Entry(pairing_control,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20)
-    pairing_status_label=tk.Label(pairing_control,textvariable=pairing_status,font=(FONT,9,"bold"),fg=C["green"],bg=C["card"])
-    pairing_actions=tk.Frame(pairing_control,bg=C["card"])
+    pairing_entry=None
+    pairing_status_label=None
+    pairing_actions=None
     pairing_mode=tk.BooleanVar(value=not _has_saved_token())
+
+    def build_pairing_control(p):
+        nonlocal pairing_control,pairing_entry,pairing_status_label,pairing_actions
+        pairing_control=tk.Frame(p,bg=C["card"])
+        pairing_entry=tk.Entry(pairing_control,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20)
+        pairing_status_label=tk.Label(pairing_control,textvariable=pairing_status,font=(FONT,9,"bold"),fg=C["green"],bg=C["card"])
+        pairing_actions=tk.Frame(pairing_control,bg=C["card"])
+        return pairing_control
 
     def refresh_pairing_control():
         for child in pairing_control.winfo_children():
@@ -242,17 +262,16 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         except OSError as exc:
             messagebox.showerror("Lucas",f"无法取消配对：{exc}")
 
-    row(c,"配对","首次安装、取消配对或重新配对都只在这里完成。Pairing Code 在 Lucas 网页生成。",pairing_control)
+    row(c,"配对","首次安装、取消配对或重新配对都只在这里完成。Pairing Code 在 Lucas 网页生成。",build_pairing_control)
     refresh_pairing_control()
 
     # 安全
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body)
     mode_display=tk.StringVar(value={"read":"只读（Safe）","operate":"标准（Recommended）","admin":"完整访问（Advanced）"}.get(permission.get(),"标准（Recommended）"))
-    mc=combo(c,mode_display,["只读（Safe）","标准（Recommended）","完整访问（Advanced）"],23)
     mode_display.trace_add("write",lambda *_: permission.set({"只读（Safe）":"read","标准（Recommended）":"operate","完整访问（Advanced）":"admin"}.get(mode_display.get(),"operate")))
-    row(c,"默认权限","基础能力上限。完整访问不会绕过 Windows UAC。",mc); divider(c)
-    row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",tk.Label(c,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
+    row(c,"默认权限","基础能力上限。完整访问不会绕过 Windows UAC。",lambda p: combo(p,mode_display,["只读（Safe）","标准（Recommended）","完整访问（Advanced）"],23)); divider(c)
+    row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
     section(body,"审批策略"); c=card(body)
     prs=[
         ("system_info","系统信息读取","读取进程、窗口、系统状态及项目只读信息。"),
@@ -273,9 +292,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         ("high_risk","其他高风险系统修改","磁盘、账户、安全软件、关机重启等高风险操作。"),
     ]
     for i,(k,h,d) in enumerate(prs):
-        row(c,h,d,decision_control(c,approval_vars[k]))
+        row(c,h,d,lambda p,k=k: decision_control(p,approval_vars[k]))
         if i<len(prs)-1: divider(c)
-    divider(c); row(c,"记住本次会话已批准操作","只记住完全相同操作；Lucas 重启后自动清除。",switch(c,remember_approvals))
+    divider(c); row(c,"记住本次会话已批准操作","只记住完全相同操作；Lucas 重启后自动清除。",lambda p: switch(p,remember_approvals))
 
     # 文件访问
     wrap,body=scroll_page(); pages["文件访问"]=wrap
@@ -294,15 +313,15 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         sel=roots_list.curselection()
         if sel: roots_list.delete(sel[0])
     button(acts,"添加文件夹",add_root,primary=True).pack(fill="x",pady=(0,8)); button(acts,"移除",remove_root,danger=True).pack(fill="x")
-    c=card(body); row(c,"硬边界","不允许通过 shell、浏览器上传/下载、进程启动或路径参数绕过 Allowed Folders。",tk.Label(c,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
+    c=card(body); row(c,"硬边界","不允许通过 shell、浏览器上传/下载、进程启动或路径参数绕过 Allowed Folders。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
     # 网络
     wrap,body=scroll_page(); pages["网络"]=wrap
     section(body,"网络访问"); c=card(body)
-    row(c,"外部网络访问","访问互联网、远程 API、Git 远端等。",decision_control(c,network_external)); divider(c)
-    row(c,"本地局域网访问","localhost、私有 IP 与 .local 地址。",decision_control(c,network_lan)); divider(c)
-    row(c,"允许的域名","可选，逗号分隔；为空表示不额外限制域名。支持 *.example.com。",tk.Entry(c,textvariable=allowed_domains,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=40)); divider(c)
-    row(c,"阻止后台静默联网","无法识别目标地址的网络命令必须在本机确认。",switch(c,block_silent_network))
+    row(c,"外部网络访问","访问互联网、远程 API、Git 远端等。",lambda p: decision_control(p,network_external)); divider(c)
+    row(c,"本地局域网访问","localhost、私有 IP 与 .local 地址。",lambda p: decision_control(p,network_lan)); divider(c)
+    row(c,"允许的域名","可选，逗号分隔；为空表示不额外限制域名。支持 *.example.com。",lambda p: tk.Entry(p,textvariable=allowed_domains,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=40)); divider(c)
+    row(c,"阻止后台静默联网","无法识别目标地址的网络命令必须在本机确认。",lambda p: switch(p,block_silent_network))
 
     # 规则
     wrap,body=scroll_page(); pages["规则"]=wrap
@@ -311,13 +330,13 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     tk.Label(c,text="需要确认的操作会把规则摘要一起显示在本机审批窗口。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,10))
     rules_text=tk.Text(c,height=8,font=(FONT,10),bg=C["control"],fg=C["text"],relief="flat",bd=0,wrap="word",padx=10,pady=9)
     rules_text.insert("1.0",rules_initial); rules_text.pack(fill="x",padx=18,pady=(0,14)); divider(c)
-    row(c,"执行前显示规则摘要","审批时显示本地规则。",switch(c,show_rule_summary))
+    row(c,"执行前显示规则摘要","审批时显示本地规则。",lambda p: switch(p,show_rule_summary))
 
     # 系统访问
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body)
-    row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",tk.Label(c,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c)
-    row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),tk.Label(c,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"]))
+    row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c)
+    row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"]))
     c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
 
     desc={
@@ -335,7 +354,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     for name in ("常规","安全","文件访问","网络","规则","系统访问"):
         b=tk.Button(nav_frame,text=name,command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2")
         b.pack(fill="x",pady=1); nav_buttons[name]=b
-    tk.Label(sidebar,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(side="bottom",anchor="w",padx=22,pady=20)
+    sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20)
+    tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w")
+    tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
     footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom")
     fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12)

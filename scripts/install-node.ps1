@@ -319,11 +319,10 @@ Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundCol
 Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
 Start-Sleep -Seconds 2
 
-# First-time setup happens in the same Settings UI used for future re-pairing.
-if (-not $HasSavedToken -and [string]::IsNullOrWhiteSpace($ConfigPairingCode)) {
-  Write-Host "[Lucas] Opening Settings to pair this computer..." -ForegroundColor Cyan
-  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
-}
+# Installation always finishes by opening the Lucas app (Settings). The tray and
+# node are already running in the background; Settings is the visible app surface.
+Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
+Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
 
 Write-Host ""
 Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
