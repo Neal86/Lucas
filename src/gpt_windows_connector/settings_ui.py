@@ -13,6 +13,7 @@ DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
 STATE_FILE = CONFIG_DIR / "node-state.json"
+STATUS_FILE = CONFIG_DIR / "node-status.json"
 
 def _has_saved_token() -> bool:
     try:
