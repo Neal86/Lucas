@@ -17,6 +17,7 @@ import websockets
 
 from .config import NodeSettings
 from .executor import Executor
+from .settings_ui import configure_gui as _configure_gui
 
 APP_NAME = "Lucas"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
