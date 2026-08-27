@@ -7,12 +7,14 @@ from . import browser, computer, files, git_tools, processes, shell
 from .config import resolve_in_workspace, validate_workspace
 from .permissions import NodePolicy
 from .path_guard import validate_command_paths, validate_launch_target
+from .security import LocalSecurityPolicy
 
 
 class Executor:
-    def __init__(self, allowed_roots: tuple[Path, ...], permission_level: str = "operate") -> None:
+    def __init__(self, allowed_roots: tuple[Path, ...], permission_level: str = "operate", config: dict | None = None) -> None:
         self.allowed_roots = tuple(root.resolve() for root in allowed_roots)
         self.policy = NodePolicy(permission_level)
+        self.security = LocalSecurityPolicy(config or {})
 
     def workspace(self, raw: str) -> Path:
         return validate_workspace(self.allowed_roots, raw)
