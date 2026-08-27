@@ -15,7 +15,17 @@ DEFAULT_SECURITY: dict[str, Any] = {
         "shell": "allow",
         "file_write": "ask",
         "file_delete": "ask",
+        "process_control": "ask",
         "service_control": "ask",
+        "registry_system": "always_ask",
+        "software_install": "always_ask",
+        "desktop_control": "ask",
+        "screenshots": "allow",
+        "clipboard": "ask",
+        "browser_control": "ask",
+        "browser_transfer": "always_ask",
+        "git_write": "ask",
+        "git_push": "always_ask",
         "high_risk": "always_ask",
     },
     "remember_approvals": True,
@@ -37,6 +47,13 @@ READ_METHODS = {
 
 FILE_WRITE_METHODS = {"files.write", "files.patch", "files.mkdir", "files.move", "files.copy"}
 FILE_DELETE_METHODS = {"files.delete"}
+PROCESS_CONTROL_METHODS = {"process.start", "process.stop", "computer.launch"}
+DESKTOP_CONTROL_METHODS = {"computer.activate", "computer.click", "computer.move", "computer.drag", "computer.type", "computer.hotkey", "computer.press", "computer.scroll", "computer.ui_click", "computer.ui_set_text"}
+SCREENSHOT_METHODS = {"computer.screenshot", "browser.screenshot"}
+CLIPBOARD_METHODS = {"computer.clipboard_get", "computer.clipboard_set"}
+BROWSER_CONTROL_METHODS = {"browser.connect_cdp", "browser.launch_persistent", "browser.new_page", "browser.navigate", "browser.click", "browser.type", "browser.select", "browser.close"}
+BROWSER_TRANSFER_METHODS = {"browser.upload", "browser.download"}
+GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.commit", "git.pull"}
 NETWORK_METHODS = {"browser.navigate", "browser.new_page", "git.pull", "git.push"}
 
 HIGH_RISK_PATTERNS = [
@@ -50,6 +67,8 @@ SERVICE_PATTERNS = [
     r"\b(?:Start|Stop|Restart|Set)-Service\b", r"\bsc(?:\.exe)?\s+(?:start|stop|pause|continue)\b",
     r"\bnet\s+(?:start|stop)\b",
 ]
+REGISTRY_SYSTEM_PATTERNS = [r"\breg(?:\.exe)?\s+(?:add|delete|import)\b", r"\bSet-ItemProperty\b[^\n]*(?:HKLM:|HKCU:|Registry::)", r"\bpowercfg\b", r"\bbcdedit\b"]
+SOFTWARE_INSTALL_PATTERNS = [r"\bwinget\s+(?:install|uninstall|upgrade)\b", r"\bchoco(?:latey)?\s+(?:install|uninstall|upgrade)\b", r"\bmsiexec(?:\.exe)?\b", r"\bpip\s+install\b", r"\bnpm\s+(?:install|uninstall)\s+-g\b"]
 NETWORK_COMMAND_PATTERNS = [
     r"\bInvoke-WebRequest\b", r"\bInvoke-RestMethod\b", r"\bcurl(?:\.exe)?\b", r"\bwget(?:\.exe)?\b",
     r"\bStart-BitsTransfer\b", r"\bgit\s+(?:clone|pull|push|fetch)\b", r"https?://",
@@ -126,6 +145,22 @@ class LocalSecurityPolicy:
         self.security = _merge_security(self.config.get("security"))
 
     def _category(self, method: str, params: dict[str, Any]) -> str:
+        if method in SCREENSHOT_METHODS:
+            return "screenshots"
+        if method in CLIPBOARD_METHODS:
+            return "clipboard"
+        if method in DESKTOP_CONTROL_METHODS:
+            return "desktop_control"
+        if method in BROWSER_TRANSFER_METHODS:
+            return "browser_transfer"
+        if method in BROWSER_CONTROL_METHODS:
+            return "browser_control"
+        if method in GIT_WRITE_METHODS:
+            return "git_write"
+        if method == "git.push":
+            return "git_push"
+        if method in PROCESS_CONTROL_METHODS:
+            return "process_control"
         if method in READ_METHODS:
             return "system_info"
         if method in FILE_WRITE_METHODS:
@@ -133,14 +168,16 @@ class LocalSecurityPolicy:
         if method in FILE_DELETE_METHODS:
             return "file_delete"
         command = _command_text(method, params)
+        if command and _matches(SOFTWARE_INSTALL_PATTERNS, command):
+            return "software_install"
+        if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
+            return "registry_system"
         if command and _matches(HIGH_RISK_PATTERNS, command):
             return "high_risk"
         if command and _matches(SERVICE_PATTERNS, command):
             return "service_control"
-        if method in {"shell.run", "process.start"}:
+        if method == "shell.run":
             return "shell"
-        if method in {"git.push"}:
-            return "high_risk"
         return "shell"
 
     def _network_decision(self, method: str, params: dict[str, Any]) -> tuple[str, str] | None:
@@ -208,7 +245,17 @@ class LocalSecurityPolicy:
             "shell": "运行命令或程序",
             "file_write": "创建或修改文件",
             "file_delete": "删除文件或目录",
+            "process_control": "启动、停止或控制进程",
             "service_control": "启动、停止或修改 Windows 服务",
-            "high_risk": "执行高风险系统或发布操作",
+            "registry_system": "修改注册表或系统配置",
+            "software_install": "安装、卸载或升级软件",
+            "desktop_control": "控制鼠标、键盘或桌面 UI",
+            "screenshots": "读取屏幕截图",
+            "clipboard": "读取或写入剪贴板",
+            "browser_control": "控制浏览器页面",
+            "browser_transfer": "浏览器上传或下载文件",
+            "git_write": "修改本地 Git 仓库",
+            "git_push": "向 Git 远端推送内容",
+            "high_risk": "执行其他高风险系统操作",
         }
         self._enforce_decision(decision, category, method, params, summary_map.get(category, method))

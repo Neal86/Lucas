@@ -71,6 +71,16 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         "file_write":tk.StringVar(value=str(approval.get("file_write") or "ask")),
         "file_delete":tk.StringVar(value=str(approval.get("file_delete") or "ask")),
         "service_control":tk.StringVar(value=str(approval.get("service_control") or "ask")),
+        "process_control":tk.StringVar(value=str(approval.get("process_control") or "ask")),
+        "desktop_control":tk.StringVar(value=str(approval.get("desktop_control") or "ask")),
+        "screenshots":tk.StringVar(value=str(approval.get("screenshots") or "allow")),
+        "clipboard":tk.StringVar(value=str(approval.get("clipboard") or "ask")),
+        "browser_control":tk.StringVar(value=str(approval.get("browser_control") or "ask")),
+        "browser_transfer":tk.StringVar(value=str(approval.get("browser_transfer") or "always_ask")),
+        "git_write":tk.StringVar(value=str(approval.get("git_write") or "ask")),
+        "git_push":tk.StringVar(value=str(approval.get("git_push") or "always_ask")),
+        "software_install":tk.StringVar(value=str(approval.get("software_install") or "always_ask")),
+        "registry_system":tk.StringVar(value=str(approval.get("registry_system") or "always_ask")),
         "high_risk":tk.StringVar(value=str(approval.get("high_risk") or "always_ask")),
     }
     try: is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -113,10 +123,12 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         tk.Frame(parent,bg=C["line"],height=1).pack(fill="x",padx=18)
     def row(parent,heading,desc="",control=None):
         r=tk.Frame(parent,bg=C["card"]); r.pack(fill="x",padx=18,pady=13)
+        # Pack the right-side control first so the expanding text column cannot consume its space.
+        # This is required for Tk pack geometry and keeps every dropdown/switch visible.
+        if control is not None: control.pack(in_=r,side="right",padx=(22,0),anchor="e")
         copy=tk.Frame(r,bg=C["card"]); copy.pack(side="left",fill="x",expand=True)
         tk.Label(copy,text=heading,font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
-        if desc: tk.Label(copy,text=desc,font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=600,justify="left").pack(anchor="w",pady=(3,0))
-        if control is not None: control.pack(in_=r,side="right",padx=(18,0))
+        if desc: tk.Label(copy,text=desc,font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=560,justify="left").pack(anchor="w",pady=(3,0))
         return r
     def button(parent,text,command,primary=False,danger=False):
         bg=C["blue"] if primary else C["control"]; fg=C["white"] if primary else (C["red"] if danger else C["text"])
@@ -161,8 +173,18 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         ("shell","普通 PowerShell / 命令行","运行不属于高风险分类的普通命令。"),
         ("file_write","文件写入与修改","创建、编辑、移动或复制文件。"),
         ("file_delete","文件删除","删除已授权目录中的文件或文件夹。"),
-        ("service_control","服务启动 / 停止","启动、停止、重启或修改 Windows 服务。"),
-        ("high_risk","高风险系统修改","注册表、系统配置、账号、磁盘、发布等高风险操作。"),
+        ("process_control","进程启动 / 停止","启动程序、终止 Lucas 管理的进程或控制进程生命周期。"),
+        ("service_control","Windows 服务启动 / 停止","启动、停止、重启或修改 Windows 服务。"),
+        ("registry_system","注册表与系统配置","修改注册表、系统配置、电源、账户及受保护系统设置。"),
+        ("software_install","安装 / 卸载软件","安装包管理器、MSI、winget、Chocolatey 或卸载软件。"),
+        ("desktop_control","电脑操控","鼠标、键盘、窗口激活、输入、点击、滚动和 UI 自动化。"),
+        ("screenshots","屏幕截图","读取当前屏幕内容用于 Computer Use。"),
+        ("clipboard","剪贴板","读取或写入 Windows 剪贴板。"),
+        ("browser_control","浏览器操控","打开页面、点击、输入、选择和浏览器自动化。"),
+        ("browser_transfer","浏览器上传 / 下载","上传本地文件或下载文件到允许目录。"),
+        ("git_write","Git 本地修改","add、commit、切换/创建分支等本地仓库写操作。"),
+        ("git_push","Git Push / 远程写入","向远端仓库推送代码或其他远程写操作。"),
+        ("high_risk","其他高风险系统修改","磁盘、账户、安全软件、关机重启等高风险操作。"),
     ]
     for i,(k,h,d) in enumerate(prs):
         row(c,h,d,decision_control(c,approval_vars[k]))
@@ -237,7 +259,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def reset_defaults():
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
         permission.set("operate"); mode_display.set("标准（Recommended）")
-        defaults={"system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask","service_control":"ask","high_risk":"always_ask"}
+        defaults={"system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask","process_control":"ask","service_control":"ask","registry_system":"always_ask","software_install":"always_ask","desktop_control":"ask","screenshots":"allow","clipboard":"ask","browser_control":"ask","browser_transfer":"always_ask","git_write":"ask","git_push":"always_ask","high_risk":"always_ask"}
         for k,v in defaults.items(): approval_vars[k].set(v)
         remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True)
         rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。")
