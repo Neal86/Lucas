@@ -98,6 +98,7 @@ class LucasTray:
         self._last_menu_state = ""
         self._ever_online = False
         self._restart_attempts = 0
+        self._settings_process: subprocess.Popen[Any] | None = None
 
     def _node_executable(self) -> Path:
         scripts = Path(sys.executable).resolve().parent
@@ -188,6 +189,33 @@ class LucasTray:
         _save_config(config)
         log.info("Launch at startup=%s", enabled)
         self._refresh_icon(force=True)
+
+    def _open_settings(self, icon: Any = None, item: Any = None) -> None:
+        process = self._settings_process
+        if process is not None and process.poll() is None:
+            return
+        try:
+            executable = self._node_executable()
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            process = subprocess.Popen([str(executable), "--configure"], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            self._settings_process = process
+        except Exception as exc:
+            log.exception("Could not open Lucas Settings")
+            _message_box(str(exc), "Lucas Settings")
+            return
+
+        def wait_for_settings() -> None:
+            try:
+                process.wait()
+                if process.returncode == 0 and _connection_enabled(_load_config()):
+                    self._reconnect()
+            except Exception:
+                log.exception("Could not apply Lucas Settings")
+            finally:
+                self._settings_process = None
+                self._refresh_icon(force=True)
+
+        threading.Thread(target=wait_for_settings, name="lucas-settings-watcher", daemon=True).start()
 
     def _open_dashboard(self, icon: Any = None, item: Any = None) -> None:
         webbrowser.open(DASHBOARD_URL)
@@ -360,7 +388,8 @@ class LucasTray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Launch at startup", self._toggle_startup, checked=lambda item: _startup_enabled(_load_config())),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Open Dashboard", self._open_dashboard, default=True),
+            pystray.MenuItem("Settings", self._open_settings, default=True),
+            pystray.MenuItem("Open Dashboard", self._open_dashboard),
             pystray.MenuItem("View logs", self._view_logs),
             pystray.MenuItem("Re-pair this computer", self._repair),
             pystray.Menu.SEPARATOR,
