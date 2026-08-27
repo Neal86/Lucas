@@ -58,7 +58,7 @@ def _write_status(status: str, detail: str = "") -> None:
     temporary.replace(STATUS_FILE)
 
 
-def _configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
+def _legacy_configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     try:
         import ctypes
         import tkinter as tk
