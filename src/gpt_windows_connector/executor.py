@@ -59,6 +59,7 @@ class Executor:
 
     async def call(self, method: str, params: dict) -> object:
         self.policy.authorize(method)
+        self.security.authorize(method, dict(params or {}))
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
         if method in {"shell.run", "process.start"}:
