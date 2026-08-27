@@ -132,12 +132,12 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         tk.Frame(parent,bg=C["line"],height=1).pack(fill="x",padx=18)
     def row(parent,heading,desc="",control=None):
         r=tk.Frame(parent,bg=C["card"]); r.pack(fill="x",padx=18,pady=13)
-        # Pack the right-side control first so the expanding text column cannot consume its space.
-        # This is required for Tk pack geometry and keeps every dropdown/switch visible.
-        if control is not None: control.pack(in_=r,side="right",padx=(22,0),anchor="e")
-        copy=tk.Frame(r,bg=C["card"]); copy.pack(side="left",fill="x",expand=True)
+        r.grid_columnconfigure(0,weight=1)
+        copy=tk.Frame(r,bg=C["card"]); copy.grid(row=0,column=0,sticky="ew")
         tk.Label(copy,text=heading,font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
         if desc: tk.Label(copy,text=desc,font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=560,justify="left").pack(anchor="w",pady=(3,0))
+        if control is not None:
+            control.grid(in_=r,row=0,column=1,sticky="e",padx=(22,0))
         return r
     def button(parent,text,command,primary=False,danger=False):
         bg=C["blue"] if primary else C["control"]; fg=C["white"] if primary else (C["red"] if danger else C["text"])
