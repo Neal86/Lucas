@@ -248,38 +248,9 @@ class LucasTray:
             _message_box(str(exc), "Lucas logs")
 
     def _repair(self, icon: Any = None, item: Any = None) -> None:
-        try:
-            import tkinter as tk
-            from tkinter import simpledialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            code = simpledialog.askstring("Re-pair Lucas", "Generate a new pairing code in Lucas > Computer Nodes,\nthen enter it here:", parent=root)
-            root.destroy()
-        except Exception as exc:
-            log.exception("Could not open re-pair dialog")
-            _message_box(str(exc), "Re-pair Lucas")
-            return
-        if not code or not code.strip():
-            return
-        self._stop_node()
-        config = _load_config()
-        config["pairing_code"] = code.strip()
-        config["connection_enabled"] = True
-        _save_config(config)
-        try:
-            STATE_FILE.unlink(missing_ok=True)
-        except OSError:
-            log.exception("Could not remove previous pairing state")
-            _message_box("Could not reset the previous pairing token.", "Re-pair Lucas")
-            return
-        try:
-            self._spawn_node()
-        except Exception as exc:
-            log.exception("Could not start re-pair")
-            _message_box(str(exc), "Re-pair Lucas")
-            return
-        self._refresh_icon(force=True)
+        # Pairing has one canonical UI: Lucas Settings. The previous standalone
+        # simpledialog created a second, inconsistent pairing flow.
+        self._open_settings(icon, item)
 
     def _exit(self, icon: Any = None, item: Any = None) -> None:
         self._stop.set()
@@ -409,7 +380,7 @@ class LucasTray:
             pystray.MenuItem("Settings", self._open_settings, default=True),
             pystray.MenuItem("Open Dashboard", self._open_dashboard),
             pystray.MenuItem("View logs", self._view_logs),
-            pystray.MenuItem("Re-pair this computer", self._repair),
+            pystray.MenuItem("Pair / Re-pair this computer", self._repair),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit Lucas", self._exit),
         )

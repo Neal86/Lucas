@@ -12,6 +12,14 @@ APP_NAME = "Lucas"
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
+STATE_FILE = CONFIG_DIR / "node-state.json"
+
+def _has_saved_token() -> bool:
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return bool(str(data.get("node_token") or "").strip()) if isinstance(data, dict) else False
+    except (OSError, json.JSONDecodeError):
+        return False
 
 def _default_node_id() -> str:
     machine = os.environ.get("COMPUTERNAME") or socket.gethostname() or "windows-node"
@@ -157,7 +165,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"Node ID","设备唯一标识。",tk.Label(c,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",tk.Entry(c,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
-    row(c,"配对码","仅重新配对时需要。",tk.Entry(c,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20))
+    pairing_entry=tk.Entry(c,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=24)
+    row(c,"配对码","首次安装或重新配对时，在这里输入网页生成的 Pairing Code。",pairing_entry)
 
     # 安全
     wrap,body=scroll_page(); pages["安全"]=wrap
@@ -272,10 +281,20 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): messagebox.showerror("Lucas","电脑名称和 Node ID 不能为空。"); return
         if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
+        code=pairing_code.get().strip()
+        # Entering a pairing code explicitly starts a fresh pairing session. Keep
+        # the old token until Save is pressed, then remove it so the next node
+        # connection must exchange this code for a new token.
+        if code:
+            try:
+                STATE_FILE.unlink(missing_ok=True)
+            except OSError as exc:
+                messagebox.showerror("Lucas",f"无法重置旧的配对状态：{exc}")
+                return
         updated=dict(existing)
         updated.update({
             "gateway_ws_url":gv.rstrip("/"),"node_name":node_name.get().strip(),"node_id":node_id.get().strip(),
-            "pairing_code":pairing_code.get().strip() or None,"permission_level":permission.get(),"allowed_roots":rv,
+            "pairing_code":code or None,"permission_level":permission.get(),"allowed_roots":rv,
             "security":{
                 "approval_policy":{k:v.get() for k,v in approval_vars.items()},
                 "remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),
@@ -283,12 +302,22 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
                 "rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get(),
             },
         })
-        updated.setdefault("connection_enabled",True); updated.setdefault("launch_at_startup",True)
+        updated.setdefault("launch_at_startup",True)
+        # Saving a pairing code also connects immediately. An unpaired install
+        # without a code remains disconnected instead of retrying anonymously.
+        if code:
+            updated["connection_enabled"] = True
+        elif not _has_saved_token():
+            updated["connection_enabled"] = False
+        else:
+            updated.setdefault("connection_enabled",True)
         _save_config(updated); result=updated; root.destroy()
 
     button(fi,"保存更改",save,primary=True).pack(side="right")
     button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10))
     button(fi,"取消",root.destroy).pack(side="right",padx=(0,10))
-    show_page("安全")
+    show_page("常规" if not _has_saved_token() else "安全")
+    if not _has_saved_token():
+        root.after(200, pairing_entry.focus_set)
     root.mainloop()
     return result

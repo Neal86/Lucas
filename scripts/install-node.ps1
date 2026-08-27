@@ -86,12 +86,8 @@ Write-Host "          LUCAS WINDOWS NODE" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
-  $PairingCode = Read-Host "Lucas pairing code"
-}
-if ([string]::IsNullOrWhiteSpace($PairingCode) -and -not $HasSavedToken) {
-  throw "A Lucas pairing code is required. Generate one from Lucas > Computer Nodes."
-}
+# Pairing is intentionally performed after installation in Lucas Settings.
+# Keep the optional parameter only for backwards compatibility with old launchers.
 
 $Python = Resolve-Python311
 if (-not $Python) {
@@ -215,15 +211,25 @@ if ($ExistingConfig -and $ExistingConfig.allowed_roots -and @($ExistingConfig.al
 }
 if ($ConfigRoots.Count -eq 0) { $ConfigRoots = @($AllowedRoot) }
 
-$ConnectionEnabled = $true
-if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled) { $ConnectionEnabled = [bool]$ExistingConfig.connection_enabled }
+$ConfigPairingCode = $null
+if (-not $HasSavedToken) {
+  if (-not [string]::IsNullOrWhiteSpace($PairingCode)) {
+    $ConfigPairingCode = $PairingCode.Trim()
+  } elseif ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.pairing_code)) {
+    $ConfigPairingCode = ([string]$ExistingConfig.pairing_code).Trim()
+  }
+}
+
+# A brand-new unpaired node stays disconnected until the user enters a pairing
+# code in Lucas Settings. This prevents endless anonymous reconnect loops.
+$ConnectionEnabled = $HasSavedToken -or -not [string]::IsNullOrWhiteSpace($ConfigPairingCode)
+if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled -and ($HasSavedToken -or $ConfigPairingCode)) {
+  $ConnectionEnabled = [bool]$ExistingConfig.connection_enabled
+}
 $LaunchAtStartup = $true
 if ($ExistingConfig -and $null -ne $ExistingConfig.launch_at_startup) { $LaunchAtStartup = [bool]$ExistingConfig.launch_at_startup }
 $SecurityConfig = $null
 if ($ExistingConfig -and $null -ne $ExistingConfig.security) { $SecurityConfig = $ExistingConfig.security }
-
-$ConfigPairingCode = $null
-if (-not $HasSavedToken) { $ConfigPairingCode = $PairingCode.Trim() }
 $Config = [ordered]@{
   gateway_ws_url = $GatewayUrl.TrimEnd('/')
   node_id = $NodeId
@@ -292,6 +298,17 @@ Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundCol
 # the installer is replacing the same runtime files.
 Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
 Start-Sleep -Seconds 2
+
+# First-time setup happens in the same Settings UI used for future re-pairing.
+if (-not $HasSavedToken -and [string]::IsNullOrWhiteSpace($ConfigPairingCode)) {
+  $NodeLauncher = Join-Path $Venv "Scripts\lucas-node.exe"
+  if (Test-Path $NodeLauncher) {
+    Write-Host "[Lucas] Opening Settings to pair this computer..." -ForegroundColor Cyan
+    Start-Process -FilePath $NodeLauncher -ArgumentList "--configure"
+  } else {
+    Write-Host "[Lucas] Open the Lucas tray icon > Settings to pair this computer." -ForegroundColor Yellow
+  }
+}
 
 Write-Host ""
 Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
