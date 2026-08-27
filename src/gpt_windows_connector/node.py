@@ -414,7 +414,7 @@ async def run_node() -> None:
             config = _load_config()
             _apply_config(config)
             settings = NodeSettings.from_env()
-            executor = Executor(settings.allowed_roots, settings.permission_level)
+            executor = Executor(settings.allowed_roots, settings.permission_level, config)
             _write_status("Connecting")
             await _serve_connection(settings, executor)
             delay = 1.0
