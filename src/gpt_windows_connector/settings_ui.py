@@ -58,7 +58,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     gateway = tk.StringVar(value=str(existing.get("gateway_ws_url") or DEFAULT_GATEWAY))
     node_id = tk.StringVar(value=str(existing.get("node_id") or _default_node_id()))
-    node_name = tk.StringVar(value=str(existing.get("node_name") or os.environ.get("COMPUTERNAME") or socket.gethostname()))
+    node_name = tk.StringVar(value=str(os.environ.get("COMPUTERNAME") or socket.gethostname()))
     pairing_code = tk.StringVar(value=str(existing.get("pairing_code") or ""))
     permission = tk.StringVar(value=str(existing.get("permission_level") or "operate").lower())
     if permission.get() not in {"read","operate","admin"}: permission.set("operate")
@@ -160,8 +160,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     # 常规
     wrap,body=scroll_page(); pages["常规"]=wrap
     section(body,"电脑"); c=card(body)
-    name_entry=tk.Entry(c,textvariable=node_name,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=32)
-    row(c,"电脑名称","用于在 Lucas 中识别这台电脑。",name_entry); divider(c)
+    name_value=tk.Label(c,textvariable=node_name,font=(FONT,10),fg=C["muted"],bg=C["card"])
+    row(c,"电脑名称","Windows 设备名称，只读。网页中的显示名称可单独修改。",name_value); divider(c)
     row(c,"Node ID","设备唯一标识。",tk.Label(c,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",tk.Entry(c,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
@@ -293,7 +293,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
                 return
         updated=dict(existing)
         updated.update({
-            "gateway_ws_url":gv.rstrip("/"),"node_name":node_name.get().strip(),"node_id":node_id.get().strip(),
+            "gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),
             "pairing_code":code or None,"permission_level":permission.get(),"allowed_roots":rv,
             "security":{
                 "approval_policy":{k:v.get() for k,v in approval_vars.items()},

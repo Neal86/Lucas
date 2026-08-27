@@ -137,6 +137,18 @@ class NodeAuthStore:
                 raise PermissionError("Node not found or not owned by this account")
         return await self.record_for(node_id)
 
+    async def update_name(self, node_id: str, owner_user_id: str, name: str) -> dict:
+        name = str(name).strip()
+        if not name:
+            raise ValueError("Computer display name is required")
+        if len(name) > 120:
+            raise ValueError("Computer display name is too long")
+        with self._connect() as db:
+            cur = db.execute("UPDATE nodes SET name=?,updated_at=? WHERE node_id=? AND owner_user_id=?", (name, time.time(), node_id, owner_user_id))
+            if cur.rowcount != 1:
+                raise PermissionError("Node not found or not owned by this account")
+        return await self.record_for(node_id)
+
     async def delete(self, node_id: str, owner_user_id: str) -> bool:
         with self._connect() as db:
             cur = db.execute("DELETE FROM nodes WHERE node_id=? AND owner_user_id=?", (node_id, owner_user_id))
@@ -583,9 +595,13 @@ async def node_websocket(websocket: WebSocket):
         # mirrors the locally reported values for status/audit only and never sends
         # an older web policy back as an authority.
         allowed_roots = hello_roots or stored_roots
+        # The website owns the user-facing display alias. The Windows node only
+        # reports its real machine name and local security state; reconnecting must
+        # never overwrite a display name the user chose on the website.
+        display_name = str(record.get("name") or name) if record else name
         if authorized:
-            await auth_store.update_config(node_id, owner_user_id, name, permission_level, allowed_roots)
-        connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)
+            await auth_store.update_config(node_id, owner_user_id, display_name, permission_level, allowed_roots)
+        connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=display_name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):

@@ -195,9 +195,10 @@ $NodeId = $GeneratedNodeId
 if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_id)) { $NodeId = [string]$ExistingConfig.node_id }
 elseif ($SavedState -and -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_id)) { $NodeId = [string]$SavedState.node_id }
 
-if ([string]::IsNullOrWhiteSpace($NodeName)) { $NodeName = $env:COMPUTERNAME }
-$ConfigNodeName = $NodeName
-if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_name)) { $ConfigNodeName = [string]$ExistingConfig.node_name }
+# The local node name is always the real Windows computer name. User-facing
+# aliases are managed on the Lucas website and must not be written back locally.
+$ConfigNodeName = $env:COMPUTERNAME
+if ([string]::IsNullOrWhiteSpace($ConfigNodeName)) { $ConfigNodeName = $NodeName }
 
 $ConfigPermission = $Permission
 if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.permission_level)) { $ConfigPermission = [string]$ExistingConfig.permission_level }
