@@ -549,7 +549,9 @@ async def node_websocket(websocket: WebSocket):
             await websocket.close(code=4400)
             return
         name = str(hello.get("name") or node_id)
-        permission_level = str(hello.get("permission_level") or "operate")
+        permission_level = str(hello.get("permission_level") or "operate").strip().lower()
+        if permission_level not in {"read", "operate", "admin"}:
+            permission_level = "operate"
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         supplied_token = hello.get("node_token")
         pairing_code = hello.get("pairing_code")
@@ -562,7 +564,7 @@ async def node_websocket(websocket: WebSocket):
             if pairing and (not pairing.get("node_id") or pairing["node_id"] == node_id) and pairing["expires"] >= time.time():
                 owner_user_id = pairing["owner_user_id"]
                 issued_token = secrets.token_urlsafe(32)
-                await auth_store.save(node_id, owner_user_id, str(pairing.get("name") or name), issued_token, "operate", hello_roots)
+                await auth_store.save(node_id, owner_user_id, name, issued_token, permission_level, hello_roots)
                 _pairings.pop(str(pairing_code), None)
                 authorized = True
                 record = await auth_store.record_for(node_id)
@@ -571,27 +573,25 @@ async def node_websocket(websocket: WebSocket):
             await websocket.close(code=4401)
             return
         record = record or await auth_store.record_for(node_id)
+        stored_roots: list[str] = []
         if record:
             try:
                 stored_roots = json.loads(record.get("allowed_roots") or "[]")
             except json.JSONDecodeError:
                 stored_roots = []
-            if authorized and not stored_roots and hello_roots:
-                await auth_store.update_config(node_id, owner_user_id, str(record.get("name") or name), permission_level, hello_roots)
-                record = await auth_store.record_for(node_id) or record
-                stored_roots = hello_roots
-            name = str(record.get("name") or name)
-            permission_level = str(record.get("permission_level") or permission_level)
-            allowed_roots = stored_roots or hello_roots
-        else:
-            allowed_roots = hello_roots
+        # The Windows Node is the source of truth for security settings. The server
+        # mirrors the locally reported values for status/audit only and never sends
+        # an older web policy back as an authority.
+        allowed_roots = hello_roots or stored_roots
+        if authorized:
+            await auth_store.update_config(node_id, owner_user_id, name, permission_level, allowed_roots)
         connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
-        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "config": {"node_name": name, "permission_level": permission_level, "allowed_roots": allowed_roots}})
+        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "config": {"local_security_authority": True}})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
