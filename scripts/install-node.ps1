@@ -321,13 +321,8 @@ Start-Sleep -Seconds 2
 
 # First-time setup happens in the same Settings UI used for future re-pairing.
 if (-not $HasSavedToken -and [string]::IsNullOrWhiteSpace($ConfigPairingCode)) {
-  $NodeLauncher = Join-Path $Venv "Scripts\lucas-node.exe"
-  if (Test-Path $NodeLauncher) {
-    Write-Host "[Lucas] Opening Settings to pair this computer..." -ForegroundColor Cyan
-    Start-Process -FilePath $NodeLauncher -ArgumentList "--configure"
-  } else {
-    Write-Host "[Lucas] Open the Lucas tray icon > Settings to pair this computer." -ForegroundColor Yellow
-  }
+  Write-Host "[Lucas] Opening Settings to pair this computer..." -ForegroundColor Cyan
+  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
 }
 
 Write-Host ""

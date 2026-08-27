@@ -118,21 +118,22 @@ class LucasTray:
         self._restart_attempts = 0
         self._settings_process: subprocess.Popen[Any] | None = None
 
-    def _node_executable(self) -> Path:
-        scripts = Path(sys.executable).resolve().parent
-        for name in ("lucas-node.exe", "gwc-node.exe"):
-            candidate = scripts / name
-            if candidate.exists():
-                return candidate
-        raise FileNotFoundError("Lucas Node launcher is missing. Run the Lucas installer again.")
+    def _runtime_pythonw(self) -> Path:
+        executable = Path(sys.executable).resolve()
+        candidate = executable.with_name("pythonw.exe")
+        if candidate.exists():
+            return candidate
+        if executable.exists():
+            return executable
+        raise FileNotFoundError("Lucas Python runtime is missing. Run the Lucas installer again.")
 
     def _spawn_node(self) -> None:
         with self._lock:
             if self._process and self._process.poll() is None:
                 return
-            executable = self._node_executable()
+            pythonw = self._runtime_pythonw()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            self._process = subprocess.Popen([str(executable)], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            self._process = subprocess.Popen([str(pythonw), "-m", "gpt_windows_connector.node"], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
             self._status = "Reconnecting" if self._ever_online else "Connecting"
             self._detail = ""
             self._restart_attempts += 1
@@ -213,9 +214,9 @@ class LucasTray:
         if process is not None and process.poll() is None:
             return
         try:
-            executable = self._node_executable()
+            pythonw = self._runtime_pythonw()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            process = subprocess.Popen([str(executable), "--configure"], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            process = subprocess.Popen([str(pythonw), "-m", "gpt_windows_connector.node", "--configure"], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
             self._settings_process = process
         except Exception as exc:
             log.exception("Could not open Lucas Settings")
