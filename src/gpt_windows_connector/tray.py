@@ -252,6 +252,28 @@ class LucasTray:
         # simpledialog created a second, inconsistent pairing flow.
         self._open_settings(icon, item)
 
+    def _restart_lucas(self, icon: Any = None, item: Any = None) -> None:
+        try:
+            self._stop_node()
+            pythonw = Path(sys.executable).resolve()
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            current_pid = os.getpid()
+            helper = (
+                "import subprocess,time,psutil; "
+                f"pid={current_pid}; "
+                "[(time.sleep(0.1)) for _ in range(50) if psutil.pid_exists(pid)]; "
+                f"subprocess.Popen({[str(pythonw), '-m', 'gpt_windows_connector.tray']!r}, cwd={str(CONFIG_DIR)!r}, creationflags={flags}, close_fds=True)"
+            )
+            subprocess.Popen([str(pythonw), "-c", helper], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            log.info("Restarting Lucas tray and node")
+        except Exception as exc:
+            log.exception("Could not restart Lucas")
+            _message_box(str(exc), "Restart Lucas")
+            return
+        self._stop.set()
+        if self._icon is not None:
+            self._icon.stop()
+
     def _exit(self, icon: Any = None, item: Any = None) -> None:
         self._stop.set()
         self._stop_node()
@@ -381,6 +403,7 @@ class LucasTray:
             pystray.MenuItem("Open Dashboard", self._open_dashboard),
             pystray.MenuItem("View logs", self._view_logs),
             pystray.MenuItem("Pair / Re-pair this computer", self._repair),
+            pystray.MenuItem("Restart Lucas", self._restart_lucas),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit Lucas", self._exit),
         )

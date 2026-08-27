@@ -292,6 +292,25 @@ if (-not $LaunchAtStartup) {
   try { Disable-ScheduledTask -TaskName $TaskName | Out-Null } catch { & schtasks.exe /Change /TN $TaskName /DISABLE | Out-Null }
 }
 
+Write-Host "[Lucas] Creating Start menu and desktop shortcuts..." -ForegroundColor Green
+try {
+  $WshShell = New-Object -ComObject WScript.Shell
+  $ShortcutTargets = @(
+    (Join-Path ([Environment]::GetFolderPath("Desktop")) "Lucas.lnk"),
+    (Join-Path (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs") "Lucas.lnk")
+  )
+  foreach ($ShortcutPath in $ShortcutTargets) {
+    $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+    $Shortcut.TargetPath = $VenvPythonw
+    $Shortcut.Arguments = "-m gpt_windows_connector.launcher"
+    $Shortcut.WorkingDirectory = $InstallDir
+    $Shortcut.Description = "Open or start Lucas"
+    $Shortcut.Save()
+  }
+} catch {
+  Write-Host "[Lucas] Could not create one or more shortcuts: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundColor Green
 # Start the tray directly for the current session. The scheduled task is the
 # watchdog for future logons/restarts; starting it here can be unreliable while
@@ -313,7 +332,8 @@ if (-not $HasSavedToken -and [string]::IsNullOrWhiteSpace($ConfigPairingCode)) {
 Write-Host ""
 Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
 Write-Host "Lucas now runs in the background with a system tray icon."
-Write-Host "Use the tray icon to Connect/Disconnect, reconnect, view logs, re-pair, or change startup behavior."
+Write-Host "Open Lucas from the desktop or Start menu. If Lucas is already running, the shortcut opens Settings."
+Write-Host "Use the tray icon to Connect/Disconnect, reconnect, restart Lucas, view logs, re-pair, or change startup behavior."
 Write-Host "After reboot or sign-in, Lucas starts automatically when Launch at startup is enabled."
 Write-Host ""
 exit 0
