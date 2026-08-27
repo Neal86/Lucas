@@ -341,25 +341,8 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             if config.get("pairing_code"):
                 config["pairing_code"] = None
                 _save_config(config)
-        server_config = welcome.get("config")
-        if isinstance(server_config, dict):
-            config = _load_config()
-            changed = False
-            for key in ("node_name", "permission_level"):
-                value = server_config.get(key)
-                if value is not None and config.get(key) != value:
-                    config[key] = value
-                    changed = True
-            roots = server_config.get("allowed_roots")
-            if isinstance(roots, list) and roots and config.get("allowed_roots") != roots:
-                config["allowed_roots"] = roots
-                changed = True
-            if changed:
-                _save_config(config)
-                configured_roots = config.get("allowed_roots") or [str(path) for path in settings.allowed_roots]
-                executor.allowed_roots = tuple(Path(item).expanduser().resolve() for item in configured_roots if str(item).strip())
-                executor.policy = type(executor.policy)(str(config.get("permission_level") or settings.permission_level))
-                log.info("Applied Lucas web configuration without reconnecting")
+        # Security policy is authoritative on the Windows computer. The gateway may
+        # report status, but it is never allowed to overwrite local permissions.
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         _write_status("Online")
         send_lock = asyncio.Lock()
@@ -399,28 +382,11 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 method = message.get("method", "")
                 params = message.get("params") or {}
                 if method == "node.configure":
-                    try:
-                        config = _load_config()
-                        name = str(params.get("node_name") or config.get("node_name") or settings.node_name).strip()
-                        permission = str(params.get("permission_level") or config.get("permission_level") or "operate").strip().lower()
-                        roots = [str(Path(item).expanduser().resolve()) for item in (params.get("allowed_roots") or config.get("allowed_roots") or []) if str(item).strip()]
-                        if permission not in {"read", "operate", "admin"}:
-                            raise ValueError("permission_level must be read, operate, or admin")
-                        if not roots or any(not Path(item).is_dir() for item in roots):
-                            raise ValueError("Every allowed folder must exist on this Windows PC")
-                        config.update({"node_name": name, "permission_level": permission, "allowed_roots": roots})
-                        _save_config(config)
-                        executor.allowed_roots = tuple(Path(item).expanduser().resolve() for item in roots)
-                        executor.policy = type(executor.policy)(permission)
-                        response = {"type": "response", "id": request_id, "ok": True, "result": {"node_name": name, "permission_level": permission, "allowed_roots": roots}}
-                        await send_json(response)
-                        log.info("Applied Lucas web configuration without reconnecting")
-                        continue
-                    except RuntimeError:
-                        raise
-                    except Exception as exc:
-                        await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
-                        continue
+                    await send_json({
+                        "type": "response", "id": request_id, "ok": False,
+                        "error": "PermissionError: Security settings are local-only. Open Lucas Settings from the Windows tray.",
+                    })
+                    continue
                 if method == "node.logs":
                     try:
                         limit = max(20, min(int(params.get("limit", 200)), 1000))
@@ -471,7 +437,10 @@ def main() -> None:
         config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "pairing_code": settings.pairing_code, "permission_level": settings.permission_level, "allowed_roots": [str(path) for path in settings.allowed_roots]}
         _save_config(config)
     if args.configure:
-        log.info("Local setup UI is disabled. Manage this node from the Lucas web dashboard.")
+        updated = _configure_gui(config)
+        if updated is not None:
+            log.info("Saved local Lucas security settings")
+        return
     _apply_config(config)
     log.info("Lucas Node starting. config=%s log=%s", CONFIG_FILE, LOG_FILE)
     try:
