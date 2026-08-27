@@ -165,8 +165,50 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"Node ID","设备唯一标识。",tk.Label(c,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",tk.Entry(c,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
-    pairing_entry=tk.Entry(c,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=24)
-    row(c,"配对码","首次安装或重新配对时，在这里输入网页生成的 Pairing Code。",pairing_entry)
+    pairing_control=tk.Frame(c,bg=C["card"])
+    pairing_status=tk.StringVar(value=("已配对" if _has_saved_token() else "未配对"))
+    pairing_entry=tk.Entry(pairing_control,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20)
+    pairing_status_label=tk.Label(pairing_control,textvariable=pairing_status,font=(FONT,9,"bold"),fg=C["green"],bg=C["card"])
+    pairing_actions=tk.Frame(pairing_control,bg=C["card"])
+    pairing_mode=tk.BooleanVar(value=not _has_saved_token())
+
+    def refresh_pairing_control():
+        for child in pairing_control.winfo_children():
+            child.pack_forget()
+        paired=_has_saved_token()
+        if paired and not pairing_mode.get():
+            pairing_status.set("已配对")
+            pairing_status_label.configure(fg=C["green"]); pairing_status_label.pack(side="left",padx=(0,10))
+            pairing_actions.pack(side="left")
+            for child in pairing_actions.winfo_children(): child.destroy()
+            button(pairing_actions,"重新配对",lambda: (pairing_mode.set(True),pairing_code.set(""),refresh_pairing_control(),root.after(50,pairing_entry.focus_set))).pack(side="left")
+            button(pairing_actions,"取消配对",cancel_pairing,danger=True).pack(side="left",padx=(8,0))
+        else:
+            pairing_status.set("未配对" if not paired else "重新配对")
+            pairing_status_label.configure(fg=(C["orange"] if not paired else C["blue"])); pairing_status_label.pack(side="left",padx=(0,10))
+            pairing_entry.pack(side="left",ipady=6)
+            if paired:
+                button(pairing_control,"取消",lambda: (pairing_mode.set(False),pairing_code.set(""),refresh_pairing_control())).pack(side="left",padx=(8,0))
+
+    def cancel_pairing():
+        if not messagebox.askyesno("Lucas","取消这台电脑的配对？取消后 Lucas 会停止连接，需要新的 Pairing Code 才能重新连接。"): return
+        try:
+            STATE_FILE.unlink(missing_ok=True)
+            pairing_code.set("")
+            current=dict(existing)
+            try:
+                if CONFIG_FILE.exists():
+                    loaded=json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                    if isinstance(loaded,dict): current.update(loaded)
+            except (OSError,json.JSONDecodeError): pass
+            current["pairing_code"]=None; current["connection_enabled"]=False
+            _save_config(current)
+            pairing_mode.set(True); refresh_pairing_control()
+        except OSError as exc:
+            messagebox.showerror("Lucas",f"无法取消配对：{exc}")
+
+    row(c,"配对","首次安装、取消配对或重新配对都只在这里完成。Pairing Code 在 Lucas 网页生成。",pairing_control)
+    refresh_pairing_control()
 
     # 安全
     wrap,body=scroll_page(); pages["安全"]=wrap

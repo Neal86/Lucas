@@ -226,8 +226,14 @@ class LucasTray:
         def wait_for_settings() -> None:
             try:
                 process.wait()
-                if process.returncode == 0 and _connection_enabled(_load_config()):
-                    self._reconnect()
+                if process.returncode == 0:
+                    if _connection_enabled(_load_config()):
+                        self._reconnect()
+                    else:
+                        self._stop_node()
+                        self._status = "Disconnected"
+                        self._detail = "Disconnected by local settings"
+                        self._write_local_status()
             except Exception:
                 log.exception("Could not apply Lucas Settings")
             finally:
@@ -247,11 +253,6 @@ class LucasTray:
         except Exception as exc:
             log.exception("Could not open logs")
             _message_box(str(exc), "Lucas logs")
-
-    def _repair(self, icon: Any = None, item: Any = None) -> None:
-        # Pairing has one canonical UI: Lucas Settings. The previous standalone
-        # simpledialog created a second, inconsistent pairing flow.
-        self._open_settings(icon, item)
 
     def _restart_lucas(self, icon: Any = None, item: Any = None) -> None:
         try:
@@ -400,10 +401,11 @@ class LucasTray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Launch at startup", self._toggle_startup, checked=lambda item: _startup_enabled(_load_config())),
             pystray.Menu.SEPARATOR,
+            # On Windows pystray invokes the default menu item when the tray icon
+            # is double-clicked, so Settings is the single primary tray action.
             pystray.MenuItem("Settings", self._open_settings, default=True),
             pystray.MenuItem("Open Dashboard", self._open_dashboard),
             pystray.MenuItem("View logs", self._view_logs),
-            pystray.MenuItem("Pair / Re-pair this computer", self._repair),
             pystray.MenuItem("Restart Lucas", self._restart_lucas),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit Lucas", self._exit),
