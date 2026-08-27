@@ -166,6 +166,40 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"Node ID","设备唯一标识。",tk.Label(c,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",tk.Entry(c,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
+    connection_status=tk.StringVar(value="检测中…")
+    connection_status_label=tk.Label(c,textvariable=connection_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"])
+    row(c,"连接状态","实时显示 Lucas 与 Gateway 的配对和连接状态。",connection_status_label); divider(c)
+
+    def refresh_connection_status():
+        paired=_has_saved_token()
+        status_data={}
+        try:
+            loaded=json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+            if isinstance(loaded,dict): status_data=loaded
+        except (OSError,json.JSONDecodeError): pass
+        value=str(status_data.get("status") or "").strip()
+        detail=str(status_data.get("detail") or "").strip().lower()
+        if not paired:
+            if "pairing" in detail or "token required" in detail:
+                text,color="配对失败",C["red"]
+            elif value in {"Connecting","Reconnecting"}:
+                text,color="正在配对 / 连接…",C["orange"]
+            else:
+                text,color="未配对",C["orange"]
+        elif value == "Online":
+            text,color="已连接",C["green"]
+        elif value == "Connecting":
+            text,color="正在连接…",C["orange"]
+        elif value == "Reconnecting":
+            text,color="正在重新连接…",C["orange"]
+        elif value in {"Disconnected","Offline"}:
+            text,color="已配对 · 未连接",C["muted"]
+        else:
+            text,color="已配对 · 等待连接",C["muted"]
+        connection_status.set(text); connection_status_label.configure(fg=color)
+        try: root.after(1000,refresh_connection_status)
+        except tk.TclError: pass
+
     pairing_control=tk.Frame(c,bg=C["card"])
     pairing_status=tk.StringVar(value=("已配对" if _has_saved_token() else "未配对"))
     pairing_entry=tk.Entry(pairing_control,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20)
