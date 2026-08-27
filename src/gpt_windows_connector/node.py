@@ -28,6 +28,24 @@ DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
 
+def _acquire_node_mutex() -> object | None:
+    if sys.platform != "win32":
+        return object()
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, "Local\\LucasNodeSingleInstance")
+        if not handle:
+            return None
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle(handle)
+            return None
+        return handle
+    except Exception:
+        log.exception("Could not create node single-instance mutex")
+        return object()
+
+
 def _default_node_id() -> str:
     machine = os.environ.get("COMPUTERNAME") or socket.gethostname() or "windows-node"
     return f"{machine}-{uuid.getnode():012x}".lower()
@@ -441,6 +459,10 @@ def main() -> None:
         updated = _configure_gui(config)
         if updated is not None:
             log.info("Saved local Lucas security settings")
+        return
+    mutex = _acquire_node_mutex()
+    if mutex is None:
+        log.info("Another Lucas Node instance is already running; exiting duplicate process")
         return
     _apply_config(config)
     log.info("Lucas Node starting. config=%s log=%s", CONFIG_FILE, LOG_FILE)

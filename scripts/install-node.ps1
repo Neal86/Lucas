@@ -219,6 +219,8 @@ $ConnectionEnabled = $true
 if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled) { $ConnectionEnabled = [bool]$ExistingConfig.connection_enabled }
 $LaunchAtStartup = $true
 if ($ExistingConfig -and $null -ne $ExistingConfig.launch_at_startup) { $LaunchAtStartup = [bool]$ExistingConfig.launch_at_startup }
+$SecurityConfig = $null
+if ($ExistingConfig -and $null -ne $ExistingConfig.security) { $SecurityConfig = $ExistingConfig.security }
 
 $ConfigPairingCode = $null
 if (-not $HasSavedToken) { $ConfigPairingCode = $PairingCode.Trim() }
@@ -231,8 +233,9 @@ $Config = [ordered]@{
   allowed_roots = $ConfigRoots
   connection_enabled = $ConnectionEnabled
   launch_at_startup = $LaunchAtStartup
+  security = $SecurityConfig
 }
-$Config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
+$Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
 
 $env:GWC_GATEWAY_WS = $Config.gateway_ws_url
 $env:GWC_NODE_ID = $Config.node_id

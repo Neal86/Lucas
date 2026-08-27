@@ -26,6 +26,24 @@ STATUS_STALE_SECONDS = 45.0
 log = logging.getLogger("lucas.tray")
 
 
+def _acquire_single_instance_mutex() -> object | None:
+    if sys.platform != "win32":
+        return object()
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, "Local\\LucasTraySingleInstance")
+        if not handle:
+            return None
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            kernel32.CloseHandle(handle)
+            return None
+        return handle
+    except Exception:
+        log.exception("Could not create tray single-instance mutex")
+        return object()
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -415,6 +433,10 @@ def main() -> None:
     if sys.platform != "win32":
         raise SystemExit("Lucas tray is available on Windows only.")
     _setup_logging()
+    mutex = _acquire_single_instance_mutex()
+    if mutex is None:
+        log.info("Another Lucas tray instance is already running; exiting duplicate process")
+        return
     log.info("Lucas tray starting pid=%s", os.getpid())
     try:
         LucasTray().run()
