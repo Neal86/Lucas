@@ -396,5 +396,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     show_page("常规" if not _has_saved_token() else "安全")
     if not _has_saved_token():
         root.after(200, pairing_entry.focus_set)
+    refresh_connection_status()
     root.mainloop()
     return result
