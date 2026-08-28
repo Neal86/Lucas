@@ -319,6 +319,35 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"配对","首次安装、取消配对或重新配对都只在这里完成。Pairing Code 在 Lucas 网页生成。",build_pairing_control)
     refresh_pairing_control()
 
+    section(body,"Lucas Node"); c=card(body)
+    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None
+    def run_update():
+        if not messagebox.askyesno("Lucas","更新 Lucas Node？现有配对、Allowed Folders 和安全设置会保留。"): return
+        try:
+            script_path=Path(tempfile.gettempdir())/"Lucas-Node-update.ps1"
+            urllib.request.urlretrieve(INSTALLER_URL,script_path)
+            subprocess.Popen(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(script_path)],creationflags=getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0))
+            root.destroy()
+        except Exception as exc:
+            messagebox.showerror("Lucas",f"无法启动更新：{exc}")
+    def build_update_control(p):
+        nonlocal update_button
+        update_button=button(p,"更新 Node",run_update,primary=True); update_button.configure(state="disabled"); return update_button
+    row(c,"Lucas Node","检测到新版本时可直接升级；更新会保留本机现有配置。",build_update_control); divider(c)
+    row(c,"版本状态","",lambda p: tk.Label(p,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]))
+    def check_update_worker():
+        latest=_fetch_latest_version()
+        def apply_result():
+            if not latest:
+                version_status.set(f"当前版本 {current_version} · 无法检查更新"); return
+            if current_version != "dev" and _version_key(latest)>_version_key(current_version):
+                version_status.set(f"当前版本 {current_version} · 新版本 {latest} 可用"); update_button.configure(state="normal")
+            else:
+                version_status.set(f"当前版本 {current_version} · 已是最新版本")
+        try: root.after(0,apply_result)
+        except tk.TclError: pass
+    threading.Thread(target=check_update_worker,daemon=True).start()
+
     # 安全
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body)
