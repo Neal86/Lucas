@@ -228,7 +228,7 @@ class NodeRegistry:
         return node
 
     def acquire_control(self, node_id: str, user_id: str, context_id: str, ttl_seconds: int = 120) -> dict:
-        self.require_owned(node_id, user_id)
+        self.require_online(node_id)
         now = time.time()
         ttl_seconds = max(15, min(ttl_seconds, 1800))
         current = self.control_locks.get(node_id)
@@ -246,7 +246,7 @@ class NodeRegistry:
         return {"released": False, "node_id": node_id, "context": context_id}
 
     def control_status(self, node_id: str, user_id: str) -> dict:
-        self.require_owned(node_id, user_id)
+        self.require_online(node_id)
         now = time.time()
         current = self.control_locks.get(node_id)
         if current and current.expires_at <= now:
@@ -357,8 +357,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
 
 async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) -> None:
     user = _user()
-    registry.require_owned(node_id, user.id)
-    await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
     registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
@@ -507,9 +506,9 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def node_list() -> list[dict]:
+async def node_list() -> list[dict]:
     user = _user()
-    return registry.list(user.id)
+    return await registry.list(user)
 
 
 @mcp.tool()
@@ -523,9 +522,21 @@ def node_pair(node_id: str, name: str | None = None, ttl_seconds: int = 600) -> 
 
 
 @mcp.tool()
+async def node_request_access(node_id: str, requested_permission: str = "operate") -> dict:
+    user = _user()
+    if requested_permission not in {"read", "operate", "admin"}:
+        raise ValueError("requested_permission must be read, operate, or admin")
+    node = registry.require_online(node_id)
+    if node.owner_user_id == user.id:
+        return {"authorized": True, "owner": True, "permission_level": node.permission_level, "allowed_roots": node.allowed_roots}
+    result = await registry.rpc(node_id, user.id, "access.request", {"requested_permission": requested_permission}, actor=_actor(user), timeout=180.0)
+    auth.audit(user.id, "node.access_request", node_id, {"requested_permission": requested_permission, "result": result})
+    return result
+
+
+@mcp.tool()
 async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) -> dict:
     user = _user()
-    registry.require_owned(node_id, user.id)
     verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
     return registry.acquire_control(node_id, user.id, str(verified["path"]), ttl_seconds)
 
@@ -533,7 +544,7 @@ async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) 
 @mcp.tool()
 def control_release(node_id: str, workspace: str) -> dict:
     user = _user()
-    registry.require_owned(node_id, user.id)
+    registry.require_online(node_id)
     return registry.release_control(node_id, user.id, workspace)
 
 
@@ -683,8 +694,9 @@ async def node_websocket(websocket: WebSocket):
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
-        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "config": {"local_security_authority": True}})
-        snapshot = next((item for item in registry.list(owner_user_id) if item["node_id"] == node_id), None)
+        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "owner_user_id": owner_user_id, "config": {"local_security_authority": True, "multi_user_access": True}})
+        owner = auth.get_user(owner_user_id)
+        snapshot = next((item for item in await registry.list(owner) if item["node_id"] == node_id), None)
         if snapshot:
             await dashboard_events.publish(owner_user_id, "node.upsert", {"node": snapshot})
         while True:
