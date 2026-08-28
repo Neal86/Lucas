@@ -168,6 +168,13 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     tk.Label(header,textvariable=subtitle,font=(FONT,10),fg=C["muted"],bg=C["window"]).pack(anchor="w",pady=(5,0))
     page_host = tk.Frame(main,bg=C["window"]); page_host.pack(fill="both",expand=True,padx=54,pady=(0,8))
 
+    active_scroll_canvas=None
+    def _mousewheel(event):
+        if active_scroll_canvas is None or not active_scroll_canvas.winfo_exists(): return
+        delta=int(-1*(event.delta/120)) if event.delta else 0
+        if delta: active_scroll_canvas.yview_scroll(delta,"units")
+    root.bind_all("<MouseWheel>",_mousewheel,add="+")
+
     def scroll_page():
         wrapper=tk.Frame(page_host,bg=C["window"]); canvas=tk.Canvas(wrapper,bg=C["window"],highlightthickness=0,bd=0)
         sb=ttk.Scrollbar(wrapper,orient="vertical",command=canvas.yview); body=tk.Frame(canvas,bg=C["window"])
@@ -175,7 +182,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         body.bind("<Configure>",lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>",lambda e: canvas.itemconfigure(win,width=e.width))
         canvas.configure(yscrollcommand=sb.set); canvas.pack(side="left",fill="both",expand=True); sb.pack(side="right",fill="y")
-        canvas.bind_all("<MouseWheel>",lambda e: canvas.yview_scroll(int(-1*(e.delta/120)),"units") if wrapper.winfo_ismapped() else None)
+        wrapper._lucas_canvas=canvas
         return wrapper,body
 
     def section(parent,text):
