@@ -1,0 +1,51 @@
+name: Fix Task Runs web once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fix-task-runs-web-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fix Task Runs web routing
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('src/gpt_windows_connector/webapp.py')
+          s=p.read_text(encoding='utf-8')
+          old="const viewPaths={dashboard:'/dashboard',nodes:'/nodes',ai:'/ai-connections',logs:'/logs',account:'/account',admin:'/admin'};"
+          new="const viewPaths={dashboard:'/dashboard',nodes:'/nodes',ai:'/ai-connections',tasks:'/task-runs',logs:'/logs',account:'/account',admin:'/admin'};"
+          if old not in s: raise SystemExit('viewPaths block not found')
+          s=s.replace(old,new,1)
+          old="if(id==='logs')loadLogs();if(id==='admin')"
+          new="if(id==='tasks')loadTaskRuns();if(id==='logs')loadLogs();if(id==='admin')"
+          if old not in s: raise SystemExit('view load block not found')
+          s=s.replace(old,new,1)
+          p.write_text(s,encoding='utf-8')
+      - name: Validate
+        run: |
+          python -m compileall -q src
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('src/gpt_windows_connector/webapp.py').read_text(encoding='utf-8')
+          assert "tasks:'/task-runs'" in s
+          assert "if(id==='tasks')loadTaskRuns()" in s
+          PY
+      - name: Remove one-time workflow
+        run: rm -f .github/workflows/fix-task-runs-web-once.yml
+      - name: Commit fix
+        run: |
+          git config user.name "Neal86"
+          git config user.email "52608308+Neal86@users.noreply.github.com"
+          git add -A
+          git commit -m "Wire Task Runs web navigation [skip ci]"
+          git push
