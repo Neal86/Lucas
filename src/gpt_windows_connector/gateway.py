@@ -186,25 +186,32 @@ class NodeRegistry:
         self.nodes: dict[str, NodeConnection] = {}
         self.control_locks: dict[str, ControlLock] = {}
 
-    def list(self, user_id: str) -> list[dict]:
+    async def list(self, user) -> list[dict]:
         now = time.time()
         out = []
-        for node in self.nodes.values():
-            if node.owner_user_id != user_id:
-                continue
+        actor = {"user_id": user.id, "email": user.email, "name": user.name or ""}
+        for node in tuple(self.nodes.values()):
+            permission_level = node.permission_level
+            allowed_roots = node.allowed_roots
+            if node.owner_user_id != user.id:
+                try:
+                    access = await self.rpc(node.node_id, user.id, "access.check", {}, actor=actor, timeout=3.0)
+                except Exception:
+                    continue
+                if not isinstance(access, dict) or not access.get("authorized"):
+                    continue
+                permission_level = str(access.get("permission_level") or "read")
+                allowed_roots = [str(item) for item in access.get("allowed_roots") or []]
             lock = self.control_locks.get(node.node_id)
             if lock and lock.expires_at <= now:
                 self.control_locks.pop(node.node_id, None)
                 lock = None
             out.append({
-                "node_id": node.node_id,
-                "name": node.name,
-                "permission_level": node.permission_level,
-                "allowed_roots": node.allowed_roots,
-                "online": True,
-                "last_seen": node.last_seen,
-                "control_context": lock.context_id if lock else None,
-                "control_expires_at": lock.expires_at if lock else None,
+                "node_id": node.node_id, "name": node.name, "permission_level": permission_level,
+                "allowed_roots": allowed_roots, "online": True, "last_seen": node.last_seen,
+                "shared": node.owner_user_id != user.id,
+                "control_context": lock.context_id if lock and lock.owner_user_id == user.id else None,
+                "control_expires_at": lock.expires_at if lock and lock.owner_user_id == user.id else None,
             })
         return out
 
