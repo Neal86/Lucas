@@ -274,6 +274,39 @@ class NodeRegistry:
 registry = NodeRegistry()
 
 
+class BrowserEventHub:
+    def __init__(self) -> None:
+        self.clients: dict[str, set[WebSocket]] = {}
+
+    def subscribe(self, user_id: str, websocket: WebSocket) -> None:
+        self.clients.setdefault(user_id, set()).add(websocket)
+
+    def unsubscribe(self, user_id: str, websocket: WebSocket) -> None:
+        sockets = self.clients.get(user_id)
+        if not sockets:
+            return
+        sockets.discard(websocket)
+        if not sockets:
+            self.clients.pop(user_id, None)
+
+    async def publish(self, user_id: str, event_type: str, payload: dict | None = None) -> None:
+        sockets = tuple(self.clients.get(user_id, ()))
+        if not sockets:
+            return
+        message = {"type": event_type, **(payload or {})}
+        stale: list[WebSocket] = []
+        for socket in sockets:
+            try:
+                await asyncio.wait_for(socket.send_json(message), timeout=2)
+            except Exception:
+                stale.append(socket)
+        for socket in stale:
+            self.unsubscribe(user_id, socket)
+
+
+dashboard_events = BrowserEventHub()
+
+
 def _user():
     return current_user(required=True)
 
@@ -548,6 +581,30 @@ async def health(_: Request):
     return JSONResponse({"ok": True, "online_nodes": len(registry.nodes), "auth": "multi-user"})
 
 
+async def browser_events_websocket(websocket: WebSocket):
+    authorization = websocket.headers.get("authorization", "")
+    token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if not token:
+        token = websocket.cookies.get("gwc_access_token", "")
+    try:
+        user = auth.verify_token(token)
+    except Exception:
+        await websocket.close(code=4401)
+        return
+    await websocket.accept()
+    dashboard_events.subscribe(user.id, websocket)
+    try:
+        await websocket.send_json({"type": "ready", "time": time.time()})
+        while True:
+            message = await websocket.receive_json()
+            if message.get("type") == "heartbeat":
+                await websocket.send_json({"type": "heartbeat_ack", "time": time.time()})
+    except (WebSocketDisconnect, asyncio.TimeoutError):
+        pass
+    finally:
+        dashboard_events.unsubscribe(user.id, websocket)
+
+
 async def node_websocket(websocket: WebSocket):
     await websocket.accept()
     node_id = None
@@ -608,6 +665,9 @@ async def node_websocket(websocket: WebSocket):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
         await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "config": {"local_security_authority": True}})
+        snapshot = next((item for item in registry.list(owner_user_id) if item["node_id"] == node_id), None)
+        if snapshot:
+            await dashboard_events.publish(owner_user_id, "node.upsert", {"node": snapshot})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
@@ -624,6 +684,15 @@ async def node_websocket(websocket: WebSocket):
             for future in connection.pending.values():
                 if not future.done():
                     future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
+            record = await auth_store.record_for(node_id)
+            if record and record.get("owner_user_id") == connection.owner_user_id:
+                try:
+                    roots = json.loads(record.get("allowed_roots") or "[]")
+                except json.JSONDecodeError:
+                    roots = []
+                await dashboard_events.publish(connection.owner_user_id, "node.upsert", {"node": {"node_id": node_id, "name": record.get("name"), "permission_level": record.get("permission_level") or "operate", "allowed_roots": roots, "online": False, "last_seen": connection.last_seen, "updated_at": record.get("updated_at")}})
+            else:
+                await dashboard_events.publish(connection.owner_user_id, "node.remove", {"node_id": node_id})
 
 
 mcp_app = mcp.streamable_http_app()
@@ -653,6 +722,7 @@ app = Starlette(
         Route("/auth/me", auth_me, methods=["GET"]),
         Route("/auth/google/start", auth_google_start, methods=["GET"]),
         Route("/auth/google/callback", auth_google_callback, methods=["GET"]),
+        WebSocketRoute("/ws/events", browser_events_websocket),
         WebSocketRoute("/ws/node", node_websocket),
         Mount("/", app=mcp_app),
     ],
