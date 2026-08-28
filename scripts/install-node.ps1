@@ -76,8 +76,16 @@ if (Test-Path $StateFile) {
 }
 
 $ExistingConfig = $null
+$ExistingConfigRaw = $null
+$ConfigBackupFile = "$ConfigFile.pre-update"
 if (Test-Path $ConfigFile) {
-  try { $ExistingConfig = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json } catch { $ExistingConfig = $null }
+  try {
+    $ExistingConfigRaw = Get-Content -Raw -Path $ConfigFile
+    $ExistingConfig = $ExistingConfigRaw | ConvertFrom-Json -ErrorAction Stop
+    Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
+  } catch {
+    throw "Existing Lucas configuration could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
+  }
 }
 
 Write-Host ""
@@ -231,18 +239,26 @@ $LaunchAtStartup = $true
 if ($ExistingConfig -and $null -ne $ExistingConfig.launch_at_startup) { $LaunchAtStartup = [bool]$ExistingConfig.launch_at_startup }
 $SecurityConfig = $null
 if ($ExistingConfig -and $null -ne $ExistingConfig.security) { $SecurityConfig = $ExistingConfig.security }
-$Config = [ordered]@{
-  gateway_ws_url = $GatewayUrl.TrimEnd('/')
-  node_id = $NodeId
-  node_name = $ConfigNodeName
-  pairing_code = $ConfigPairingCode
-  permission_level = $ConfigPermission
-  allowed_roots = $ConfigRoots
-  connection_enabled = $ConnectionEnabled
-  launch_at_startup = $LaunchAtStartup
-  security = $SecurityConfig
+if ($ExistingConfig -and $ExistingConfigRaw) {
+  # Updating an existing installation must preserve the complete local
+  # configuration byte-for-byte. This intentionally retains unknown
+  # future fields instead of rebuilding a partial allow-list of keys.
+  $ExistingConfigRaw | Set-Content -Path $ConfigFile -Encoding UTF8
+  $Config = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
+} else {
+  $Config = [ordered]@{
+    gateway_ws_url = $GatewayUrl.TrimEnd('/')
+    node_id = $NodeId
+    node_name = $ConfigNodeName
+    pairing_code = $ConfigPairingCode
+    permission_level = $ConfigPermission
+    allowed_roots = $ConfigRoots
+    connection_enabled = $ConnectionEnabled
+    launch_at_startup = $LaunchAtStartup
+    security = $SecurityConfig
+  }
+  $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
 }
-$Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigFile -Encoding UTF8
 
 $env:GWC_GATEWAY_WS = $Config.gateway_ws_url
 $env:GWC_NODE_ID = $Config.node_id
