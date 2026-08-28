@@ -137,6 +137,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     try:
         import tkinter as tk
         from tkinter import filedialog, messagebox, ttk
+        from PIL import Image, ImageTk
     except Exception as exc:
         raise RuntimeError(f"Lucas configuration UI is unavailable: {exc}") from exc
 
@@ -155,6 +156,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     root.geometry(f"{width}x{height}+{x}+{y}")
     root.minsize(980, 680)
     root.configure(bg=C["window"])
+    window_icon_image=None
+    try:
+        icon=Image.open(Path(__file__).with_name("assets")/"lucas-logo-square.png").convert("RGBA")
+        icon.thumbnail((64,64),Image.Resampling.LANCZOS)
+        window_icon_image=ImageTk.PhotoImage(icon)
+        root.iconphoto(True,window_icon_image)
+    except Exception:
+        pass
 
     style = ttk.Style(root)
     try: style.theme_use("vista")
@@ -203,9 +212,15 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     sidebar = tk.Frame(shell,bg=C["sidebar"],width=235); sidebar.pack(side="left",fill="y"); sidebar.pack_propagate(False)
     main = tk.Frame(shell,bg=C["window"]); main.pack(side="left",fill="both",expand=True)
 
-    brand = tk.Frame(sidebar,bg=C["sidebar"]); brand.pack(fill="x",padx=20,pady=(22,18))
-    tk.Label(brand,text="L",font=(FONT,13,"bold"),fg=C["white"],bg=C["blue"],width=2,height=1).pack(side="left")
-    tk.Label(brand,text="Lucas",font=(FONT,15,"bold"),fg=C["text"],bg=C["sidebar"]).pack(side="left",padx=(10,0))
+    brand = tk.Frame(sidebar,bg=C["sidebar"]); brand.pack(fill="x",padx=18,pady=(20,16))
+    brand_logo_image=None
+    try:
+        logo=Image.open(Path(__file__).with_name("assets")/"lucas-logo-horizontal.png").convert("RGBA")
+        logo.thumbnail((180,66),Image.Resampling.LANCZOS)
+        brand_logo_image=ImageTk.PhotoImage(logo)
+        tk.Label(brand,image=brand_logo_image,bg=C["sidebar"],bd=0).pack(side="left")
+    except Exception:
+        tk.Label(brand,text="Lucas",font=(FONT,15,"bold"),fg=C["text"],bg=C["sidebar"]).pack(side="left")
     search = tk.Entry(sidebar,font=(FONT,10),bg="#E9E9E9",fg=C["subtle"],relief="flat",bd=0)
     search.insert(0,"搜索设置..."); search.pack(fill="x",padx=14,ipady=8,pady=(0,18))
 

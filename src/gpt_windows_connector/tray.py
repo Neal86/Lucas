@@ -325,7 +325,12 @@ class LucasTray:
                 self._restart_attempts = 0
 
     def _make_icon(self, status: str) -> Any:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
+        asset = Path(__file__).with_name("assets") / "lucas-logo-square.png"
+        source = Image.open(asset).convert("RGBA")
+        source.thumbnail((58, 58), Image.Resampling.LANCZOS)
+        image = Image.new("RGBA", (64, 64), (255, 255, 255, 0))
+        image.alpha_composite(source, ((64 - source.width) // 2, (64 - source.height) // 2))
         palette = {
             "Online": (33, 180, 92, 255),
             "Connecting": (245, 166, 35, 255),
@@ -333,14 +338,9 @@ class LucasTray:
             "Disconnected": (120, 126, 137, 255),
             "Offline": (120, 126, 137, 255),
         }
-        image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((5, 5, 59, 59), radius=14, fill=palette.get(status, palette["Offline"]))
-        try:
-            font = ImageFont.truetype("segoeuib.ttf", 37)
-        except OSError:
-            font = ImageFont.load_default()
-        draw.text((20, 9), "L", fill=(255, 255, 255, 255), font=font)
+        draw.ellipse((46, 46, 63, 63), fill=(255, 255, 255, 255))
+        draw.ellipse((49, 49, 60, 60), fill=palette.get(status, palette["Offline"]))
         return image
 
     def _refresh_icon(self, force: bool = False) -> None:
