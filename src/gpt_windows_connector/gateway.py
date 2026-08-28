@@ -35,12 +35,14 @@ from .auth import (
 from .config import GatewaySettings
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
+from .task_runs import TaskRunStore
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 registration_security = RegistrationSecurity(db_path)
+task_runs = TaskRunStore(db_path)
 
 
 class AuthMiddleware:
@@ -322,17 +324,20 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     payload = dict(params or {})
     if include_workspace:
         payload["workspace"] = resolved_workspace
+    wall_started = time.time()
     started = time.monotonic()
     try:
         result = await registry.rpc(node_id, user.id, method, payload)
     except Exception as exc:
-        duration = time.monotonic() - started
+        duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration)
         auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=resolved_workspace)
         raise
-    duration = time.monotonic() - started
+    duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration)
     auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=resolved_workspace)
     return result
 
 

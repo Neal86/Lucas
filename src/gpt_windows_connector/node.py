@@ -18,12 +18,15 @@ import websockets
 from .config import NodeSettings
 from .executor import Executor
 from .settings_ui import configure_gui as _configure_gui
+from .task_runs import TaskRunStore
 
 APP_NAME = "Lucas"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
+TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
+local_task_runs = TaskRunStore(TASK_RUNS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
@@ -388,14 +391,22 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 await ws.send(json.dumps(payload, ensure_ascii=False))
 
         async def execute_request(request_id: object, method: str, params: dict) -> None:
+            wall_started=time.time(); status="success"; error_type=None
             try:
                 result = await executor.call(method, params)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                status="failed"; error_type=type(exc).__name__
                 log.exception("Execution failed: %s", method)
                 response = {"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            wall_ended=time.time()
+            try:
+                workspace=str(params.get("workspace") or "")
+                local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type} if error_type else {},context_key=workspace or "default")
+            except Exception:
+                log.exception("Could not record local Task Run")
             try:
                 await send_json(response)
             except Exception:

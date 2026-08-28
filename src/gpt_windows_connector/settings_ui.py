@@ -15,6 +15,8 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 
+from .task_runs import TaskRunStore
+
 APP_NAME = "Lucas"
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
@@ -23,6 +25,7 @@ STATE_FILE = CONFIG_DIR / "node-state.json"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
 TRAY_PID_FILE = CONFIG_DIR / "lucas-tray.pid"
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
+TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
 INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
 
@@ -94,7 +97,7 @@ def _save_config(config: dict[str, Any]) -> None:
     temp.replace(CONFIG_FILE)
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "文件访问", "网络", "规则", "系统访问"}
+    allowed = {"常规", "安全", "文件访问", "网络", "规则", "任务记录", "系统访问"}
     try:
         data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
         page = str(data.get("last_page") or "") if isinstance(data, dict) else ""
@@ -434,6 +437,33 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     wrap,body=scroll_page(); pages["规则"]=wrap
     section(body,"本地 Rules"); c=card(body); tk.Label(c,text="本地安全规则",font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",padx=18,pady=(16,4)); tk.Label(c,text="需要确认的操作会把规则摘要一起显示在本机审批窗口。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,10)); rules_text=tk.Text(c,height=8,font=(FONT,10),bg=C["control"],fg=C["text"],relief="flat",bd=0,wrap="word",padx=10,pady=9); rules_text.insert("1.0",rules_initial); rules_text.pack(fill="x",padx=18,pady=(0,14)); divider(c); row(c,"执行前显示规则摘要","审批时显示本地规则。",lambda p: switch(p,show_rule_summary))
+
+    tasks_wrapper,tasks_body=scroll_page(); pages["任务记录"]=tasks_wrapper
+    section(tasks_body,"任务记录")
+    task_card=card(tasks_body)
+    tk.Label(task_card,text="记录本机通过 Lucas 执行的大任务与小任务耗时。5 分钟无新操作后自动结束一个大任务。",font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=650,justify="left").pack(anchor="w",padx=18,pady=(14,10))
+    task_list=tk.Frame(task_card,bg=C["card"]); task_list.pack(fill="both",expand=True,padx=18,pady=(0,14))
+    def _duration_text(ms):
+        sec=max(0,int((ms or 0)/1000)); h,rem=divmod(sec,3600); m,s=divmod(rem,60)
+        return f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
+    def refresh_local_tasks():
+        for child in task_list.winfo_children(): child.destroy()
+        try: runs=TaskRunStore(TASK_RUNS_FILE).list_runs("local",node_id=node_id.get().strip() or None,limit=100)
+        except Exception as exc:
+            tk.Label(task_list,text=f"无法读取任务记录：{exc}",font=(FONT,9),fg=C["red"],bg=C["card"]).pack(anchor="w",pady=8); return
+        if not runs:
+            tk.Label(task_list,text="还没有任务记录。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",pady=8); return
+        for run in runs:
+            box=tk.Frame(task_list,bg=C["control"],highlightthickness=1,highlightbackground=C["line"]); box.pack(fill="x",pady=(0,8))
+            head=tk.Frame(box,bg=C["control"]); head.pack(fill="x",padx=12,pady=(10,6))
+            tk.Label(head,text=str(run.get("title") or "Lucas task"),font=(FONT,9,"bold"),fg=C["text"],bg=C["control"]).pack(side="left")
+            tk.Label(head,text=f"{run.get('status','')} · {_duration_text(run.get('duration_ms'))}",font=(FONT,9),fg=C["muted"],bg=C["control"]).pack(side="right")
+            for step in run.get("steps",[])[:20]:
+                row=tk.Frame(box,bg=C["control"]); row.pack(fill="x",padx=18,pady=2)
+                tk.Label(row,text=str(step.get("action") or "operation"),font=(FONT,8),fg=C["text"],bg=C["control"]).pack(side="left")
+                tk.Label(row,text=_duration_text(step.get("duration_ms")),font=(FONT,8),fg=C["muted"],bg=C["control"]).pack(side="right")
+    button(task_card,"刷新",refresh_local_tasks).pack(anchor="e",padx=18,pady=(0,14))
+    refresh_local_tasks()
 
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
