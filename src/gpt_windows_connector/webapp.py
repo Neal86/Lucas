@@ -235,7 +235,7 @@ async def api_logout(_: Request):
 
 async def api_nodes(request: Request):
     user = _auth_user(request)
-    online = {n["node_id"]: n for n in gateway.registry.list(user.id)}
+    online = {n["node_id"]: n for n in await gateway.registry.list(user)}
     with _db() as db:
         rows = db.execute("SELECT node_id,name,updated_at,permission_level,allowed_roots FROM nodes WHERE owner_user_id=? ORDER BY name", (user.id,)).fetchall()
     result = []
@@ -287,7 +287,7 @@ async def api_node_config(request: Request):
         live = gateway.registry.nodes.get(node_id)
         if live and live.owner_user_id == user.id:
             live.name = name
-            node = next((item for item in gateway.registry.list(user.id) if item["node_id"] == node_id), None)
+            node = next((item for item in await gateway.registry.list(user) if item["node_id"] == node_id), None)
         else:
             try:
                 roots = json.loads(updated.get("allowed_roots") or "[]")
