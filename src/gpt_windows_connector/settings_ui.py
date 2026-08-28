@@ -451,8 +451,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         "系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。",
     }
     def show_page(name):
+        nonlocal active_scroll_canvas
         for p in pages.values(): p.pack_forget()
-        pages[name].pack(fill="both",expand=True); title.set(name); subtitle.set(desc[name])
+        pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name])
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
     for name in ("常规","安全","文件访问","网络","规则","系统访问"):
         b=tk.Button(nav_frame,text=name,command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2")
