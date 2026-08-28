@@ -67,13 +67,29 @@ def _save_config(config: dict[str, object]) -> None:
 
 
 def _write_status(status: str, detail: str = "") -> None:
+    """Best-effort status publishing; UI file-lock races must never drop WebSocket."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     temporary = STATUS_FILE.with_name(f"{STATUS_FILE.name}.{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps({"status": status, "detail": detail, "time": time.time(), "pid": os.getpid(), "source": "node"}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary.replace(STATUS_FILE)
+    try:
+        temporary.write_text(
+            json.dumps({"status": status, "detail": detail, "time": time.time(), "pid": os.getpid(), "source": "node"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        for attempt in range(5):
+            try:
+                temporary.replace(STATUS_FILE)
+                return
+            except OSError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+    except OSError as exc:
+        log.debug("Could not update status file: %s", exc)
+    finally:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _legacy_configure_gui(existing: dict[str, object]) -> dict[str, object] | None:

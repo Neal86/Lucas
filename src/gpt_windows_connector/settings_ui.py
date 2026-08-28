@@ -430,11 +430,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): messagebox.showerror("Lucas","电脑名称和 Node ID 不能为空。"); return
         if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]; code=pairing_code.get().strip()
-        if code:
+        # A stale pairing_code may still be present in config from an older install.
+        # Never destroy a valid node token just because unrelated security settings are saved.
+        re_pair=bool(pairing_mode.get() and code)
+        if re_pair:
             try: STATE_FILE.unlink(missing_ok=True)
             except OSError as exc: messagebox.showerror("Lucas",f"无法重置旧的配对状态：{exc}"); return
-        updated=dict(existing); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"pairing_code":code or None,"permission_level":permission.get(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True)
-        if code: updated["connection_enabled"]=True
+        updated=dict(existing); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"pairing_code":code if re_pair else None,"permission_level":permission.get(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True)
+        if re_pair: updated["connection_enabled"]=True
         elif not _has_saved_token(): updated["connection_enabled"]=False
         else: updated.setdefault("connection_enabled",True)
         _save_config(updated); result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
