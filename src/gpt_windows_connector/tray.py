@@ -209,9 +209,46 @@ class LucasTray:
         log.info("Launch at startup=%s", enabled)
         self._refresh_icon(force=True)
 
+    def _focus_settings_window(self) -> bool:
+        if sys.platform != "win32":
+            return False
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            found = []
+            @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+            def enum_proc(hwnd, _lparam):
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length <= 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                title = buf.value.strip()
+                if title in {"Lucas Settings", "Lucas 设置"}:
+                    found.append(hwnd)
+                    return False
+                return True
+            user32.EnumWindows(enum_proc, 0)
+            if not found:
+                return False
+            hwnd = found[0]
+            SW_RESTORE = 9
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            return True
+        except Exception:
+            log.exception("Could not focus Lucas Settings window")
+            return False
+
     def _open_settings(self, icon: Any = None, item: Any = None) -> None:
         process = self._settings_process
         if process is not None and process.poll() is None:
+            self._focus_settings_window()
+            return
+        if self._focus_settings_window():
             return
         try:
             pythonw = self._runtime_pythonw()
