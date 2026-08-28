@@ -313,11 +313,20 @@ try {
 }
 
 Write-Host "[Lucas] Starting in the Windows notification area..." -ForegroundColor Green
-# Start the tray directly for the current session. The scheduled task is the
-# watchdog for future logons/restarts; starting it here can be unreliable while
-# the installer is replacing the same runtime files.
-Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
-Start-Sleep -Seconds 2
+# Start through Task Scheduler so Windows owns and supervises the tray process
+# immediately. If Task Scheduler cannot start it, fall back to direct launch.
+$TrayStarted = $false
+try {
+  Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+  Start-Sleep -Seconds 2
+  $TrayStarted = $true
+} catch {
+  Write-Host "[Lucas] Scheduled tray start failed; using direct fallback..." -ForegroundColor Yellow
+}
+if (-not $TrayStarted) {
+  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.tray" -WindowStyle Hidden
+  Start-Sleep -Seconds 2
+}
 
 # Installation always finishes by opening the Lucas app (Settings). The tray and
 # node are already running in the background; Settings is the visible app surface.

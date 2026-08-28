@@ -362,12 +362,24 @@ class LucasTray:
                 self._restart_attempts = 0
 
     def _make_icon(self, status: str) -> Any:
-        from PIL import Image, ImageDraw
-        asset = Path(__file__).with_name("assets") / "lucas-logo-square.png"
-        source = Image.open(asset).convert("RGBA")
-        source.thumbnail((58, 58), Image.Resampling.LANCZOS)
+        from PIL import Image, ImageDraw, ImageFont
         image = Image.new("RGBA", (64, 64), (255, 255, 255, 0))
-        image.alpha_composite(source, ((64 - source.width) // 2, (64 - source.height) // 2))
+        try:
+            asset = Path(__file__).with_name("assets") / "lucas-logo-square.png"
+            source = Image.open(asset).convert("RGBA")
+            source.thumbnail((58, 58), Image.Resampling.LANCZOS)
+            image.alpha_composite(source, ((64 - source.width) // 2, (64 - source.height) // 2))
+        except Exception:
+            # Branding must never be able to kill the background tray agent.
+            log.exception("Could not load Lucas tray logo; using built-in fallback")
+            draw = ImageDraw.Draw(image)
+            draw.rounded_rectangle((5, 5, 59, 59), radius=12, fill=(21, 94, 239, 255))
+            try:
+                font = ImageFont.truetype("arialbd.ttf", 34)
+            except Exception:
+                font = ImageFont.load_default()
+            box = draw.textbbox((0, 0), "L", font=font)
+            draw.text(((64-(box[2]-box[0]))/2, (64-(box[3]-box[1]))/2-2), "L", font=font, fill=(255,255,255,255))
         palette = {
             "Online": (33, 180, 92, 255),
             "Connecting": (245, 166, 35, 255),
