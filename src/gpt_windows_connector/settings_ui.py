@@ -15,6 +15,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 
+from .access_control import LocalAccessStore, clamp_permission, clamp_roots
 from .task_runs import TaskRunStore
 
 APP_NAME = "Lucas"
@@ -26,6 +27,7 @@ STATUS_FILE = CONFIG_DIR / "node-status.json"
 TRAY_PID_FILE = CONFIG_DIR / "lucas-tray.pid"
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
+ACCESS_FILE = CONFIG_DIR / "node-access.json"
 LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
 INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
 
@@ -97,7 +99,7 @@ def _save_config(config: dict[str, Any]) -> None:
     temp.replace(CONFIG_FILE)
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "文件访问", "网络", "规则", "任务记录", "系统访问"}
+    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "规则", "任务记录", "系统访问"}
     try:
         data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
         page = str(data.get("last_page") or "") if isinstance(data, dict) else ""
@@ -180,6 +182,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     permission = tk.StringVar(value=str(existing.get("permission_level") or "operate").lower())
     if permission.get() not in {"read","operate","admin"}: permission.set("operate")
     roots = [str(x) for x in existing.get("allowed_roots",[]) if str(x).strip()] or [str(Path.home().resolve())]
+    access_store = LocalAccessStore(ACCESS_FILE)
     security = dict(existing.get("security") or {}) if isinstance(existing.get("security"),dict) else {}
     approval = dict(security.get("approval_policy") or {}) if isinstance(security.get("approval_policy"),dict) else {}
 
@@ -420,6 +423,70 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if i<len(prs)-1: divider(c)
     divider(c); row(c,"记住本次会话已批准操作","只记住完全相同操作；Lucas 重启后自动清除。",lambda p: switch(p,remember_approvals))
 
+    wrap,body=scroll_page(); pages["用户与权限"]=wrap
+    section(body,"已授权 Lucas 用户"); users_card=card(body)
+    tk.Label(users_card,text="只有在这台电脑上批准过的 Lucas 用户才能操作此 Node。权限和目录以这里的本地设置为最终准则。",font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=680,justify="left").pack(anchor="w",padx=18,pady=(14,10))
+    users_shell=tk.Frame(users_card,bg=C["card"]); users_shell.pack(fill="both",expand=True,padx=18,pady=(0,14))
+    user_list=tk.Listbox(users_shell,width=34,height=13,font=(FONT,9),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); user_list.pack(side="left",fill="y")
+    user_editor=tk.Frame(users_shell,bg=C["card"]); user_editor.pack(side="left",fill="both",expand=True,padx=(18,0))
+    selected_user_id={"value":""}; user_records=[]
+    user_identity=tk.StringVar(value="选择一个用户"); user_permission=tk.StringVar(value="read")
+    tk.Label(user_editor,textvariable=user_identity,font=(FONT,11,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",pady=(2,12))
+    perm_row=tk.Frame(user_editor,bg=C["card"]); perm_row.pack(fill="x",pady=(0,10)); tk.Label(perm_row,text="权限",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left"); combo(perm_row,user_permission,["read","operate","admin"],12).pack(side="right")
+    tk.Label(user_editor,text="允许访问的文件夹",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
+    user_roots=tk.Listbox(user_editor,selectmode="multiple",height=7,font=(FONT,9),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); user_roots.pack(fill="x",pady=(5,10))
+    for item in roots: user_roots.insert("end",item)
+    user_note=tk.StringVar(value="用户权限不会超过 Node 总权限，目录不会超出 Allowed Folders。"); tk.Label(user_editor,textvariable=user_note,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=430,justify="left").pack(anchor="w")
+    user_actions=tk.Frame(user_editor,bg=C["card"]); user_actions.pack(fill="x",pady=(14,0))
+
+    def refresh_users(select_id=None):
+        nonlocal user_records
+        user_records=access_store.list_users(); user_list.delete(0,"end")
+        target=None
+        for idx,record in enumerate(user_records):
+            label=str(record.get("name") or record.get("email") or record.get("user_id") or "未知用户")
+            permission_value=str(record.get("permission_level") or "read")
+            user_list.insert("end",f"{label}   [{permission_value}]")
+            if select_id and str(record.get("user_id"))==str(select_id): target=idx
+        if user_records:
+            index=target if target is not None else 0; user_list.selection_clear(0,"end"); user_list.selection_set(index); user_list.activate(index); load_user()
+        else:
+            selected_user_id["value"]=""; user_identity.set("暂无已授权用户"); user_permission.set("read"); user_roots.selection_clear(0,"end")
+
+    def load_user(*_):
+        sel=user_list.curselection()
+        if not sel or sel[0]>=len(user_records): return
+        record=user_records[sel[0]]; selected_user_id["value"]=str(record.get("user_id") or "")
+        name=str(record.get("name") or record.get("email") or selected_user_id["value"]); email=str(record.get("email") or "")
+        user_identity.set(name + (f"  ·  {email}" if email and email!=name else "")); user_permission.set(str(record.get("permission_level") or "read"))
+        user_roots.selection_clear(0,"end"); granted={str(Path(v).expanduser().resolve()) for v in (record.get("allowed_roots") or [])}
+        for idx,path in enumerate(roots):
+            try: resolved=str(Path(path).expanduser().resolve())
+            except Exception: resolved=path
+            if resolved in granted: user_roots.selection_set(idx)
+    user_list.bind("<<ListboxSelect>>",load_user)
+
+    def save_user_access():
+        uid=selected_user_id["value"]
+        if not uid: return
+        record=next((r for r in user_records if str(r.get("user_id"))==uid),None)
+        if not record: return
+        selected=[roots[i] for i in user_roots.curselection()]; selected=clamp_roots(selected,roots)
+        if not selected: messagebox.showerror("Lucas","请至少为该用户选择一个允许访问的文件夹。"); return
+        effective_permission=clamp_permission(user_permission.get(),permission.get())
+        access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},effective_permission,selected,enabled=True)
+        user_note.set("已保存。新权限会在该用户下一次操作时立即生效。"); refresh_users(uid)
+
+    def revoke_user_access():
+        uid=selected_user_id["value"]
+        if not uid: return
+        record=next((r for r in user_records if str(r.get("user_id"))==uid),None); label=str((record or {}).get("name") or (record or {}).get("email") or uid)
+        if not messagebox.askyesno("Lucas",f"撤销 {label} 对这台电脑的访问权限？\n\n撤销后，该用户必须重新在本机获得批准。"): return
+        access_store.remove(uid); user_note.set("已撤销访问。"); refresh_users()
+    button(user_actions,"保存权限",save_user_access,primary=True).pack(side="right"); button(user_actions,"撤销访问",revoke_user_access,danger=True).pack(side="right",padx=(0,8)); button(user_actions,"刷新",lambda: refresh_users(selected_user_id["value"])).pack(side="right",padx=(0,8))
+    refresh_users()
+    c=card(body); row(c,"本地最终授权","VPS 只负责转发用户身份和请求。是否允许执行、实际权限和允许目录都由此 Windows Node 再次检查。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
+
     wrap,body=scroll_page(); pages["文件访问"]=wrap
     section(body,"沙箱与文件访问"); c=card(body); tk.Label(c,text="仅允许访问以下文件夹",font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",padx=18,pady=(16,4)); tk.Label(c,text="文件读写、上传、下载与项目工作区都受此列表限制。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,10)); lw=tk.Frame(c,bg=C["card"]); lw.pack(fill="both",padx=18,pady=(0,16)); roots_list=tk.Listbox(lw,height=9,font=(FONT,10),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); roots_list.pack(side="left",fill="both",expand=True)
     for item in roots: roots_list.insert("end",item)
@@ -468,7 +535,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
 
-    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
+    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","用户与权限":"管理哪些 Lucas 用户可以操作此电脑，以及每个用户的权限和允许目录。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
     def show_page(name):
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
@@ -476,7 +543,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name]); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
-    for name in ("常规","安全","文件访问","网络","规则","任务记录","系统访问"):
+    for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","系统访问"):
         b=tk.Button(nav_frame,text=name,command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
