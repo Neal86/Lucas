@@ -468,7 +468,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
 
-    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
+    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
     def show_page(name):
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
@@ -476,7 +476,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name]); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
-    for name in ("常规","安全","文件访问","网络","规则","系统访问"):
+    for name in ("常规","安全","文件访问","网络","规则","任务记录","系统访问"):
         b=tk.Button(nav_frame,text=name,command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
