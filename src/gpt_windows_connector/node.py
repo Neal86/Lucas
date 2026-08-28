@@ -437,6 +437,45 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
         # report status, but it is never allowed to overwrite local permissions.
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         _write_status("Online")
+        owner_user_id = str(welcome.get("owner_user_id") or "").strip()
+        node_roots = [str(path) for path in settings.allowed_roots]
+        session_grants: dict[str, dict[str, object]] = {}
+
+        def effective_access(actor: dict[str, object]) -> dict[str, object] | None:
+            user_id = str(actor.get("user_id") or "").strip()
+            if not user_id:
+                return None
+            if owner_user_id and user_id == owner_user_id:
+                return {"user_id": user_id, "owner": True, "permission_level": settings.permission_level, "allowed_roots": node_roots}
+            temporary = session_grants.get(user_id)
+            if temporary:
+                return dict(temporary)
+            saved = local_access.effective(user_id, settings.permission_level, node_roots)
+            return dict(saved) if saved else None
+
+        async def request_access(actor: dict[str, object], requested_permission: str) -> dict[str, object]:
+            user_id = str(actor.get("user_id") or "").strip()
+            if not user_id:
+                return {"authorized": False, "error": "missing user identity"}
+            current = effective_access(actor)
+            if current:
+                return {"authorized": True, **current}
+            decision = await asyncio.to_thread(_prompt_access_request, actor, requested_permission, node_roots)
+            choice = str(decision.get("decision") or "deny")
+            roots = clamp_roots([str(item) for item in decision.get("allowed_roots") or []], node_roots)
+            permission_level = clamp_permission(str(decision.get("permission_level") or "read"), settings.permission_level)
+            if choice not in {"once", "always"} or not roots:
+                log.info("Local access denied for user %s", user_id)
+                return {"authorized": False, "decision": "deny"}
+            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "permission_level": permission_level, "allowed_roots": roots, "owner": False}
+            if choice == "always":
+                saved = local_access.upsert(actor, permission_level, roots)
+                grant.update(saved)
+            else:
+                session_grants[user_id] = dict(grant)
+            log.info("Local access approved for user %s permission=%s mode=%s", user_id, permission_level, choice)
+            return {"authorized": True, "decision": choice, **grant}
+
         send_lock = asyncio.Lock()
         request_tasks: set[asyncio.Task[None]] = set()
 
@@ -444,10 +483,21 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             async with send_lock:
                 await ws.send(json.dumps(payload, ensure_ascii=False))
 
-        async def execute_request(request_id: object, method: str, params: dict) -> None:
+        async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
             wall_started=time.time(); status="success"; error_type=None
             try:
-                result = await executor.call(method, params)
+                access = effective_access(actor)
+                if not access:
+                    raise PermissionError("This Lucas user has not been approved on the Windows Node")
+                user_id = str(access.get("user_id") or "")
+                if access.get("owner"):
+                    active_executor = executor
+                else:
+                    roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
+                    active_executor = Executor(roots, str(access.get("permission_level") or "read"), _load_config())
+                result = await active_executor.call(method, params)
+                if user_id and not access.get("owner") and user_id not in session_grants:
+                    local_access.touch(user_id)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
             except asyncio.CancelledError:
                 raise
@@ -481,6 +531,19 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 request_id = message.get("id")
                 method = message.get("method", "")
                 params = message.get("params") or {}
+                actor = message.get("actor") if isinstance(message.get("actor"), dict) else {}
+                if method == "access.request":
+                    try:
+                        result = await request_access(actor, str(params.get("requested_permission") or "operate"))
+                        await send_json({"type": "response", "id": request_id, "ok": True, "result": result})
+                    except Exception as exc:
+                        log.exception("Access approval failed")
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
+                    continue
+                if method == "access.check":
+                    access = effective_access(actor)
+                    await send_json({"type": "response", "id": request_id, "ok": True, "result": ({"authorized": True, **access} if access else {"authorized": False})})
+                    continue
                 if method == "node.configure":
                     await send_json({
                         "type": "response", "id": request_id, "ok": False,
@@ -488,6 +551,9 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                     })
                     continue
                 if method == "node.logs":
+                    if not owner_user_id or str(actor.get("user_id") or "") != owner_user_id:
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Node logs are owner-only"})
+                        continue
                     try:
                         limit = max(20, min(int(params.get("limit", 200)), 1000))
                         lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:] if LOG_FILE.exists() else []
@@ -496,7 +562,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                         await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
                     continue
 
-                task = asyncio.create_task(execute_request(request_id, method, params), name=f"lucas:{method}:{request_id}")
+                task = asyncio.create_task(execute_request(request_id, method, params, actor), name=f"lucas:{method}:{request_id}")
                 request_tasks.add(task)
                 task.add_done_callback(request_tasks.discard)
         finally:
