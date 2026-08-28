@@ -8,6 +8,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import urllib.request
 import uuid
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -54,7 +55,15 @@ def _version_key(value: str) -> tuple[int,...]:
 
 def _fetch_latest_version(timeout: float = 5.0) -> str | None:
     try:
-        with urllib.request.urlopen(LATEST_VERSION_URL, timeout=timeout) as response:
+        request = urllib.request.Request(
+            f"{LATEST_VERSION_URL}?t={int(time.time())}",
+            headers={
+                "Cache-Control":"no-cache",
+                "Pragma":"no-cache",
+                "User-Agent":"Lucas-Node-Updater",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             text=response.read().decode("utf-8",errors="replace")
         for line in text.splitlines():
             if line.strip().startswith("version ="):
@@ -338,28 +347,47 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     refresh_pairing_control()
 
     section(body,"Lucas Node"); c=card(body)
-    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None
+    current_version=_app_version()
+    version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…")
+    update_button=None
+    update_control=None
     def run_update():
         if not messagebox.askyesno("Lucas","更新 Lucas Node？现有配对、Allowed Folders 和安全设置会保留。"): return
         try:
+            version_status.set("正在启动更新…")
+            if update_button is not None: update_button.configure(state="disabled")
             script_path=Path(tempfile.gettempdir())/"Lucas-Node-update.ps1"
-            urllib.request.urlretrieve(INSTALLER_URL,script_path)
+            request=urllib.request.Request(
+                f"{INSTALLER_URL}?t={int(time.time())}",
+                headers={"Cache-Control":"no-cache","Pragma":"no-cache","User-Agent":"Lucas-Node-Updater"},
+            )
+            with urllib.request.urlopen(request,timeout=15) as response:
+                script_path.write_bytes(response.read())
             subprocess.Popen(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(script_path)],creationflags=getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0))
-            root.destroy()
+            root.after(300,root.destroy)
         except Exception as exc:
+            version_status.set(f"更新启动失败：{exc}")
+            if update_button is not None: update_button.configure(state="normal")
             messagebox.showerror("Lucas",f"无法启动更新：{exc}")
     def build_update_control(p):
-        nonlocal update_button
-        update_button=button(p,"更新 Node",run_update,primary=True); update_button.configure(state="disabled"); return update_button
-    row(c,"Lucas Node","检测到新版本时可直接升级；更新会保留本机现有配置。",build_update_control); divider(c)
-    row(c,"版本状态","",lambda p: tk.Label(p,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]))
+        nonlocal update_button,update_control
+        update_control=tk.Frame(p,bg=C["card"])
+        tk.Label(update_control,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]).pack(side="left")
+        update_button=button(update_control,"更新 Node",run_update)
+        return update_control
+    row(c,"Lucas Node","自动检查新版本；仅检测到新版时显示更新按钮。",build_update_control)
     def check_update_worker():
         latest=_fetch_latest_version()
         def apply_result():
+            if update_button is not None: update_button.pack_forget()
             if not latest:
-                version_status.set(f"当前版本 {current_version} · 无法检查更新"); return
+                version_status.set(f"当前版本 {current_version} · 无法检查更新")
+                return
             if current_version != "dev" and _version_key(latest)>_version_key(current_version):
-                version_status.set(f"当前版本 {current_version} · 新版本 {latest} 可用"); update_button.configure(state="normal")
+                version_status.set(f"新版本 {latest} 可用")
+                if update_button is not None:
+                    update_button.configure(state="normal")
+                    update_button.pack(side="left",padx=(10,0))
             else:
                 version_status.set(f"当前版本 {current_version} · 已是最新版本")
         try: root.after(0,apply_result)
@@ -501,9 +529,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
         code=pairing_code.get().strip()
-        # Entering a pairing code explicitly starts a fresh pairing session. Keep
-        # the old token until Save is pressed, then remove it so the next node
-        # connection must exchange this code for a new token.
         if code:
             try:
                 STATE_FILE.unlink(missing_ok=True)
@@ -522,8 +547,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             },
         })
         updated.setdefault("launch_at_startup",True)
-        # Saving a pairing code also connects immediately. An unpaired install
-        # without a code remains disconnected instead of retrying anonymously.
         if code:
             updated["connection_enabled"] = True
         elif not _has_saved_token():
