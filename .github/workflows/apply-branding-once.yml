@@ -29,6 +29,18 @@ jobs:
               raise SystemExit('Expected Lucas 1.7.5 before branding migration')
           p.write_text(s.replace('version = "1.7.5"','version = "1.7.4"',1),encoding='utf-8')
           PY
+      - name: Patch migration compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-branding.py')
+          s=p.read_text(encoding='utf-8')
+          old='''    count = text.count(old)\n    if count != 1:\n'''
+          new='''    count = text.count(old)\n    if label == "web logo styles" and count >= 1:\n        return text.replace(old, new, 1)\n    if count != 1:\n'''
+          if old not in s:
+              raise SystemExit('Could not patch branding migration compatibility')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
       - name: Apply branding
         run: python scripts/apply-branding.py
       - name: Set release version
