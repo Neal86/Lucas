@@ -324,13 +324,16 @@ def _user():
     return current_user(required=True)
 
 
+def _actor(user) -> dict:
+    return {"user_id": user.id, "email": user.email, "name": user.name or ""}
+
+
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True):
     user = _user()
-    registry.require_owned(node_id, user.id)
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
-    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
     resolved_workspace = str(verified["path"])
     payload = dict(params or {})
     if include_workspace:
@@ -338,7 +341,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     wall_started = time.time()
     started = time.monotonic()
     try:
-        result = await registry.rpc(node_id, user.id, method, payload)
+        result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user))
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration)
@@ -523,7 +526,7 @@ def node_pair(node_id: str, name: str | None = None, ttl_seconds: int = 600) -> 
 async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) -> dict:
     user = _user()
     registry.require_owned(node_id, user.id)
-    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace})
+    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
     return registry.acquire_control(node_id, user.id, str(verified["path"]), ttl_seconds)
 
 
