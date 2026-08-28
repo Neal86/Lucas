@@ -3,7 +3,12 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import re
 import socket
+import subprocess
+import tempfile
+import threading
+import urllib.request
 import uuid
 from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
