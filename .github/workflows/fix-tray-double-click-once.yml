@@ -1,0 +1,50 @@
+name: Fix tray double click once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fix-tray-double-click-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fix tray settings activation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/gpt_windows_connector/tray.py')
+          s=p.read_text(encoding='utf-8')
+          old='''    def _open_settings(self, icon: Any = None, item: Any = None) -> None:\n        process = self._settings_process\n        if process is not None and process.poll() is None:\n            return\n        try:\n'''
+          new='''    def _focus_settings_window(self) -> bool:\n        if sys.platform != "win32":\n            return False\n        try:\n            import ctypes\n            user32 = ctypes.windll.user32\n            found = []\n            @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)\n            def enum_proc(hwnd, _lparam):\n                if not user32.IsWindowVisible(hwnd):\n                    return True\n                length = user32.GetWindowTextLengthW(hwnd)\n                if length <= 0:\n                    return True\n                buf = ctypes.create_unicode_buffer(length + 1)\n                user32.GetWindowTextW(hwnd, buf, length + 1)\n                title = buf.value.strip()\n                if title in {"Lucas Settings", "Lucas 设置"}:\n                    found.append(hwnd)\n                    return False\n                return True\n            user32.EnumWindows(enum_proc, 0)\n            if not found:\n                return False\n            hwnd = found[0]\n            SW_RESTORE = 9\n            user32.ShowWindow(hwnd, SW_RESTORE)\n            user32.BringWindowToTop(hwnd)\n            user32.SetForegroundWindow(hwnd)\n            return True\n        except Exception:\n            log.exception("Could not focus Lucas Settings window")\n            return False\n\n    def _open_settings(self, icon: Any = None, item: Any = None) -> None:\n        process = self._settings_process\n        if process is not None and process.poll() is None:\n            self._focus_settings_window()\n            return\n        if self._focus_settings_window():\n            return\n        try:\n'''
+          if old not in s:
+              raise SystemExit('Expected _open_settings block not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+
+          p=Path('pyproject.toml')
+          s=p.read_text(encoding='utf-8')
+          if 'version = "1.7.6"' not in s:
+              raise SystemExit('Expected version 1.7.6')
+          p.write_text(s.replace('version = "1.7.6"','version = "1.7.7"',1),encoding='utf-8')
+          PY
+      - name: Validate compile
+        run: python -m compileall -q src
+      - name: Remove one-time workflow
+        run: rm -f .github/workflows/fix-tray-double-click-once.yml
+      - name: Commit fix
+        run: |
+          git config user.name "Neal86"
+          git config user.email "52608308+Neal86@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix tray double click opening Settings [skip ci]"
+          git push
