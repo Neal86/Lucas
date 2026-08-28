@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 
 import websockets
 
+from .access_control import LocalAccessStore, clamp_permission, clamp_roots
 from .config import NodeSettings
 from .executor import Executor
 from .settings_ui import configure_gui as _configure_gui
@@ -26,7 +27,9 @@ CONFIG_FILE = CONFIG_DIR / "node-config.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
+ACCESS_FILE = CONFIG_DIR / "node-access.json"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
+local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
@@ -354,6 +357,57 @@ def _save_token(settings: NodeSettings, token: str) -> None:
     temporary = settings.state_file.with_suffix(".tmp")
     temporary.write_text(json.dumps({"node_id": settings.node_id, "node_token": token}, indent=2), encoding="utf-8")
     temporary.replace(settings.state_file)
+
+
+def _prompt_access_request(actor: dict[str, object], requested_permission: str, node_roots: list[str]) -> dict[str, object]:
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception as exc:
+        return {"decision": "deny", "error": f"approval UI unavailable: {exc}"}
+
+    result: dict[str, object] = {"decision": "deny"}
+    root = tk.Tk()
+    root.title("Lucas 访问请求")
+    root.geometry("560x520")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+    frame = tk.Frame(root, padx=24, pady=22)
+    frame.pack(fill="both", expand=True)
+    display = str(actor.get("name") or actor.get("email") or actor.get("user_id") or "未知用户")
+    email = str(actor.get("email") or "")
+    tk.Label(frame, text="新的 Lucas 用户请求访问此电脑", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+    tk.Label(frame, text=display, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(18, 2))
+    if email and email != display:
+        tk.Label(frame, text=email, font=("Segoe UI", 9), fg="#666666").pack(anchor="w")
+    tk.Label(frame, text="只有你在此电脑上批准后，该用户才能通过 Lucas 执行操作。", font=("Segoe UI", 9), fg="#555555", wraplength=500, justify="left").pack(anchor="w", pady=(10, 18))
+
+    tk.Label(frame, text="权限", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    permission = tk.StringVar(value=requested_permission if requested_permission in {"read", "operate", "admin"} else "operate")
+    ttk.Combobox(frame, textvariable=permission, values=["read", "operate", "admin"], state="readonly", width=24).pack(anchor="w", pady=(5, 14))
+
+    tk.Label(frame, text="允许访问的文件夹", font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    folders = tk.Listbox(frame, selectmode="multiple", height=min(max(len(node_roots), 4), 9), width=70)
+    folders.pack(fill="x", pady=(5, 8))
+    for index, path in enumerate(node_roots):
+        folders.insert("end", path)
+        folders.selection_set(index)
+    tk.Label(frame, text="权限不能超过此 Node 的总权限，文件夹也不能超出 Allowed Folders。", font=("Segoe UI", 8), fg="#777777").pack(anchor="w")
+
+    actions = tk.Frame(frame)
+    actions.pack(side="bottom", fill="x", pady=(24, 0))
+
+    def finish(decision: str) -> None:
+        selected = [node_roots[i] for i in folders.curselection()]
+        result.update({"decision": decision, "permission_level": permission.get(), "allowed_roots": selected})
+        root.destroy()
+
+    tk.Button(actions, text="拒绝", command=lambda: finish("deny"), padx=14, pady=7).pack(side="right")
+    tk.Button(actions, text="允许一次", command=lambda: finish("once"), padx=14, pady=7).pack(side="right", padx=(0, 8))
+    tk.Button(actions, text="始终允许", command=lambda: finish("always"), padx=14, pady=7).pack(side="right", padx=(0, 8))
+    root.protocol("WM_DELETE_WINDOW", lambda: finish("deny"))
+    root.mainloop()
+    return result
 
 
 async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
