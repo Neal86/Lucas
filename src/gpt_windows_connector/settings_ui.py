@@ -219,7 +219,25 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     DT={"allow":"直接允许","ask":"需要确认","always_ask":"始终确认","block":"阻止"}
     def decision_control(parent,var):
         display=tk.StringVar(value=DT.get(var.get(),"需要确认")); c=combo(parent,display,list(DT.values()),12)
-        display.trace_add("write",lambda *_: var.set({v:k for k,v in DT.items()}.get(display.get(),"ask"))); return c
+        syncing={"value":False}
+        reverse={v:k for k,v in DT.items()}
+        def display_to_policy(*_):
+            if syncing["value"]: return
+            value=reverse.get(display.get(),"ask")
+            if var.get()==value: return
+            syncing["value"]=True
+            try: var.set(value)
+            finally: syncing["value"]=False
+        def policy_to_display(*_):
+            if syncing["value"]: return
+            value=DT.get(var.get(),"需要确认")
+            if display.get()==value: return
+            syncing["value"]=True
+            try: display.set(value)
+            finally: syncing["value"]=False
+        display.trace_add("write",display_to_policy)
+        var.trace_add("write",policy_to_display)
+        return c
 
     # 常规
     wrap,body=scroll_page(); pages["常规"]=wrap
