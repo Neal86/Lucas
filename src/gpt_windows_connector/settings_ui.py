@@ -22,6 +22,7 @@ CONFIG_FILE = CONFIG_DIR / "node-config.json"
 STATE_FILE = CONFIG_DIR / "node-state.json"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
 TRAY_PID_FILE = CONFIG_DIR / "lucas-tray.pid"
+UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
 INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
 
@@ -91,6 +92,24 @@ def _save_config(config: dict[str, Any]) -> None:
     temp = CONFIG_FILE.with_name(f"{CONFIG_FILE.name}.{os.getpid()}.tmp")
     temp.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     temp.replace(CONFIG_FILE)
+
+def _load_last_page() -> str:
+    allowed = {"常规", "安全", "文件访问", "网络", "规则", "系统访问"}
+    try:
+        data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
+        page = str(data.get("last_page") or "") if isinstance(data, dict) else ""
+        return page if page in allowed else "常规"
+    except (OSError, json.JSONDecodeError):
+        return "常规"
+
+def _save_last_page(page: str) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        temp = UI_STATE_FILE.with_name(f"{UI_STATE_FILE.name}.{os.getpid()}.tmp")
+        temp.write_text(json.dumps({"last_page": page}, ensure_ascii=False), encoding="utf-8")
+        temp.replace(UI_STATE_FILE)
+    except OSError:
+        pass
 
 def _restart_node_for_apply() -> None:
     """Ask the running tray to recreate Node by safely terminating its managed child."""
@@ -407,8 +426,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
     def show_page(name):
         nonlocal active_scroll_canvas
+        if name not in pages: name="常规"
         for p in pages.values(): p.pack_forget()
-        pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name])
+        pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name]); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
     for name in ("常规","安全","文件访问","网络","规则","系统访问"):
@@ -448,6 +468,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         root.after(1800,reset_feedback)
 
     save_button=button(fi,"保存更改",save,primary=True); save_button.pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10)); button(fi,"取消",root.destroy).pack(side="right",padx=(0,10))
-    show_page("常规" if not _has_saved_token() else "安全")
+    show_page(_load_last_page())
     if not _has_saved_token(): root.after(200, pairing_entry.focus_set)
     refresh_connection_status(); root.mainloop(); return result
