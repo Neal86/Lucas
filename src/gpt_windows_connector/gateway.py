@@ -215,10 +215,14 @@ class NodeRegistry:
             })
         return out
 
-    def require_owned(self, node_id: str, user_id: str) -> NodeConnection:
+    def require_online(self, node_id: str) -> NodeConnection:
         node = self.nodes.get(node_id)
         if not node:
             raise RuntimeError(f"Node is offline: {node_id}")
+        return node
+
+    def require_owned(self, node_id: str, user_id: str) -> NodeConnection:
+        node = self.require_online(node_id)
         if node.owner_user_id != user_id:
             raise PermissionError("Node does not belong to the authenticated user")
         return node
@@ -254,14 +258,14 @@ class NodeRegistry:
             "expires_at": current.expires_at if current and current.owner_user_id == user_id else None,
         }
 
-    async def rpc(self, node_id: str, user_id: str, method: str, params: dict, timeout: float = 180.0) -> Any:
-        node = self.require_owned(node_id, user_id)
+    async def rpc(self, node_id: str, user_id: str, method: str, params: dict, timeout: float = 180.0, actor: dict | None = None) -> Any:
+        node = self.require_online(node_id)
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         node.pending[request_id] = future
         try:
             async with node.send_lock:
-                await node.websocket.send_json({"type": "request", "id": request_id, "method": method, "params": params})
+                await node.websocket.send_json({"type": "request", "id": request_id, "method": method, "params": params, "actor": actor or {"user_id": user_id}})
             return await asyncio.wait_for(future, timeout=timeout)
         finally:
             node.pending.pop(request_id, None)
