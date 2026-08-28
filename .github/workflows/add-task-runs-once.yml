@@ -19,6 +19,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Patch migration compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-task-runs.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace("m=re.search(r'(?m)^    system_wrapper,system_body=scroll_page\\(\\); pages\\[\"系统访问\"\\]=system_wrapper\\s*$',s)", "m=re.search(r'(?m)^    wrap,body=scroll_page\\(\\); pages\\[\"系统访问\"\\]=wrap\\s*$',s)")
+          s=s.replace('normal_button(task_card,"刷新",refresh_local_tasks)', 'button(task_card,"刷新",refresh_local_tasks)')
+          p.write_text(s,encoding='utf-8')
+          PY
       - name: Apply Task Runs migration
         run: python scripts/apply-task-runs.py
       - name: Validate
@@ -29,8 +39,10 @@ jobs:
           assert Path('src/gpt_windows_connector/task_runs.py').exists()
           assert 'task_runs.record_operation' in Path('src/gpt_windows_connector/gateway.py').read_text()
           assert 'local_task_runs.record_operation' in Path('src/gpt_windows_connector/node.py').read_text()
-          assert '/api/task-runs' in Path('src/gpt_windows_connector/webapp.py').read_text()
-          assert '任务记录' in Path('src/gpt_windows_connector/settings_ui.py').read_text()
+          w=Path('src/gpt_windows_connector/webapp.py').read_text()
+          assert '/api/task-runs' in w and 'data-view="tasks"' in w and 'function loadTaskRuns()' in w
+          u=Path('src/gpt_windows_connector/settings_ui.py').read_text()
+          assert 'pages["任务记录"]' in u and '"任务记录"' in u
           PY
       - name: Remove migration files
         run: rm -f scripts/apply-task-runs.py .github/workflows/add-task-runs-once.yml
