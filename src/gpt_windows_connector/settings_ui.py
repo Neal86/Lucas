@@ -20,6 +20,48 @@ CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
 STATE_FILE = CONFIG_DIR / "node-state.json"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
+LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
+INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
+
+APPROVAL_DEFAULTS = {
+    "system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask",
+    "service_control":"ask","process_control":"ask","desktop_control":"ask","screenshots":"allow",
+    "clipboard":"ask","browser_control":"ask","browser_transfer":"always_ask","git_write":"ask",
+    "git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask",
+}
+PRESETS = {
+    "请求批准（Recommended）": {"permission_level":"operate","approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
+    "帮我批准": {"permission_level":"operate","approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},"browser_transfer":"always_ask","git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask","service_control":"always_ask"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "完全访问权限": {"permission_level":"admin","approval_policy":{k:"allow" for k in APPROVAL_DEFAULTS},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+}
+PRESET_DESCRIPTIONS = {
+    "请求批准（Recommended）":"编辑外部文件和使用互联网时始终询问。",
+    "帮我批准":"仅对检测到的高风险操作请求批准。",
+    "完全访问权限":"可不受限制地访问互联网和允许目录中的任何文件。",
+    "自定义":"使用下方逐项设置。",
+}
+
+def detect_security_preset(permission_level: str, approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool) -> str:
+    for name,preset in PRESETS.items():
+        if permission_level != preset["permission_level"] or network_external != preset["network_external"] or network_lan != preset["network_lan"] or bool(block_silent_network) != bool(preset["block_silent_network"]):
+            continue
+        if all(str(approval_policy.get(k)) == str(v) for k,v in preset["approval_policy"].items()):
+            return name
+    return "自定义"
+
+def _version_key(value: str) -> tuple[int,...]:
+    return tuple(int(x) for x in re.findall(r"\d+", value)[:4]) or (0,)
+
+def _fetch_latest_version(timeout: float = 5.0) -> str | None:
+    try:
+        with urllib.request.urlopen(LATEST_VERSION_URL, timeout=timeout) as response:
+            text=response.read().decode("utf-8",errors="replace")
+        for line in text.splitlines():
+            if line.strip().startswith("version ="):
+                return line.split("=",1)[1].strip().strip(chr(34)).strip(chr(39))
+        return None
+    except Exception:
+        return None
 
 def _has_saved_token() -> bool:
     try:
