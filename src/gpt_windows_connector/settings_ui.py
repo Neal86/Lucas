@@ -469,9 +469,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     result=None
     def reset_defaults():
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
-        permission.set("operate"); mode_display.set("标准（Recommended）")
-        defaults={"system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask","process_control":"ask","service_control":"ask","registry_system":"always_ask","software_install":"always_ask","desktop_control":"ask","screenshots":"allow","clipboard":"ask","browser_control":"ask","browser_transfer":"always_ask","git_write":"ask","git_push":"always_ask","high_risk":"always_ask"}
-        for k,v in defaults.items(): approval_vars[k].set(v)
+        preset_display.set("请求批准（Recommended）")
+        for k,v in APPROVAL_DEFAULTS.items(): approval_vars[k].set(v)
         remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True)
         rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。")
 
