@@ -351,9 +351,29 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     # 安全
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body)
-    mode_display=tk.StringVar(value={"read":"只读（Safe）","operate":"标准（Recommended）","admin":"完整访问（Advanced）"}.get(permission.get(),"标准（Recommended）"))
-    mode_display.trace_add("write",lambda *_: permission.set({"只读（Safe）":"read","标准（Recommended）":"operate","完整访问（Advanced）":"admin"}.get(mode_display.get(),"operate")))
-    row(c,"默认权限","基础能力上限。完整访问不会绕过 Windows UAC。",lambda p: combo(p,mode_display,["只读（Safe）","标准（Recommended）","完整访问（Advanced）"],23)); divider(c)
+    preset_syncing={"value":False}
+    preset_display=tk.StringVar(value=detect_security_preset(permission.get(),{k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get()))
+    preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
+    def sync_preset_from_fields(*_):
+        if preset_syncing["value"]: return
+        name=detect_security_preset(permission.get(),{k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get())
+        preset_syncing["value"]=True; preset_display.set(name); preset_desc.set(PRESET_DESCRIPTIONS[name]); preset_syncing["value"]=False
+    def apply_preset(*_):
+        if preset_syncing["value"]: return
+        name=preset_display.get(); preset_desc.set(PRESET_DESCRIPTIONS.get(name,PRESET_DESCRIPTIONS["自定义"]))
+        preset=PRESETS.get(name)
+        if not preset: return
+        preset_syncing["value"]=True
+        permission.set(str(preset["permission_level"]))
+        for k,v in preset["approval_policy"].items(): approval_vars[k].set(str(v))
+        network_external.set(str(preset["network_external"])); network_lan.set(str(preset["network_lan"])); block_silent_network.set(bool(preset["block_silent_network"]))
+        preset_syncing["value"]=False
+    preset_display.trace_add("write",apply_preset)
+    for var in [permission,network_external,network_lan,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
+    def preset_control(p):
+        f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e")
+        tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
+    row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c)
     row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
     section(body,"审批策略"); c=card(body)
     prs=[
