@@ -1,0 +1,1 @@
+User-supplied transparent Lucas square and horizontal artwork are the source of truth for the web brand assets. No build-time normalization should modify those files.
