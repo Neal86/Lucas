@@ -9,6 +9,24 @@ from starlette.responses import JSONResponse
 from . import gateway, webapp
 
 
+# Dark surfaces use the user-provided white transparent Lucas artwork directly.
+# Remove the legacy inversion and cache-bust the logo URLs so browsers cannot
+# keep rendering an older dark/gray asset from cache.
+webapp.DASHBOARD_HTML = (
+    webapp.DASHBOARD_HTML
+    .replace("filter:brightness(0) invert(1)!important", "filter:none!important")
+    .replace("filter:brightness(0) invert(1)", "filter:none")
+    .replace(
+        "/assets/lucas-logo-horizontal.png",
+        "/assets/lucas-logo-horizontal.png?v=direct-white-20260829",
+    )
+    .replace(
+        "/assets/lucas-logo-square.png",
+        "/assets/lucas-logo-square.png?v=direct-white-20260829",
+    )
+)
+
+
 class DashboardAuthMiddleware:
     def __init__(self, app) -> None:
         self.app = app
