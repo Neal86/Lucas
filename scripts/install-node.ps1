@@ -1,6 +1,5 @@
 param(
   [string]$GatewayUrl = "wss://lucasmcp.com/ws/node",
-  [string]$PairingCode = "",
   [string]$NodeName = "$env:COMPUTERNAME",
   [string]$AllowedRoot = "$env:USERPROFILE",
   [ValidateSet("read", "operate", "admin")]
@@ -94,8 +93,7 @@ Write-Host "          LUCAS WINDOWS NODE" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Pairing is intentionally performed after installation in Lucas Settings.
-# Keep the optional parameter only for backwards compatibility with old launchers.
+# Lucas Nodes self-register with a local device credential and do not use account pairing codes.
 
 $Python = Resolve-Python311
 if (-not $Python) {
@@ -220,19 +218,8 @@ if ($ExistingConfig -and $ExistingConfig.allowed_roots -and @($ExistingConfig.al
 }
 if ($ConfigRoots.Count -eq 0) { $ConfigRoots = @($AllowedRoot) }
 
-$ConfigPairingCode = $null
-if (-not $HasSavedToken) {
-  if (-not [string]::IsNullOrWhiteSpace($PairingCode)) {
-    $ConfigPairingCode = $PairingCode.Trim()
-  } elseif ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.pairing_code)) {
-    $ConfigPairingCode = ([string]$ExistingConfig.pairing_code).Trim()
-  }
-}
-
-# A brand-new unpaired node stays disconnected until the user enters a pairing
-# code in Lucas Settings. This prevents endless anonymous reconnect loops.
-$ConnectionEnabled = $HasSavedToken -or -not [string]::IsNullOrWhiteSpace($ConfigPairingCode)
-if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled -and ($HasSavedToken -or $ConfigPairingCode)) {
+$ConnectionEnabled = $true
+if ($ExistingConfig -and $null -ne $ExistingConfig.connection_enabled) {
   $ConnectionEnabled = [bool]$ExistingConfig.connection_enabled
 }
 $LaunchAtStartup = $true
@@ -250,7 +237,6 @@ if ($ExistingConfig -and $ExistingConfigRaw) {
     gateway_ws_url = $GatewayUrl.TrimEnd('/')
     node_id = $NodeId
     node_name = $ConfigNodeName
-    pairing_code = $ConfigPairingCode
     permission_level = $ConfigPermission
     allowed_roots = $ConfigRoots
     connection_enabled = $ConnectionEnabled
@@ -263,7 +249,7 @@ if ($ExistingConfig -and $ExistingConfigRaw) {
 $env:GWC_GATEWAY_WS = $Config.gateway_ws_url
 $env:GWC_NODE_ID = $Config.node_id
 $env:GWC_NODE_NAME = $Config.node_name
-if ($Config.pairing_code) { $env:GWC_PAIRING_CODE = $Config.pairing_code } else { Remove-Item Env:GWC_PAIRING_CODE -ErrorAction SilentlyContinue }
+Remove-Item Env:GWC_PAIRING_CODE -ErrorAction SilentlyContinue
 $env:GWC_PERMISSION_LEVEL = $Config.permission_level
 $env:GWC_ALLOWED_ROOTS = ($Config.allowed_roots -join [System.IO.Path]::PathSeparator)
 $env:GWC_NODE_STATE = $StateFile
@@ -353,7 +339,8 @@ Write-Host ""
 Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
 Write-Host "Lucas now runs in the background with a system tray icon."
 Write-Host "Open Lucas from the desktop or Start menu. If Lucas is already running, the shortcut opens Settings."
-Write-Host "Use the tray icon to Connect/Disconnect, reconnect, restart Lucas, view logs, re-pair, or change startup behavior."
+Write-Host "Use the tray icon to connect/disconnect, reconnect, restart Lucas, view logs, or change startup behavior."
+Write-Host "Share the Node ID shown in Lucas Settings; each Lucas account must be approved locally before access."
 Write-Host "After reboot or sign-in, Lucas starts automatically when Launch at startup is enabled."
 Write-Host ""
 exit 0
