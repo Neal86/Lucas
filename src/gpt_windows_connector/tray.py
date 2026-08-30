@@ -11,6 +11,8 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
+from .i18n import tr
+
 APP_NAME = "Lucas"
 TASK_NAME = "Lucas Node"
 DASHBOARD_URL = "https://lucasmcp.com/nodes"
@@ -94,14 +96,19 @@ def _message_box(text: str, title: str = APP_NAME, flags: int = 0x40) -> int:
         return 0
 
 
-def _status_label(status: str) -> str:
+def _display_status(status: str) -> str:
     return {
-        "Online": "●  Online",
-        "Connecting": "◐  Connecting…",
-        "Reconnecting": "↻  Reconnecting…",
-        "Disconnected": "○  Disconnected",
-        "Offline": "○  Offline",
-    }.get(status, f"○  {status or 'Offline'}")
+        "Online": tr("在线", "Online"),
+        "Connecting": tr("连接中…", "Connecting…"),
+        "Reconnecting": tr("重新连接中…", "Reconnecting…"),
+        "Disconnected": tr("已断开", "Disconnected"),
+        "Offline": tr("离线", "Offline"),
+    }.get(status, status or tr("离线", "Offline"))
+
+
+def _status_label(status: str) -> str:
+    icon = {"Online": "●", "Connecting": "◐", "Reconnecting": "↻", "Disconnected": "○", "Offline": "○"}.get(status, "○")
+    return f"{icon}  {_display_status(status)}"
 
 
 class LucasTray:
@@ -400,7 +407,7 @@ class LucasTray:
         menu_state = f"{_connection_enabled(config)}:{_startup_enabled(config)}:{self._status}:{self._detail}"
         if force or self._last_icon_state != self._status:
             icon.icon = self._make_icon(self._status)
-            icon.title = f"Lucas • {self._status}"
+            icon.title = f"Lucas • {_display_status(self._status)}"
             self._last_icon_state = self._status
         if force or self._last_menu_state != menu_state:
             try:
@@ -445,23 +452,23 @@ class LucasTray:
             pystray.MenuItem("Lucas", lambda icon, item: None, enabled=False),
             pystray.MenuItem(lambda item: _status_label(self._status), lambda icon, item: None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(lambda item: "Disconnect" if _connection_enabled(_load_config()) else "Connect", self._toggle_connection),
-            pystray.MenuItem("Reconnect now", self._reconnect, enabled=lambda item: _connection_enabled(_load_config())),
+            pystray.MenuItem(lambda item: tr("断开连接", "Disconnect") if _connection_enabled(_load_config()) else tr("连接", "Connect"), self._toggle_connection),
+            pystray.MenuItem(tr("立即重新连接", "Reconnect now"), self._reconnect, enabled=lambda item: _connection_enabled(_load_config())),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Launch at startup", self._toggle_startup, checked=lambda item: _startup_enabled(_load_config())),
+            pystray.MenuItem(tr("开机启动", "Launch at startup"), self._toggle_startup, checked=lambda item: _startup_enabled(_load_config())),
             pystray.Menu.SEPARATOR,
             # On Windows pystray invokes the default menu item when the tray icon
             # is double-clicked, so Settings is the single primary tray action.
-            pystray.MenuItem("Settings", self._open_settings, default=True),
-            pystray.MenuItem("Open Dashboard", self._open_dashboard),
-            pystray.MenuItem("View logs", self._view_logs),
-            pystray.MenuItem("Restart Lucas", self._restart_lucas),
+            pystray.MenuItem(tr("设置", "Settings"), self._open_settings, default=True),
+            pystray.MenuItem(tr("打开 Dashboard", "Open Dashboard"), self._open_dashboard),
+            pystray.MenuItem(tr("查看日志", "View logs"), self._view_logs),
+            pystray.MenuItem(tr("重启 Lucas", "Restart Lucas"), self._restart_lucas),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Exit Lucas", self._exit),
+            pystray.MenuItem(tr("退出 Lucas", "Exit Lucas"), self._exit),
         )
         initial = "Disconnected" if not _connection_enabled(config) else "Connecting"
         self._status = initial
-        self._icon = pystray.Icon("Lucas", self._make_icon(initial), f"Lucas • {initial}", menu)
+        self._icon = pystray.Icon("Lucas", self._make_icon(initial), f"Lucas • {_display_status(initial)}", menu)
         worker = threading.Thread(target=self._supervise, name="lucas-tray-supervisor", daemon=True)
         worker.start()
         try:
