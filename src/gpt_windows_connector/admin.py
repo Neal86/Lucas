@@ -69,7 +69,7 @@ async def users(request: Request):
         with _db() as db:
             sql = """SELECT u.id,u.email,u.name,u.provider,u.role,u.status,u.created_at,u.last_login_at,
                 COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') subscription_status,
-                (SELECT COUNT(*) FROM nodes n WHERE n.owner_user_id=u.id) node_count,
+                0 node_count,
                 (SELECT COUNT(*) FROM audit_logs a WHERE a.user_id=u.id AND a.created_at>=?) operations_30d
                 FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id"""
             params: list[object] = [time.time()-30*86400]
@@ -88,7 +88,7 @@ async def user_detail(request: Request):
             user = db.execute("SELECT id,email,name,provider,role,status,created_at,last_login_at FROM users WHERE id=?", (user_id,)).fetchone()
             if not user: return JSONResponse({"error": "User not found"}, status_code=404)
             sub = db.execute("SELECT plan,status,billing_provider,started_at,ends_at FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
-            nodes = db.execute("SELECT node_id,name,permission_level,allowed_roots,updated_at FROM nodes WHERE owner_user_id=? ORDER BY name", (user_id,)).fetchall()
+            nodes = []
             ops = db.execute("SELECT id,action,target,details,created_at FROM audit_logs WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
             counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) last30 FROM audit_logs WHERE user_id=?", (time.time()-30*86400,user_id)).fetchone()
         return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
@@ -136,7 +136,7 @@ async def nodes(request: Request):
     try:
         _admin(request); online=set(gateway.registry.nodes)
         with _db() as db:
-            rows=db.execute("SELECT n.node_id,n.name,n.updated_at,n.permission_level,n.allowed_roots,u.email owner FROM nodes n LEFT JOIN users u ON u.id=n.owner_user_id ORDER BY n.updated_at DESC").fetchall()
+            rows=db.execute("SELECT n.node_id,n.name,n.updated_at,n.permission_level,n.allowed_roots FROM nodes n ORDER BY n.updated_at DESC").fetchall()
         data=[]
         for r in rows:
             d=dict(r); d["online"]=d["node_id"] in online; d["platform"]="windows"; d["allowed_folder_count"]=len(json.loads(d.get("allowed_roots") or "[]")); d.pop("allowed_roots",None); data.append(d)

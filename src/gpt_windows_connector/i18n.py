@@ -10,7 +10,7 @@ def system_language() -> str:
     candidates: list[str] = []
     override = str(os.environ.get("LUCAS_LANGUAGE") or "").strip()
     if override:
-        candidates.append(override)
+        return "zh" if override.lower().replace("_", "-").startswith("zh") else "en"
     if sys.platform == "win32":
         try:
             import ctypes
