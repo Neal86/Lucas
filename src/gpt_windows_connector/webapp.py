@@ -193,7 +193,9 @@ def _landing_html() -> str:
 {landing_css}
 </style>
 </head>
-<body>{landing}</body>
+<body>{landing}<script>
+if((navigator.language||'en').toLowerCase().startsWith('zh')){{document.documentElement.lang='zh-CN';const Z={{'Capabilities':'功能','Security':'安全','How it works':'工作原理','Sign in':'登录','Dashboard':'控制台','Connect your computer':'连接电脑','See how it works ↓':'查看工作原理 ↓','Model agnostic':'不限模型','Cross-platform':'跨平台','Token-free execution':'无额外执行 Token','WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正执行工作。','Terminal & Code':'终端与代码','Files & Projects':'文件与项目','Browser':'浏览器','Computer Use':'电脑操作','Remote Access':'远程访问','A DIFFERENT ARCHITECTURE':'不同的架构','Token-free':'无额外 Token','execution.':'执行。','CONTROL WITHOUT COMPROMISE':'安全控制，不做妥协','Your computer.':'你的电脑。','Your boundaries.':'你的边界。','Project-scoped access':'项目范围访问','Local permission control':'本地权限控制','OAuth-secured MCP':'OAuth 安全 MCP','Activity visibility':'操作记录可见','THREE STEPS':'三个步骤','From AI to action.':'从 AI 到实际执行。','Connect a computer':'连接电脑','Add Lucas MCP':'添加 Lucas MCP','Start working':'开始工作','THE BRIDGE IS READY':'连接已经准备好','Any AI.':'任何 AI。','Any computer.':'任何电脑。','Get started with Lucas':'开始使用 Lucas'}};const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const a=[];while(w.nextNode())a.push(w.currentNode);for(const n of a){{const t=n.nodeValue.trim();if(Z[t])n.nodeValue=n.nodeValue.replace(t,Z[t])}}}}
+</script></body>
 </html>"""
 
 
