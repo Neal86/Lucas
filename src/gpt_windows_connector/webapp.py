@@ -50,7 +50,7 @@ DASHBOARD_HTML = r'''<!doctype html>
 </section>
 <div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div><div class="sub">Connect any MCP-compatible AI to your computers through Lucas.</div><div id="authError" class="error hidden"></div><div id="loginForm"><div class="field"><label>Email</label><input id="loginEmail" class="input" type="email" autocomplete="email"></div><div class="field"><label>Password</label><input id="loginPassword" class="input" type="password" autocomplete="current-password"></div><button class="btn primary" style="width:100%" onclick="login()">Sign in</button><button class="btn google" onclick="location.href='/auth/google/start'">Continue with Google</button><p class="muted" style="margin:16px 0 0">No account? <button class="switch" onclick="showRegister(true)">Create one</button></p></div><div id="registerForm" class="hidden"><div class="field"><label>Name</label><input id="regName" class="input"></div><div class="field"><label>Email</label><input id="regEmail" class="input" type="email"></div><div class="field"><label>Password</label><input id="regPassword" class="input" type="password" placeholder="At least 10 characters"></div><input id="regWebsite" type="text" tabindex="-1" autocomplete="off" style="position:absolute;left:-10000px;opacity:0" aria-hidden="true"><div id="turnstileWrap" class="field __TURNSTILE_CLASS__"><div class="cf-turnstile" data-sitekey="__TURNSTILE_SITE_KEY__"></div></div><button class="btn primary" style="width:100%" onclick="registerUser()">Create account</button><button class="btn google" onclick="location.href='/auth/google/start'">Sign up with Google</button><p class="muted" style="margin:16px 0 0">Already registered? <button class="switch" onclick="showRegister(false)">Sign in</button></p></div><div id="verifyForm" class="hidden"><p class="muted">We sent a 6-digit verification code to <b id="verifyEmailLabel"></b>.</p><div class="field"><label>Verification code</label><input id="verifyCode" class="input" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><button class="btn primary" style="width:100%" onclick="verifyEmail()">Verify email</button><button class="btn secondary" style="width:100%;margin-top:10px" onclick="resendVerification()">Resend code</button></div></div></div>
 <div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div><button class="nav active" data-view="dashboard" onclick="view('dashboard',this)">Dashboard</button><button class="nav" data-view="nodes" onclick="view('nodes',this)">Computer Nodes</button><button class="nav" data-view="ai" onclick="view('ai',this)">AI Connections</button><button class="nav" data-view="tasks" onclick="view('tasks',this)">Task Runs</button><button class="nav" data-view="logs" onclick="view('logs',this)">Activity Logs</button><button class="nav" data-view="account" onclick="view('account',this)">Account & Security</button><button id="adminNav" class="nav hidden" data-view="admin" onclick="view('admin',this)">Admin</button><div class="userbox"><div id="userName"></div><small id="userEmail"></small><div style="margin-top:10px"><button class="btn secondary" onclick="logout()">Sign out</button></div></div></aside><main class="main"><div id="dashboard" class="view"><div class="top"><div><h2>Dashboard</h2><p class="muted">Your computers, AI connections, and recent activity.</p></div></div><div class="grid"><div class="card"><div class="muted">Authorized computers</div><div id="metricPairedNodes" class="metric">0</div></div><div class="card"><div class="muted">Online computers</div><div id="metricNodes" class="metric">0</div></div><div class="card"><div class="muted">AI clients</div><div id="metricAiClients" class="metric">0</div></div></div><div class="card" style="margin-top:16px"><h3>Recent activity</h3><div id="recentLogs"></div></div></div><div id="nodes" class="view hidden"><div class="top"><div><h2>Computer Nodes</h2><p class="muted">Connect Lucas to your computers. Windows is available now; macOS and Linux support are coming soon.</p></div></div><div class="platform-grid"><div class="platform-card"><div class="platform-head"><span class="platform-name">Windows</span><span class="badge online">Available</span></div><p>Full Lucas Node support for Windows computers.</p><div class="platform-actions"><a class="btn secondary" style="text-decoration:none" href="/download/Lucas-Node.bat">Download Lucas Node</a><button class="btn primary" onclick="openConnectModal()">Connect by Node ID</button></div></div><div class="platform-card"><div class="platform-head"><span class="platform-name">macOS</span><span class="badge coming">Coming Soon</span></div><p>Lucas Node for macOS is in development.</p><div class="platform-actions"><button class="btn disabled-btn" type="button" disabled>Coming Soon</button></div></div><div class="platform-card"><div class="platform-head"><span class="platform-name">Linux</span><span class="badge coming">Coming Soon</span></div><p>Lucas Node for Linux is in development.</p><div class="platform-actions"><button class="btn disabled-btn" type="button" disabled>Coming Soon</button></div></div></div><div id="nodeTable"></div></div><div id="ai" class="view hidden"><div class="top"><div><h2>AI Connections</h2><p class="muted">Connect multiple AI and MCP clients to the same Lucas account securely with OAuth.</p></div><button class="btn primary" onclick="openAiModal()">Add AI</button></div><div class="card"><div style="display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap"><div><h3 style="margin-bottom:6px">Lucas MCP Gateway</h3><p class="muted" style="margin:0">OAuth 2.0 + PKCE · refresh tokens · dynamic client registration</p></div><span class="badge online">Ready</span></div><div class="field"><label>MCP Server URL</label><input id="mcpUrl" class="input" readonly value="https://lucasmcp.com/mcp"></div><p class="muted">Use this same URL from ChatGPT, Claude, Gemini, Cursor, Codex, Claude Code, or any compatible MCP client. Each AI authorizes independently.</p><div class="toolbar"><button class="btn primary" onclick="openAiModal()">Add AI connection</button><button class="btn secondary" onclick="copyMcpUrl()">Copy MCP URL</button></div></div><div class="card" style="margin-top:16px"><h3>Registered AI / MCP clients</h3><div id="aiClientTable"><div class="empty">No OAuth clients registered yet.</div></div></div></div><div id="tasks" class="view hidden"><div class="top"><div><h2>Task Runs</h2><p class="muted">Task and subtask execution time measured by Lucas MCP.</p></div><button class="btn secondary" onclick="loadTaskRuns()">Refresh</button></div><div id="taskRunSummary" class="grid" style="margin-bottom:16px"></div><div id="taskRunTable"></div></div><div id="logs" class="view hidden"><div class="top"><div><h2>Activity Logs</h2><p class="muted">Only activity belonging to your account is shown.</p></div></div><div class="log-filter"><input id="logAction" class="input" placeholder="Action filter"><input id="logTarget" class="input" placeholder="Target"><button class="btn secondary" onclick="loadLogs()">Filter</button></div><div id="logTable"></div></div><div id="account" class="view hidden"><div class="top"><div><h2>Account & Security</h2><p class="muted">Authentication and connector security information.</p></div></div><div class="card"><h3 id="accountName"></h3><p id="accountEmail"></p><p class="muted">Authentication provider: <span id="accountProvider"></span></p><p class="muted">All AI-to-computer traffic is relayed through this VPS Gateway. Nodes do not require a public inbound port.</p></div></div><div id="admin" class="view hidden"><div class="top"><div><h2>Admin</h2><p class="muted">Lucas SaaS operations, users, usage, nodes, subscriptions, audit logs, and system health.</p></div></div><div class="toolbar" id="adminTabs"><button class="btn primary" onclick="adminTab('dashboard',this)">Dashboard</button><button class="btn secondary" onclick="adminTab('users',this)">Users</button><button class="btn secondary" onclick="adminTab('usage',this)">Usage</button><button class="btn secondary" onclick="adminTab('nodes',this)">Nodes</button><button class="btn secondary" onclick="adminTab('operations',this)">Operations</button><button class="btn secondary" onclick="adminTab('subscriptions',this)">Subscriptions</button><button class="btn secondary" onclick="adminTab('system',this)">System</button></div><div id="adminContent"><div class="card empty">Loading admin dashboard…</div></div></div></main></div><div id="adminUserModal" class="modal-backdrop hidden"><div class="modal" style="width:min(900px,100%)"><div id="adminUserDetail"></div><div class="actions"><button class="btn secondary" onclick="closeModal('adminUserModal')">Close</button></div></div></div>
-<div id="nodeModal" class="modal-backdrop hidden"><div class="modal"><h3>Computer Node</h3><p class="muted">Rename this computer here. Security settings remain controlled locally from the Lucas tray.</p><div class="card"><div class="field"><label>Display name</label><input id="manageNodeNameInput" class="input" maxlength="120"></div><div class="field"><label>Security mode</label><div id="managePermissionText"></div></div><div class="field"><label>Allowed folders</label><pre id="manageRootsText" class="details"></pre></div></div><div class="field"><label>Node log</label><pre id="manageLogs" class="details card" style="max-height:220px;overflow:auto">Load logs after the node is online.</pre></div><div class="actions"><button class="btn secondary" onclick="loadNodeLogs()">Refresh logs</button><button class="btn secondary" onclick="closeModal('nodeModal')">Close</button><button class="btn primary" onclick="saveNodeName()">Save name</button></div></div></div>
+<div id="nodeModal" class="modal-backdrop hidden"><div class="modal"><h3>Computer Node</h3><p class="muted">Account access and security settings are controlled locally on the target computer.</p><div class="card"><div class="field"><label>Node ID</label><div id="manageNodeIdText" class="path"></div></div><div class="field"><label>Effective permission</label><div id="managePermissionText"></div></div><div class="field"><label>Allowed folders</label><pre id="manageRootsText" class="details"></pre></div></div><div class="field"><label>Node log</label><pre id="manageLogs" class="details card" style="max-height:220px;overflow:auto">Admin permission is required to read Node logs.</pre></div><div class="actions"><button class="btn secondary" onclick="loadNodeLogs()">Refresh logs</button><button class="btn secondary" onclick="closeModal('nodeModal')">Close</button></div></div></div>
 <div id="aiModal" class="modal-backdrop hidden"><div class="modal"><h3>Add AI connection</h3><p class="muted">Lucas accepts multiple independent OAuth-capable MCP clients. Choose a client for setup guidance, then add the same MCP URL in that client.</p><div class="field"><label>AI / MCP client</label><select id="aiClientType" onchange="updateAiHelp()"><option>ChatGPT</option><option>Claude</option><option>Gemini</option><option>Cursor</option><option>Codex</option><option>Claude Code</option><option>Other MCP client</option></select></div><div class="field"><label>MCP Server URL</label><input id="aiModalUrl" class="input" readonly value="https://lucasmcp.com/mcp"></div><div id="aiHelp" class="card muted"></div><div class="actions"><button class="btn secondary" onclick="closeModal('aiModal')">Close</button><button class="btn primary" onclick="copyMcpUrl()">Copy MCP URL</button></div></div></div><div id="connectModal" class="modal-backdrop hidden"><div class="modal"><h3>Connect to a computer</h3><p class="muted">Enter the Node ID shown in Lucas Settings on the target computer. The target computer must approve this Lucas account locally before any operation is allowed.</p><div class="field"><label>Node ID</label><input id="connectNodeId" class="input" autocomplete="off" placeholder="computer-xxxxxxxxxxxx"></div><div class="field"><label>Requested permission</label><select id="connectPermission"><option value="read">Read</option><option value="operate" selected>Operate</option><option value="admin">Admin</option></select></div><div id="connectResult" class="card hidden"></div><div class="actions"><button class="btn secondary" onclick="closeModal('connectModal')">Close</button><button class="btn primary" onclick="requestNodeAccess()">Send access request</button></div></div></div>
 <div id="toast" class="toast hidden"></div>
 <script>
@@ -99,8 +99,7 @@ function renderRecent(logs){recentLogs.innerHTML=logs.length?'<table class="tabl
 async function loadLogs(){const q=new URLSearchParams({limit:'200'});if(logAction.value)q.set('action',logAction.value);if(logTarget.value)q.set('target',logTarget.value);const d=await api('/api/logs?'+q);logTable.innerHTML=d.logs.length?'<table class="table"><thead><tr><th>Time</th><th>Action</th><th>Target</th><th>Details</th></tr></thead><tbody>'+d.logs.map(l=>`<tr><td>${esc(timefmt(l.created_at))}</td><td>${esc(l.action)}</td><td>${esc(l.target||'')}</td><td><pre class="details">${esc(JSON.stringify(l.details||{},null,2))}</pre></td></tr>`).join('')+'</tbody></table>':'<div class="card empty">No matching activity.</div>'}
 function renderAiClients(){if(!state.aiClients.length){aiClientTable.innerHTML='<div class="empty">No OAuth clients registered yet.</div>';return}aiClientTable.innerHTML='<table class="table"><thead><tr><th>Client</th><th>Registered</th></tr></thead><tbody>'+state.aiClients.map(c=>`<tr><td><b>${esc(c.client_name||'MCP Client')}</b></td><td>${esc(timefmt(c.created_at))}</td></tr>`).join('')+'</tbody></table>'}
 let managedNodeId=null;
-function openNodeModal(id){managedNodeId=decodeURIComponent(id);const n=state.nodes.find(x=>x.node_id===managedNodeId);if(!n)return;manageNodeNameInput.value=n.name||n.node_id;managePermissionText.textContent=({read:'Safe · Read-only',operate:'Standard · Operate',admin:'Full Access · Admin'})[n.permission_level]||n.permission_level||'Standard';manageRootsText.textContent=(n.allowed_roots||[]).join('\n')||'—';manageLogs.textContent='Click Refresh logs to load the latest local Lucas Node log.';nodeModal.classList.remove('hidden')}
-async function saveNodeName(){if(!managedNodeId)return;const name=manageNodeNameInput.value.trim();if(!name){toast('Computer name is required');return}const d=await api('/api/nodes/'+encodeURIComponent(managedNodeId)+'/config',{method:'PUT',body:JSON.stringify({name})});const n=state.nodes.find(x=>x.node_id===managedNodeId);if(n)applyNodeUpsert({...n,name:d.name||name});manageNodeNameInput.value=d.name||name;toast('Computer name updated')}
+function openNodeModal(id){managedNodeId=decodeURIComponent(id);const n=state.nodes.find(x=>x.node_id===managedNodeId);if(!n)return;manageNodeIdText.textContent=n.node_id;managePermissionText.textContent=({read:'Safe · Read-only',operate:'Standard · Operate',admin:'Full Access · Admin'})[n.permission_level]||n.permission_level||'Standard';manageRootsText.textContent=(n.allowed_roots||[]).join('\n')||'—';manageLogs.textContent='Admin permission is required to read Node logs.';nodeModal.classList.remove('hidden')}
 async function loadNodeLogs(){if(!managedNodeId)return;try{const d=await api('/api/nodes/'+encodeURIComponent(managedNodeId)+'/logs?limit=250');manageLogs.textContent=(d.lines||[]).join('\n')||'No log lines yet.'}catch(e){manageLogs.textContent=e.message}}
 async function copyMcpUrl(){const u='https://lucasmcp.com/mcp';mcpUrl.value=u;try{await navigator.clipboard.writeText(u);toast('MCP URL copied')}catch{mcpUrl.select();document.execCommand('copy');toast('MCP URL copied')}}
 function openAiModal(){aiModal.classList.remove('hidden');aiModalUrl.value='https://lucasmcp.com/mcp';updateAiHelp()}
@@ -256,64 +255,6 @@ async def api_request_node_access(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=400)
 
 
-async def api_node_config(request: Request):
-    user = _auth_user(request)
-    node_id = unquote(request.path_params["node_id"])
-    record = await gateway.auth_store.record_for(node_id)
-    if not record or record.get("owner_user_id") != user.id:
-        return JSONResponse({"error": "Node not found"}, status_code=404)
-    if request.method == "GET":
-        try:
-            roots = json.loads(record.get("allowed_roots") or "[]")
-        except json.JSONDecodeError:
-            roots = []
-        return JSONResponse({"node_id": node_id, "name": record.get("name"), "permission_level": record.get("permission_level") or "operate", "allowed_roots": roots})
-    body = await request.json()
-    requested_keys = set(body.keys())
-    if requested_keys - {"name"}:
-        return JSONResponse({"error": "Only the display name can be changed on the website. Security settings are local-only."}, status_code=403)
-    name = str(body.get("name") or "").strip()
-    try:
-        updated = await gateway.auth_store.update_name(node_id, user.id, name)
-        live = gateway.registry.nodes.get(node_id)
-        if live and live.owner_user_id == user.id:
-            live.name = name
-            node = next((item for item in await gateway.registry.list(user) if item["node_id"] == node_id), None)
-        else:
-            try:
-                roots = json.loads(updated.get("allowed_roots") or "[]")
-            except json.JSONDecodeError:
-                roots = []
-            node = {"node_id": node_id, "name": name, "online": False, "updated_at": updated.get("updated_at"), "permission_level": updated.get("permission_level") or "operate", "allowed_roots": roots}
-        gateway.auth.audit(user.id, "node.rename", node_id, {"name": name})
-        if node:
-            await gateway.dashboard_events.publish(user.id, "node.upsert", {"node": node})
-        return JSONResponse({"ok": True, "node_id": node_id, "name": name})
-    except (PermissionError, ValueError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    body = await request.json()
-    name = str(body.get("name") or record.get("name") or node_id).strip()
-    permission = str(body.get("permission_level") or "operate").strip().lower()
-    roots = [str(item).strip() for item in (body.get("allowed_roots") or []) if str(item).strip()]
-    if permission not in {"read", "operate", "admin"}:
-        return JSONResponse({"error": "Invalid permission level"}, status_code=400)
-    if not roots:
-        return JSONResponse({"error": "At least one allowed folder is required"}, status_code=400)
-    try:
-        if node_id in gateway.registry.nodes:
-            await gateway.registry.rpc(node_id, user.id, "node.configure", {"node_name": name, "permission_level": permission, "allowed_roots": roots}, timeout=30)
-        updated = await gateway.auth_store.update_config(node_id, user.id, name, permission, roots)
-        live = gateway.registry.nodes.get(node_id)
-        if live:
-            live.name = name
-            live.permission_level = permission
-            live.allowed_roots = roots
-        gateway.auth.audit(user.id, "node.configure", node_id, {"permission_level": permission, "allowed_roots": roots})
-        return JSONResponse({"ok": True, "node_id": node_id})
-    except (RuntimeError, PermissionError, ValueError) as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-
-
 async def api_node_logs(request: Request):
     user = _auth_user(request)
     node_id = unquote(request.path_params["node_id"])
@@ -324,18 +265,6 @@ async def api_node_logs(request: Request):
         return JSONResponse(result)
     except (RuntimeError, PermissionError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-
-
-async def api_node_delete(request: Request):
-    user = _auth_user(request)
-    node_id = unquote(request.path_params["node_id"])
-    removed = await gateway.auth_store.delete(node_id, user.id)
-    connection = gateway.registry.nodes.get(node_id)
-    if connection and connection.owner_user_id == user.id:
-        await connection.websocket.close(code=4002)
-    gateway.auth.audit(user.id, "node.unpair", node_id)
-    await gateway.dashboard_events.publish(user.id, "node.remove", {"node_id": node_id})
-    return JSONResponse({"removed": removed})
 
 
 async def api_folders(request: Request):
@@ -423,9 +352,7 @@ routes = [
     Route("/api/logout", api_logout, methods=["POST"]),
     Route("/api/nodes", api_nodes, methods=["GET"]),
     Route("/api/nodes/request-access", api_request_node_access, methods=["POST"]),
-    Route("/api/nodes/{node_id}/config", api_node_config, methods=["GET", "PUT"]),
     Route("/api/nodes/{node_id}/logs", api_node_logs, methods=["GET"]),
-    Route("/api/nodes/{node_id}", api_node_delete, methods=["DELETE"]),
     Route("/api/nodes/{node_id}/folders", api_folders, methods=["GET"]),
     Route("/api/ai-connections", api_ai_connections, methods=["GET"]),
     Route("/api/task-runs", api_task_runs, methods=["GET"]),
