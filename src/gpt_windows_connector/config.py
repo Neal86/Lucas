@@ -92,7 +92,6 @@ class NodeSettings:
     node_id: str
     node_name: str
     gateway_ws_url: str
-    pairing_code: str | None
     node_token: str | None
     state_file: Path
     allowed_roots: tuple[Path, ...]
@@ -119,7 +118,6 @@ class NodeSettings:
             node_id=node_id,
             node_name=node_name,
             gateway_ws_url=os.environ.get("GWC_GATEWAY_WS", "ws://127.0.0.1:8787/ws/node").strip(),
-            pairing_code=os.environ.get("GWC_PAIRING_CODE") or None,
             node_token=os.environ.get("GWC_NODE_TOKEN") or None,
             state_file=state_file,
             allowed_roots=roots,

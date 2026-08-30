@@ -178,7 +178,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     gateway = tk.StringVar(value=str(existing.get("gateway_ws_url") or DEFAULT_GATEWAY))
     node_id = tk.StringVar(value=str(existing.get("node_id") or _default_node_id()))
     node_name = tk.StringVar(value=str(os.environ.get("COMPUTERNAME") or socket.gethostname()))
-    pairing_code = tk.StringVar(value=str(existing.get("pairing_code") or ""))
     permission = tk.StringVar(value=str(existing.get("permission_level") or "operate").lower())
     if permission.get() not in {"read","operate","admin"}: permission.set("operate")
     roots = [str(x) for x in existing.get("allowed_roots",[]) if str(x).strip()] or [str(Path.home().resolve())]
@@ -318,58 +317,30 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def build_connection_status(p):
         nonlocal connection_status_label
         connection_status_label=tk.Label(p,textvariable=connection_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]); return connection_status_label
-    row(c,"连接状态","实时显示 Lucas 与 Gateway 的配对和连接状态。",build_connection_status); divider(c)
+    row(c,"连接状态","实时显示 Lucas Node 与 Gateway 的连接状态。",build_connection_status); divider(c)
     def refresh_connection_status():
-        paired=_has_saved_token(); status_data={}
+        status_data={}
         try:
             loaded=json.loads(STATUS_FILE.read_text(encoding="utf-8"))
             if isinstance(loaded,dict): status_data=loaded
         except (OSError,json.JSONDecodeError): pass
         value=str(status_data.get("status") or "").strip(); detail=str(status_data.get("detail") or "").strip().lower()
-        if not paired:
-            if "pairing" in detail or "token required" in detail: text,color="配对失败",C["red"]
-            elif value in {"Connecting","Reconnecting"}: text,color="正在配对 / 连接…",C["orange"]
-            else: text,color="未配对",C["orange"]
-        elif value == "Online": text,color="已连接",C["green"]
+        if value == "Online": text,color="已连接",C["green"]
         elif value == "Connecting": text,color="正在连接…",C["orange"]
         elif value == "Reconnecting": text,color="正在重新连接…",C["orange"]
-        elif value in {"Disconnected","Offline"}: text,color="已配对 · 未连接",C["muted"]
-        else: text,color="已配对 · 等待连接",C["muted"]
+        elif value in {"Disconnected","Offline"}: text,color="未连接",C["muted"]
+        elif "token" in detail: text,color="设备认证失败",C["red"]
+        else: text,color="等待连接",C["muted"]
         connection_status.set(text); connection_status_label.configure(fg=color)
         try: root.after(1000,refresh_connection_status)
         except tk.TclError: pass
 
-    pairing_control=None; pairing_status=tk.StringVar(value=("已配对" if _has_saved_token() else "未配对")); pairing_entry=None; pairing_status_label=None; pairing_actions=None; pairing_mode=tk.BooleanVar(value=not _has_saved_token())
-    def build_pairing_control(p):
-        nonlocal pairing_control,pairing_entry,pairing_status_label,pairing_actions
-        pairing_control=tk.Frame(p,bg=C["card"]); pairing_entry=tk.Entry(pairing_control,textvariable=pairing_code,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=20); pairing_status_label=tk.Label(pairing_control,textvariable=pairing_status,font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]); pairing_actions=tk.Frame(pairing_control,bg=C["card"]); return pairing_control
-    def refresh_pairing_control():
-        for child in pairing_control.winfo_children(): child.pack_forget()
-        paired=_has_saved_token()
-        if paired and not pairing_mode.get():
-            pairing_status.set("已配对"); pairing_status_label.configure(fg=C["green"]); pairing_status_label.pack(side="left",padx=(0,10)); pairing_actions.pack(side="left")
-            for child in pairing_actions.winfo_children(): child.destroy()
-            button(pairing_actions,"重新配对",lambda: (pairing_mode.set(True),pairing_code.set(""),refresh_pairing_control(),root.after(50,pairing_entry.focus_set))).pack(side="left"); button(pairing_actions,"取消配对",cancel_pairing,danger=True).pack(side="left",padx=(8,0))
-        else:
-            pairing_status.set("未配对" if not paired else "重新配对"); pairing_status_label.configure(fg=(C["orange"] if not paired else C["blue"])); pairing_status_label.pack(side="left",padx=(0,10)); pairing_entry.pack(side="left",ipady=6)
-            if paired: button(pairing_control,"取消",lambda: (pairing_mode.set(False),pairing_code.set(""),refresh_pairing_control())).pack(side="left",padx=(8,0))
-    def cancel_pairing():
-        if not messagebox.askyesno("Lucas","取消这台电脑的配对？取消后 Lucas 会停止连接，需要新的 Pairing Code 才能重新连接。"): return
-        try:
-            STATE_FILE.unlink(missing_ok=True); pairing_code.set(""); current=dict(existing)
-            try:
-                if CONFIG_FILE.exists():
-                    loaded=json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-                    if isinstance(loaded,dict): current.update(loaded)
-            except (OSError,json.JSONDecodeError): pass
-            current["pairing_code"]=None; current["connection_enabled"]=False; _save_config(current); _restart_node_for_apply(); pairing_mode.set(True); refresh_pairing_control()
-        except OSError as exc: messagebox.showerror("Lucas",f"无法取消配对：{exc}")
-    row(c,"配对","首次安装、取消配对或重新配对都只在这里完成。Pairing Code 在 Lucas 网页生成。",build_pairing_control); refresh_pairing_control()
+    row(c,"连接方式","这台电脑使用固定 Node ID 长期在线。其他 Lucas 账号通过 Node ID 发起访问申请，再由本机批准。",lambda p: tk.Label(p,text="无需 Pairing Code",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
     section(body,"Lucas Node"); c=card(body)
     current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None; update_control=None
     def run_update():
-        if not messagebox.askyesno("Lucas","更新 Lucas Node？现有配对、Allowed Folders 和安全设置会保留。"): return
+        if not messagebox.askyesno("Lucas","更新 Lucas Node？现有 Node ID、用户权限、Allowed Folders 和安全设置会保留。"): return
         try:
             version_status.set("正在启动更新…")
             if update_button is not None: update_button.configure(state="disabled")
@@ -561,17 +532,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not gv.startswith(("ws://","wss://")): messagebox.showerror("Lucas","Gateway 必须以 ws:// 或 wss:// 开头。"); return
         if not node_name.get().strip() or not node_id.get().strip(): messagebox.showerror("Lucas","电脑名称和 Node ID 不能为空。"); return
         if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
-        domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]; code=pairing_code.get().strip()
-        # A stale pairing_code may still be present in config from an older install.
-        # Never destroy a valid node token just because unrelated security settings are saved.
-        re_pair=bool(pairing_mode.get() and code)
-        if re_pair:
-            try: STATE_FILE.unlink(missing_ok=True)
-            except OSError as exc: messagebox.showerror("Lucas",f"无法重置旧的配对状态：{exc}"); return
-        updated=dict(existing); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"pairing_code":code if re_pair else None,"permission_level":permission.get(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True)
-        if re_pair: updated["connection_enabled"]=True
-        elif not _has_saved_token(): updated["connection_enabled"]=False
-        else: updated.setdefault("connection_enabled",True)
+        domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
+        updated=dict(existing); updated.pop("pairing_code",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"permission_level":permission.get(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         _save_config(updated); result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
         if save_button is not None: save_button.configure(text="已保存")
         def reset_feedback():
@@ -581,5 +543,4 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     save_button=button(fi,"保存更改",save,primary=True); save_button.pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10)); button(fi,"取消",root.destroy).pack(side="right",padx=(0,10))
     show_page(_load_last_page())
-    if not _has_saved_token(): root.after(200, pairing_entry.focus_set)
     refresh_connection_status(); root.mainloop(); return result

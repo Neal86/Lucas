@@ -313,14 +313,11 @@ def _apply_config(config: dict[str, object]) -> None:
         "GWC_GATEWAY_WS": config.get("gateway_ws_url"),
         "GWC_NODE_ID": config.get("node_id"),
         "GWC_NODE_NAME": config.get("node_name"),
-        "GWC_PAIRING_CODE": config.get("pairing_code"),
         "GWC_PERMISSION_LEVEL": config.get("permission_level"),
     }
     for key, value in mapping.items():
         if value is not None and str(value).strip():
             os.environ[key] = str(value).strip()
-        elif key == "GWC_PAIRING_CODE":
-            os.environ.pop(key, None)
     roots = config.get("allowed_roots")
     if isinstance(roots, list) and roots:
         os.environ["GWC_ALLOWED_ROOTS"] = os.pathsep.join(str(item) for item in roots)
@@ -594,7 +591,7 @@ def main() -> None:
     config = _load_config()
     if not config:
         settings = NodeSettings.from_env()
-        config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "pairing_code": settings.pairing_code, "permission_level": settings.permission_level, "allowed_roots": [str(path) for path in settings.allowed_roots]}
+        config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "permission_level": settings.permission_level, "allowed_roots": [str(path) for path in settings.allowed_roots]}
         _save_config(config)
     if args.configure:
         updated = _configure_gui(config)
