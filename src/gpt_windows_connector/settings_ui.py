@@ -181,7 +181,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     }
     FONT = "Segoe UI"
     root = tk.Tk()
-    root.title("Lucas 设置")
+    root.title(T("Lucas 设置", "Lucas Settings"))
     width,height=1180,780
     screen_w,screen_h=root.winfo_screenwidth(),root.winfo_screenheight()
     x=max((screen_w-width)//2,0); y=max((screen_h-height)//2,0)
@@ -340,7 +340,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"Node ID","设备唯一标识。",lambda p: tk.Label(p,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",lambda p: tk.Entry(p,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
-    connection_status=tk.StringVar(value="检测中…"); connection_status_label=None
+    connection_status=tk.StringVar(value=T("检测中…", "Checking…")); connection_status_label=None
     def build_connection_status(p):
         nonlocal connection_status_label
         connection_status_label=tk.Label(p,textvariable=connection_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]); return connection_status_label
@@ -352,12 +352,12 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             if isinstance(loaded,dict): status_data=loaded
         except (OSError,json.JSONDecodeError): pass
         value=str(status_data.get("status") or "").strip(); detail=str(status_data.get("detail") or "").strip().lower()
-        if value == "Online": text,color="已连接",C["green"]
-        elif value == "Connecting": text,color="正在连接…",C["orange"]
-        elif value == "Reconnecting": text,color="正在重新连接…",C["orange"]
-        elif value in {"Disconnected","Offline"}: text,color="未连接",C["muted"]
-        elif "token" in detail: text,color="设备认证失败",C["red"]
-        else: text,color="等待连接",C["muted"]
+        if value == "Online": text,color=T("已连接","Connected"),C["green"]
+        elif value == "Connecting": text,color=T("正在连接…","Connecting…"),C["orange"]
+        elif value == "Reconnecting": text,color=T("正在重新连接…","Reconnecting…"),C["orange"]
+        elif value in {"Disconnected","Offline"}: text,color=T("未连接","Disconnected"),C["muted"]
+        elif "token" in detail: text,color=T("设备认证失败","Device authentication failed"),C["red"]
+        else: text,color=T("等待连接","Waiting for connection"),C["muted"]
         connection_status.set(text); connection_status_label.configure(fg=color)
         try: root.after(1000,refresh_connection_status)
         except tk.TclError: pass
@@ -538,11 +538,11 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
         for p in pages.values(): p.pack_forget()
-        pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name); subtitle.set(desc[name]); _save_last_page(name)
+        pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name if language=="zh" else NAV_EN[name]); subtitle.set(desc[name] if language=="zh" else SETTINGS_EN.get(desc[name], desc[name])); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
     for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","系统访问"):
-        b=tk.Button(nav_frame,text=name,command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
+        b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
     footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom"); fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12); save_feedback=tk.StringVar(value="安全设置仅在此电脑上生效"); tk.Label(fi,textvariable=save_feedback,font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(side="left")
@@ -570,4 +570,5 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     save_button=button(fi,"保存更改",save,primary=True); save_button.pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10)); button(fi,"取消",root.destroy).pack(side="right",padx=(0,10))
     show_page(_load_last_page())
+    localize_tk_tree(root, SETTINGS_EN, language)
     refresh_connection_status(); root.mainloop(); return result
