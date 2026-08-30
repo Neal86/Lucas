@@ -325,13 +325,15 @@ def _actor(user) -> dict:
     return {"user_id": user.id, "email": user.email, "name": user.name or ""}
 
 
-async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True):
+async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
     verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
     resolved_workspace = str(verified["path"])
+    task_title = " ".join(str(task_title or "").split())[:180] or None
+    run_context = resolved_workspace
     payload = dict(params or {})
     if include_workspace:
         payload["workspace"] = resolved_workspace
@@ -343,12 +345,12 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration)
         auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=resolved_workspace)
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration)
     auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=resolved_workspace)
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=run_context,task_title=task_title)
     return result
 
 
@@ -495,7 +497,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. Users request access to a Node ID and the local Lucas Node is the final authority for account approval, permission level, and Allowed folders. Every workspace is validated locally before execution.",
+    instructions="Multi-user remote computer access layer. Users request access to a Node ID and the local Lucas Node is the final authority for account approval, permission level, and Allowed folders. Every workspace is validated locally before execution. For every user-requested execution task, pass the same concise task_title (the user's goal, not the tool action) on every execution tool call so Lucas can group tool calls as subtasks under one Task Run.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -540,56 +542,56 @@ def control_status(node_id: str) -> dict:
 
 
 @mcp.tool()
-async def workspace_info(node_id: str, workspace: str) -> dict:
-    return await _node_rpc(node_id, workspace, "workspace.info", {"workspace": workspace}, include_workspace=False)
+async def workspace_info(node_id: str, workspace: str, task_title: str | None = None) -> dict:
+    return await _node_rpc(node_id, workspace, "workspace.info", {"workspace": workspace}, include_workspace=False, task_title=task_title)
 
 
 @mcp.tool()
-async def files_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
+async def files_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
     allowed = {"list", "read", "write", "patch", "search", "stat", "mkdir", "move", "copy", "delete"}
     if action not in allowed:
         raise ValueError(f"Unsupported files action: {action}")
-    return await _node_rpc(node_id, workspace, f"files.{action}", params)
+    return await _node_rpc(node_id, workspace, f"files.{action}", params, task_title=task_title)
 
 
 @mcp.tool()
-async def shell_run(node_id: str, workspace: str, command: str, timeout: int = 120, shell_type: str = "powershell") -> dict:
-    return await _node_rpc(node_id, workspace, "shell.run", {"command": command, "timeout": timeout, "shell_type": shell_type})
+async def shell_run(node_id: str, workspace: str, command: str, timeout: int = 120, shell_type: str = "powershell", task_title: str | None = None) -> dict:
+    return await _node_rpc(node_id, workspace, "shell.run", {"command": command, "timeout": timeout, "shell_type": shell_type}, task_title=task_title)
 
 
 @mcp.tool()
-async def process_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> dict:
+async def process_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> dict:
     if action not in {"start", "poll", "stop", "list"}:
         raise ValueError(f"Unsupported process action: {action}")
-    return await _node_rpc(node_id, workspace, f"process.{action}", params)
+    return await _node_rpc(node_id, workspace, f"process.{action}", params, task_title=task_title)
 
 
 @mcp.tool()
-async def git_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> dict:
+async def git_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> dict:
     allowed = {"status", "diff", "log", "branch", "branch_create", "branch_switch", "add", "commit", "pull", "push", "show"}
     if action not in allowed:
         raise ValueError(f"Unsupported git action: {action}")
-    return await _node_rpc(node_id, workspace, f"git.{action}", params)
+    return await _node_rpc(node_id, workspace, f"git.{action}", params, task_title=task_title)
 
 
 @mcp.tool()
-async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
+async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
     allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     if action not in {"discover", "pages", "inspect", "screenshot"}:
         await _desktop_lock(node_id, workspace)
-    return await _node_rpc(node_id, workspace, f"browser.{action}", params)
+    return await _node_rpc(node_id, workspace, f"browser.{action}", params, task_title=task_title)
 
 
 @mcp.tool()
-async def computer_tool(node_id: str, workspace: str, action: str, params: dict | None = None) -> object:
+async def computer_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
     allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set", "ui_elements", "ui_click", "ui_set_text"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")
     if action not in {"info", "processes", "windows", "screenshot", "clipboard_get", "ui_elements"}:
         await _desktop_lock(node_id, workspace)
-    return await _node_rpc(node_id, workspace, f"computer.{action}", params)
+    return await _node_rpc(node_id, workspace, f"computer.{action}", params, task_title=task_title)
 
 
 async def health(_: Request):

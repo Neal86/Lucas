@@ -56,10 +56,13 @@ class TaskRunStore:
     def record_operation(self, *, owner_id: str, node_id: str, action: str,
                          target: str | None, started_at: float, ended_at: float,
                          status: str, details: dict[str, Any] | None = None,
-                         context_key: str | None = None) -> str:
+                         context_key: str | None = None, task_title: str | None = None) -> str:
         owner_id=str(owner_id or "local"); node_id=str(node_id or "unknown")
         action=str(action or "operation"); target=str(target or "") or None
+        task_title=" ".join(str(task_title or "").split())[:180] or None
         context_key=str(context_key or target or "default")
+        if task_title:
+            context_key=f"{context_key}::task::{task_title}"
         started_at=float(started_at); ended_at=max(started_at,float(ended_at))
         duration_ms=max(0,round((ended_at-started_at)*1000))
         with self._connect() as db:
@@ -68,7 +71,7 @@ class TaskRunStore:
                 run_id=str(row["id"])
             else:
                 run_id=uuid.uuid4().hex
-                db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,self._title(action,target),started_at,ended_at,ended_at))
+                db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at))
             success=status=="success"
             db.execute("UPDATE task_runs SET last_activity_at=?,ended_at=?,success_count=success_count+?,error_count=error_count+? WHERE id=?",(ended_at,ended_at,1 if success else 0,0 if success else 1,run_id))
             db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,details) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,json.dumps(details or {},ensure_ascii=False)))
