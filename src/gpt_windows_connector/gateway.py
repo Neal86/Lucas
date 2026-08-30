@@ -158,7 +158,7 @@ class NodeAuthStore:
 
 
 auth_store = NodeAuthStore(db_path)
-_pairings: dict[str, dict] = {}
+
 
 
 @dataclass

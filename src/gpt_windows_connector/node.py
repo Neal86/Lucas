@@ -420,7 +420,6 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             "node_id": settings.node_id,
             "name": settings.node_name,
             "node_token": token,
-            "pairing_code": settings.pairing_code,
             "permission_level": settings.permission_level,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
         }))
