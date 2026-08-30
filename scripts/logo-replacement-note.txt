@@ -1,1 +1,0 @@
-The website brand assets are replaced from the user-provided transparent Lucas logo artwork. Existing legacy CSS currently inverts dark-source logo pixels on dark backgrounds; the replacement assets preserve the exact uploaded alpha/artwork silhouette so they render as the requested white logo without build-time image rewriting.

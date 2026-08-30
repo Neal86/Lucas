@@ -8,8 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 COPY . /app
-RUN python scripts/normalize_brand_assets.py \
-    && pip install --no-cache-dir .
+RUN pip install --no-cache-dir .
 
 VOLUME ["/data"]
 EXPOSE 8787
