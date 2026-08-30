@@ -191,17 +191,14 @@ class NodeRegistry:
         out = []
         actor = {"user_id": user.id, "email": user.email, "name": user.name or ""}
         for node in tuple(self.nodes.values()):
-            permission_level = node.permission_level
-            allowed_roots = node.allowed_roots
-            if node.owner_user_id != user.id:
-                try:
-                    access = await self.rpc(node.node_id, user.id, "access.check", {}, actor=actor, timeout=3.0)
-                except Exception:
-                    continue
-                if not isinstance(access, dict) or not access.get("authorized"):
-                    continue
-                permission_level = str(access.get("permission_level") or "read")
-                allowed_roots = [str(item) for item in access.get("allowed_roots") or []]
+            try:
+                access = await self.rpc(node.node_id, user.id, "access.check", {}, actor=actor, timeout=3.0)
+            except Exception:
+                continue
+            if not isinstance(access, dict) or not access.get("authorized"):
+                continue
+            permission_level = str(access.get("permission_level") or "read")
+            allowed_roots = [str(item) for item in access.get("allowed_roots") or []]
             lock = self.control_locks.get(node.node_id)
             if lock and lock.expires_at <= now:
                 self.control_locks.pop(node.node_id, None)
@@ -209,7 +206,7 @@ class NodeRegistry:
             out.append({
                 "node_id": node.node_id, "name": node.name, "permission_level": permission_level,
                 "allowed_roots": allowed_roots, "online": True, "last_seen": node.last_seen,
-                "shared": node.owner_user_id != user.id,
+                "shared": True, "local_authority": True,
                 "control_context": lock.context_id if lock and lock.owner_user_id == user.id else None,
                 "control_expires_at": lock.expires_at if lock and lock.owner_user_id == user.id else None,
             })
@@ -498,7 +495,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote Windows execution layer. AI clients select an owned Windows node and an explicit workspace path. Every workspace is validated by the Windows Node against its Allowed folders before execution. ChatGPT Projects or other AI-side project contexts may store node_id and workspace; Lucas does not maintain a separate project binding layer.",
+    instructions="Multi-user remote computer access layer. Users request access to a Node ID and the local Lucas Node is the final authority for account approval, permission level, and Allowed folders. Every workspace is validated locally before execution.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -512,23 +509,11 @@ async def node_list() -> list[dict]:
 
 
 @mcp.tool()
-def node_pair(node_id: str, name: str | None = None, ttl_seconds: int = 600) -> dict:
-    user = _user()
-    ttl_seconds = max(60, min(ttl_seconds, 3600))
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    _pairings[code] = {"node_id": node_id, "name": name or node_id, "owner_user_id": user.id, "expires": time.time() + ttl_seconds}
-    auth.audit(user.id, "node.pair_code", node_id)
-    return {"node_id": node_id, "pairing_code": code, "expires_in": ttl_seconds}
-
-
-@mcp.tool()
 async def node_request_access(node_id: str, requested_permission: str = "operate") -> dict:
     user = _user()
     if requested_permission not in {"read", "operate", "admin"}:
         raise ValueError("requested_permission must be read, operate, or admin")
-    node = registry.require_online(node_id)
-    if node.owner_user_id == user.id:
-        return {"authorized": True, "owner": True, "permission_level": node.permission_level, "allowed_roots": node.allowed_roots}
+    registry.require_online(node_id)
     result = await registry.rpc(node_id, user.id, "access.request", {"requested_permission": requested_permission}, actor=_actor(user), timeout=180.0)
     auth.audit(user.id, "node.access_request", node_id, {"requested_permission": requested_permission, "result": result})
     return result
@@ -652,25 +637,24 @@ async def node_websocket(websocket: WebSocket):
         if permission_level not in {"read", "operate", "admin"}:
             permission_level = "operate"
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
-        supplied_token = hello.get("node_token")
-        pairing_code = hello.get("pairing_code")
-        record = await auth_store.record_for(node_id)
-        authorized = bool(record and supplied_token and secrets.compare_digest(str(record["token"]), str(supplied_token)))
-        issued_token = None
-        owner_user_id = str(record["owner_user_id"]) if authorized and record else None
-        if not authorized and pairing_code:
-            pairing = _pairings.get(str(pairing_code))
-            if pairing and (not pairing.get("node_id") or pairing["node_id"] == node_id) and pairing["expires"] >= time.time():
-                owner_user_id = pairing["owner_user_id"]
-                issued_token = secrets.token_urlsafe(32)
-                await auth_store.save(node_id, owner_user_id, name, issued_token, permission_level, hello_roots)
-                _pairings.pop(str(pairing_code), None)
-                authorized = True
-                record = await auth_store.record_for(node_id)
-        if not authorized or not owner_user_id:
-            await websocket.send_json({"type": "welcome", "ok": False, "error": "pairing or node token required"})
+        supplied_token = str(hello.get("node_token") or "").strip()
+        if not supplied_token:
+            await websocket.send_json({"type": "welcome", "ok": False, "error": "node device token required"})
             await websocket.close(code=4401)
             return
+        record = await auth_store.record_for(node_id)
+        if record:
+            authorized = secrets.compare_digest(str(record["token"]), supplied_token)
+        else:
+            await auth_store.save(node_id, "", name, supplied_token, permission_level, hello_roots)
+            record = await auth_store.record_for(node_id)
+            authorized = True
+        if not authorized:
+            await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token"})
+            await websocket.close(code=4401)
+            return
+        issued_token = None
+        owner_user_id = ""
         record = record or await auth_store.record_for(node_id)
         stored_roots: list[str] = []
         if record:
@@ -694,11 +678,7 @@ async def node_websocket(websocket: WebSocket):
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
-        await websocket.send_json({"type": "welcome", "ok": True, "node_token": issued_token, "owner_user_id": owner_user_id, "config": {"local_security_authority": True, "multi_user_access": True}})
-        owner = auth.get_user(owner_user_id)
-        snapshot = next((item for item in await registry.list(owner) if item["node_id"] == node_id), None)
-        if snapshot:
-            await dashboard_events.publish(owner_user_id, "node.upsert", {"node": snapshot})
+        await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False}})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
@@ -715,15 +695,8 @@ async def node_websocket(websocket: WebSocket):
             for future in connection.pending.values():
                 if not future.done():
                     future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
-            record = await auth_store.record_for(node_id)
-            if record and record.get("owner_user_id") == connection.owner_user_id:
-                try:
-                    roots = json.loads(record.get("allowed_roots") or "[]")
-                except json.JSONDecodeError:
-                    roots = []
-                await dashboard_events.publish(connection.owner_user_id, "node.upsert", {"node": {"node_id": node_id, "name": record.get("name"), "permission_level": record.get("permission_level") or "operate", "allowed_roots": roots, "online": False, "last_seen": connection.last_seen, "updated_at": record.get("updated_at")}})
-            else:
-                await dashboard_events.publish(connection.owner_user_id, "node.remove", {"node_id": node_id})
+            # Nodes are not owned by a web account. Authorized users discover current
+            # online state by Node ID and local access checks.
 
 
 mcp_app = mcp.streamable_http_app()

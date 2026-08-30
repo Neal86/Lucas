@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import socket
 import sys
 import time
@@ -342,14 +343,19 @@ def _setup_logging() -> None:
         root_logger.addHandler(file_handler)
 
 
-def _load_saved_token(settings: NodeSettings) -> str | None:
+def _load_saved_token(settings: NodeSettings) -> str:
     if settings.node_token:
         return settings.node_token
     try:
         data = json.loads(settings.state_file.read_text(encoding="utf-8"))
-        return data.get("node_token")
+        token = str(data.get("node_token") or "").strip()
+        if token:
+            return token
     except (OSError, json.JSONDecodeError):
-        return None
+        pass
+    token = secrets.token_urlsafe(32)
+    _save_token(settings, token)
+    return token
 
 
 def _save_token(settings: NodeSettings, token: str) -> None:
@@ -426,17 +432,10 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
             raise RuntimeError(welcome.get("error") or "Gateway rejected node")
-        if welcome.get("node_token"):
-            _save_token(settings, welcome["node_token"])
-            config = _load_config()
-            if config.get("pairing_code"):
-                config["pairing_code"] = None
-                _save_config(config)
         # Security policy is authoritative on the Windows computer. The gateway may
         # report status, but it is never allowed to overwrite local permissions.
         log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
         _write_status("Online")
-        owner_user_id = str(welcome.get("owner_user_id") or "").strip()
         node_roots = [str(path) for path in settings.allowed_roots]
         session_grants: dict[str, dict[str, object]] = {}
 
@@ -444,8 +443,6 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             user_id = str(actor.get("user_id") or "").strip()
             if not user_id:
                 return None
-            if owner_user_id and user_id == owner_user_id:
-                return {"user_id": user_id, "owner": True, "permission_level": settings.permission_level, "allowed_roots": node_roots}
             temporary = session_grants.get(user_id)
             if temporary:
                 return dict(temporary)
@@ -466,7 +463,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             if choice not in {"once", "always"} or not roots:
                 log.info("Local access denied for user %s", user_id)
                 return {"authorized": False, "decision": "deny"}
-            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "permission_level": permission_level, "allowed_roots": roots, "owner": False}
+            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "permission_level": permission_level, "allowed_roots": roots}
             if choice == "always":
                 saved = local_access.upsert(actor, permission_level, roots)
                 grant.update(saved)
@@ -489,13 +486,10 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 if not access:
                     raise PermissionError("This Lucas user has not been approved on the Windows Node")
                 user_id = str(access.get("user_id") or "")
-                if access.get("owner"):
-                    active_executor = executor
-                else:
-                    roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
-                    active_executor = Executor(roots, str(access.get("permission_level") or "read"), _load_config())
+                roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
+                active_executor = Executor(roots, str(access.get("permission_level") or "read"), _load_config())
                 result = await active_executor.call(method, params)
-                if user_id and not access.get("owner") and user_id not in session_grants:
+                if user_id and user_id not in session_grants:
                     local_access.touch(user_id)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
             except asyncio.CancelledError:
@@ -550,8 +544,9 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                     })
                     continue
                 if method == "node.logs":
-                    if not owner_user_id or str(actor.get("user_id") or "") != owner_user_id:
-                        await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Node logs are owner-only"})
+                    log_access = effective_access(actor)
+                    if not log_access or str(log_access.get("permission_level") or "read") != "admin":
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Admin permission is required for Node logs"})
                         continue
                     try:
                         limit = max(20, min(int(params.get("limit", 200)), 1000))
