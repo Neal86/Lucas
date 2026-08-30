@@ -170,6 +170,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     except Exception as exc:
         raise RuntimeError(f"Lucas configuration UI is unavailable: {exc}") from exc
 
+    language = system_language()
+    T = lambda zh, en: tr(zh, en, language)
+    NAV_EN = {"常规":"General","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","规则":"Rules","任务记录":"Task History","系统访问":"System Access"}
     C = {
         "window":"#FFFFFF","sidebar":"#F3F3F3","sidebar_hover":"#EAEAEA","card":"#FFFFFF",
         "line":"#E5E5E5","text":"#1F1F1F","muted":"#6B6B6B","subtle":"#8A8A8A",
