@@ -136,7 +136,7 @@ async def nodes(request: Request):
     try:
         _admin(request); online=set(gateway.registry.nodes)
         with _db() as db:
-            rows=db.execute("SELECT n.node_id,n.name,n.updated_at,n.permission_level,n.allowed_roots FROM nodes n ORDER BY n.updated_at DESC").fetchall()
+            rows=db.execute("SELECT n.node_id,n.name,n.updated_at,n.allowed_roots FROM nodes n ORDER BY n.updated_at DESC").fetchall()
         data=[]
         for r in rows:
             d=dict(r); d["online"]=d["node_id"] in online; d["platform"]="windows"; d["allowed_folder_count"]=len(json.loads(d.get("allowed_roots") or "[]")); d.pop("allowed_roots",None); data.append(d)

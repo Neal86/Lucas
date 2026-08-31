@@ -121,40 +121,23 @@ class NodeAuthStore:
             row = db.execute("SELECT * FROM nodes WHERE node_id=?", (node_id,)).fetchone()
         return dict(row) if row else None
 
-    async def save(self, node_id: str, owner_user_id: str, name: str, token: str, permission_level: str = "operate", allowed_roots: list[str] | None = None) -> None:
+    async def save(self, node_id: str, name: str, token: str, allowed_roots: list[str] | None = None) -> None:
         roots_json = json.dumps(allowed_roots or [])
         with self._connect() as db:
             db.execute(
                 """
                 INSERT INTO nodes(node_id,owner_user_id,name,token,updated_at,permission_level,allowed_roots) VALUES(?,?,?,?,?,?,?)
-                ON CONFLICT(node_id) DO UPDATE SET owner_user_id=excluded.owner_user_id,name=excluded.name,token=excluded.token,updated_at=excluded.updated_at,permission_level=excluded.permission_level,allowed_roots=excluded.allowed_roots
+                ON CONFLICT(node_id) DO UPDATE SET name=excluded.name,token=excluded.token,updated_at=excluded.updated_at,allowed_roots=excluded.allowed_roots
                 """,
-                (node_id, owner_user_id, name, token, time.time(), permission_level, roots_json),
+                (node_id, "", name, token, time.time(), "operate", roots_json),
             )
 
-    async def update_config(self, node_id: str, owner_user_id: str, name: str, permission_level: str, allowed_roots: list[str]) -> dict:
+    async def update_config(self, node_id: str, name: str, allowed_roots: list[str]) -> dict:
         with self._connect() as db:
-            cur = db.execute("UPDATE nodes SET name=?,permission_level=?,allowed_roots=?,updated_at=? WHERE node_id=? AND owner_user_id=?", (name, permission_level, json.dumps(allowed_roots), time.time(), node_id, owner_user_id))
+            cur = db.execute("UPDATE nodes SET name=?,allowed_roots=?,updated_at=? WHERE node_id=?", (name, json.dumps(allowed_roots), time.time(), node_id))
             if cur.rowcount != 1:
-                raise PermissionError("Node not found or not owned by this account")
+                raise LookupError("Node not found")
         return await self.record_for(node_id)
-
-    async def update_name(self, node_id: str, owner_user_id: str, name: str) -> dict:
-        name = str(name).strip()
-        if not name:
-            raise ValueError("Computer display name is required")
-        if len(name) > 120:
-            raise ValueError("Computer display name is too long")
-        with self._connect() as db:
-            cur = db.execute("UPDATE nodes SET name=?,updated_at=? WHERE node_id=? AND owner_user_id=?", (name, time.time(), node_id, owner_user_id))
-            if cur.rowcount != 1:
-                raise PermissionError("Node not found or not owned by this account")
-        return await self.record_for(node_id)
-
-    async def delete(self, node_id: str, owner_user_id: str) -> bool:
-        with self._connect() as db:
-            cur = db.execute("DELETE FROM nodes WHERE node_id=? AND owner_user_id=?", (node_id, owner_user_id))
-            return cur.rowcount == 1
 
 
 auth_store = NodeAuthStore(db_path)
@@ -164,9 +147,7 @@ auth_store = NodeAuthStore(db_path)
 @dataclass
 class NodeConnection:
     node_id: str
-    owner_user_id: str
     name: str
-    permission_level: str
     allowed_roots: list[str]
     websocket: WebSocket
     last_seen: float = field(default_factory=time.time)
@@ -216,12 +197,6 @@ class NodeRegistry:
         node = self.nodes.get(node_id)
         if not node:
             raise RuntimeError(f"Node is offline: {node_id}")
-        return node
-
-    def require_owned(self, node_id: str, user_id: str) -> NodeConnection:
-        node = self.require_online(node_id)
-        if node.owner_user_id != user_id:
-            raise PermissionError("Node does not belong to the authenticated user")
         return node
 
     def acquire_control(self, node_id: str, user_id: str, context_id: str, ttl_seconds: int = 120) -> dict:
@@ -639,9 +614,6 @@ async def node_websocket(websocket: WebSocket):
             await websocket.close(code=4400)
             return
         name = str(hello.get("name") or node_id)
-        permission_level = str(hello.get("permission_level") or "operate").strip().lower()
-        if permission_level not in {"read", "operate", "admin"}:
-            permission_level = "operate"
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         supplied_token = str(hello.get("node_token") or "").strip()
         if not supplied_token:
@@ -652,15 +624,13 @@ async def node_websocket(websocket: WebSocket):
         if record:
             authorized = secrets.compare_digest(str(record["token"]), supplied_token)
         else:
-            await auth_store.save(node_id, "", name, supplied_token, permission_level, hello_roots)
+            await auth_store.save(node_id, name, supplied_token, hello_roots)
             record = await auth_store.record_for(node_id)
             authorized = True
         if not authorized:
             await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token"})
             await websocket.close(code=4401)
             return
-        issued_token = None
-        owner_user_id = ""
         record = record or await auth_store.record_for(node_id)
         stored_roots: list[str] = []
         if record:
@@ -677,8 +647,8 @@ async def node_websocket(websocket: WebSocket):
         # never overwrite a display name the user chose on the website.
         display_name = str(record.get("name") or name) if record else name
         if authorized:
-            await auth_store.update_config(node_id, owner_user_id, display_name, permission_level, allowed_roots)
-        connection = NodeConnection(node_id=node_id, owner_user_id=owner_user_id, name=display_name, permission_level=permission_level, allowed_roots=allowed_roots, websocket=websocket)
+            await auth_store.update_config(node_id, display_name, allowed_roots)
+        connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):

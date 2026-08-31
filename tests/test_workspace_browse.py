@@ -12,7 +12,7 @@ def test_workspace_browse_lists_only_allowed_directories(tmp_path: Path):
     (root / "Project-B").mkdir()
     (root / "file.txt").write_text("x", encoding="utf-8")
 
-    executor = Executor((root,), permission_level="read")
+    executor = Executor((root,))
     roots = executor.browse_workspaces()
     assert roots["roots"][0]["path"] == str(root.resolve())
 
@@ -26,6 +26,6 @@ def test_workspace_browse_rejects_path_outside_allowed_root(tmp_path: Path):
     outside = tmp_path / "outside"
     root.mkdir()
     outside.mkdir()
-    executor = Executor((root,), permission_level="read")
+    executor = Executor((root,))
     with pytest.raises(PermissionError):
         executor.browse_workspaces(str(outside))
