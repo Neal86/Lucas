@@ -370,7 +370,7 @@ def _save_token(settings: NodeSettings, token: str) -> None:
     temporary.replace(settings.state_file)
 
 
-def _prompt_access_request(actor: dict[str, object], requested_permission: str, node_roots: list[str]) -> dict[str, object]:
+def _prompt_access_request(actor: dict[str, object], node_roots: list[str]) -> dict[str, object]:
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -380,7 +380,7 @@ def _prompt_access_request(actor: dict[str, object], requested_permission: str, 
     result: dict[str, object] = {"decision": "deny"}
     root = tk.Tk()
     root.title(tr("Lucas 访问请求", "Lucas Access Request"))
-    root.geometry("560x520")
+    root.geometry("580x540")
     root.resizable(False, False)
     root.attributes("-topmost", True)
     frame = tk.Frame(root, padx=24, pady=22)
@@ -391,31 +391,33 @@ def _prompt_access_request(actor: dict[str, object], requested_permission: str, 
     tk.Label(frame, text=display, font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(18, 2))
     if email and email != display:
         tk.Label(frame, text=email, font=("Segoe UI", 9), fg="#666666").pack(anchor="w")
-    tk.Label(frame, text=tr("只有你在此电脑上批准后，该用户才能通过 Lucas 执行操作。", "This account can use Lucas on this computer only after you approve it locally."), font=("Segoe UI", 9), fg="#555555", wraplength=500, justify="left").pack(anchor="w", pady=(10, 18))
+    tk.Label(frame, text=tr("连接码已验证。请选择一个快捷权限模式；详细权限可以稍后在 Lucas 设置 → 用户与权限 中修改。", "The connection code is verified. Choose a quick access mode; detailed permissions can be changed later in Lucas Settings → Users & Permissions."), font=("Segoe UI", 9), fg="#555555", wraplength=520, justify="left").pack(anchor="w", pady=(10, 18))
 
-    tk.Label(frame, text=tr("权限", "Permission"), font=("Segoe UI", 9, "bold")).pack(anchor="w")
-    permission = tk.StringVar(value=requested_permission if requested_permission in {"read", "operate", "admin"} else "operate")
-    ttk.Combobox(frame, textvariable=permission, values=["read", "operate", "admin"], state="readonly", width=24).pack(anchor="w", pady=(5, 14))
+    tk.Label(frame, text=tr("快捷权限", "Quick access mode"), font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    preset_display = tk.StringVar(value=tr("请求批准（Recommended）", "Ask for approval (Recommended)"))
+    preset_values = [tr("请求批准（Recommended）", "Ask for approval (Recommended)"), tr("帮我批准", "Auto-approve safe actions"), tr("完全访问权限", "Full Access")]
+    ttk.Combobox(frame, textvariable=preset_display, values=preset_values, state="readonly", width=34).pack(anchor="w", pady=(5, 14))
 
     tk.Label(frame, text=tr("允许访问的文件夹", "Allowed folders"), font=("Segoe UI", 9, "bold")).pack(anchor="w")
-    folders = tk.Listbox(frame, selectmode="multiple", height=min(max(len(node_roots), 4), 9), width=70)
+    folders = tk.Listbox(frame, selectmode="multiple", height=min(max(len(node_roots), 4), 9), width=72)
     folders.pack(fill="x", pady=(5, 8))
     for index, path in enumerate(node_roots):
         folders.insert("end", path)
         folders.selection_set(index)
-    tk.Label(frame, text=tr("权限不能超过此 Node 的总权限，文件夹也不能超出 Allowed Folders。", "Account permission cannot exceed the Node maximum, and folders cannot exceed Allowed Folders."), font=("Segoe UI", 8), fg="#777777").pack(anchor="w")
+    tk.Label(frame, text=tr("该账号只能访问这里选择的文件夹；Windows UAC 仍然是最终系统权限边界。", "This account can access only the selected folders; Windows UAC remains the final system privilege boundary."), font=("Segoe UI", 8), fg="#777777", wraplength=520, justify="left").pack(anchor="w")
 
     actions = tk.Frame(frame)
     actions.pack(side="bottom", fill="x", pady=(24, 0))
 
     def finish(decision: str) -> None:
         selected = [node_roots[i] for i in folders.curselection()]
-        result.update({"decision": decision, "permission_level": permission.get(), "allowed_roots": selected})
+        preset_map = {preset_values[0]: "request_approval", preset_values[1]: "auto_approve", preset_values[2]: "full_access"}
+        result.update({"decision": decision, "preset": preset_map.get(preset_display.get(), "request_approval"), "allowed_roots": selected})
         root.destroy()
 
     tk.Button(actions, text=tr("拒绝", "Deny"), command=lambda: finish("deny"), padx=14, pady=7).pack(side="right")
     tk.Button(actions, text=tr("允许一次", "Allow once"), command=lambda: finish("once"), padx=14, pady=7).pack(side="right", padx=(0, 8))
-    tk.Button(actions, text=tr("始终允许", "Always allow"), command=lambda: finish("always"), padx=14, pady=7).pack(side="right", padx=(0, 8))
+    tk.Button(actions, text=tr("长期允许", "Always allow"), command=lambda: finish("always"), padx=14, pady=7).pack(side="right", padx=(0, 8))
     root.protocol("WM_DELETE_WINDOW", lambda: finish("deny"))
     root.mainloop()
     return result
