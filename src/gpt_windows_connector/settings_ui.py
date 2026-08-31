@@ -74,9 +74,12 @@ PRESET_DESCRIPTIONS = {
     "自定义":"使用下方逐项设置。",
 }
 
-def detect_security_preset(approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool) -> str:
+def detect_security_preset(approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool, allowed_domains: list[str] | tuple[str, ...] | None = None) -> str:
+    domains = [str(value).strip() for value in (allowed_domains or []) if str(value).strip()]
     for name,preset in PRESETS.items():
         if network_external != preset["network_external"] or network_lan != preset["network_lan"] or bool(block_silent_network) != bool(preset["block_silent_network"]):
+            continue
+        if name == "完全访问权限" and domains:
             continue
         if all(str(approval_policy.get(k)) == str(v) for k,v in preset["approval_policy"].items()):
             return name
@@ -402,19 +405,21 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body); preset_syncing={"value":False}
-    preset_display=tk.StringVar(value=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get())); preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
+    preset_display=tk.StringVar(value=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get(),[v.strip() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()])); preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
     def sync_preset_from_fields(*_):
         if preset_syncing["value"]: return
-        name=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get()); preset_syncing["value"]=True; preset_display.set(name); preset_desc.set(PRESET_DESCRIPTIONS[name]); preset_syncing["value"]=False
+        name=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get(),[v.strip() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]); preset_syncing["value"]=True; preset_display.set(name); preset_desc.set(PRESET_DESCRIPTIONS[name]); preset_syncing["value"]=False
     def apply_preset(*_):
         if preset_syncing["value"]: return
         name=preset_display.get(); preset_desc.set(PRESET_DESCRIPTIONS.get(name,PRESET_DESCRIPTIONS["自定义"])); preset=PRESETS.get(name)
         if not preset: return
         preset_syncing["value"]=True
         for k,v in preset["approval_policy"].items(): approval_vars[k].set(str(v))
-        network_external.set(str(preset["network_external"])); network_lan.set(str(preset["network_lan"])); block_silent_network.set(bool(preset["block_silent_network"])); preset_syncing["value"]=False
+        network_external.set(str(preset["network_external"])); network_lan.set(str(preset["network_lan"])); block_silent_network.set(bool(preset["block_silent_network"]));
+        if name == "完全访问权限": allowed_domains.set("")
+        preset_syncing["value"]=False
     preset_display.trace_add("write",apply_preset)
-    for var in [network_external,network_lan,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
+    for var in [network_external,network_lan,allowed_domains,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
     def preset_control(p):
         f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e"); tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
     row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))

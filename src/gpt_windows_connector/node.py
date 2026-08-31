@@ -165,6 +165,22 @@ def _save_token(settings: NodeSettings, token: str) -> None:
     temporary.replace(settings.state_file)
 
 
+def _grants_full_access(access: dict[str, object]) -> bool:
+    preset = normalize_preset(str(access.get("preset") or "request_approval"))
+    security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(preset)
+    full = preset_security("full_access")
+    policy = security.get("approval_policy") if isinstance(security.get("approval_policy"), dict) else {}
+    required = full.get("approval_policy") if isinstance(full.get("approval_policy"), dict) else {}
+    domains = [str(value).strip() for value in (security.get("allowed_domains") or []) if str(value).strip()]
+    return (
+        all(str(policy.get(key) or "").lower() == "allow" for key in required)
+        and str(security.get("network_external") or "").lower() == "allow"
+        and str(security.get("network_lan") or "").lower() == "allow"
+        and not bool(security.get("block_silent_network", True))
+        and not domains
+    )
+
+
 def _prompt_access_request(actor: dict[str, object], node_roots: list[str]) -> dict[str, object]:
     try:
         import tkinter as tk
@@ -353,7 +369,7 @@ async def _serve_connection(settings: NodeSettings) -> None:
                     continue
                 if method == "node.logs":
                     log_access = effective_access(actor)
-                    if not log_access or normalize_preset(str(log_access.get("preset") or "")) != "full_access":
+                    if not log_access or not _grants_full_access(log_access):
                         await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Full Access is required for Node logs"})
                         continue
                     try:
