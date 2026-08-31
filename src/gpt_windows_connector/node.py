@@ -74,6 +74,16 @@ def _save_config(config: dict[str, object]) -> None:
     temporary.replace(CONFIG_FILE)
 
 
+def _ensure_connection_code(config: dict[str, object]) -> str:
+    code = str(config.get("connection_code") or "").strip()
+    if len(code) == 8 and code.isdigit():
+        return code
+    code = f"{secrets.randbelow(100_000_000):08d}"
+    config["connection_code"] = code
+    _save_config(config)
+    return code
+
+
 def _write_status(status: str, detail: str = "") -> None:
     """Best-effort status publishing; UI file-lock races must never drop WebSocket."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
