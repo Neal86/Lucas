@@ -488,7 +488,36 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         record=next((r for r in user_records if str(r.get("user_id"))==uid),None); label=str((record or {}).get("name") or (record or {}).get("email") or uid)
         if not messagebox.askyesno("Lucas",f"撤销 {label} 对这台电脑的访问权限？\n\n撤销后，该用户必须重新在本机获得批准。"): return
         access_store.remove(uid); user_note.set("已撤销访问。"); refresh_users()
-    button(user_actions,"保存权限",save_user_access,primary=True).pack(side="right"); button(user_actions,"撤销访问",revoke_user_access,danger=True).pack(side="right",padx=(0,8)); button(user_actions,"刷新",lambda: refresh_users(selected_user_id["value"])).pack(side="right",padx=(0,8))
+    def edit_user_details():
+        uid=selected_user_id["value"]
+        if not uid: return
+        record=next((r for r in user_records if str(r.get("user_id"))==uid),None)
+        if not record: return
+        selected=[roots[i] for i in user_roots.curselection()] or list(record.get("allowed_roots") or [])
+        selected=clamp_roots(selected,roots)
+        if not selected: messagebox.showerror("Lucas","请先为该用户选择至少一个允许访问的文件夹。"); return
+        preset=preset_to_id.get(user_preset.get(),normalize_preset(str(record.get("preset") or "request_approval")))
+        security=dict(record.get("security") or preset_security(preset))
+        policy=dict(security.get("approval_policy") or {})
+        win=tk.Toplevel(root); win.title("Lucas · 用户详细权限"); win.geometry("720x720"); win.transient(root); win.grab_set()
+        outer=tk.Frame(win,bg=C["window"]); outer.pack(fill="both",expand=True,padx=22,pady=18)
+        tk.Label(outer,text="详细权限",font=(FONT,16,"bold"),fg=C["text"],bg=C["window"]).pack(anchor="w")
+        tk.Label(outer,text=user_identity.get(),font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(anchor="w",pady=(3,12))
+        canvas=tk.Canvas(outer,bg=C["window"],highlightthickness=0); sb=ttk.Scrollbar(outer,orient="vertical",command=canvas.yview); body=tk.Frame(canvas,bg=C["window"]); holder=canvas.create_window((0,0),window=body,anchor="nw"); canvas.configure(yscrollcommand=sb.set); canvas.pack(side="left",fill="both",expand=True); sb.pack(side="right",fill="y"); body.bind("<Configure>",lambda e: canvas.configure(scrollregion=canvas.bbox("all"))); canvas.bind("<Configure>",lambda e: canvas.itemconfigure(holder,width=e.width))
+        labels={"system_info":"系统信息读取","shell":"普通 PowerShell / 命令行","file_write":"文件写入与修改","file_delete":"文件删除","process_control":"进程启动 / 停止","service_control":"Windows 服务","registry_system":"注册表与系统配置","software_install":"安装 / 卸载软件","desktop_control":"电脑操控","screenshots":"屏幕截图","clipboard":"剪贴板","browser_control":"浏览器操控","browser_transfer":"浏览器上传 / 下载","git_write":"Git 本地修改","git_push":"Git Push / 远程写入","high_risk":"其他高风险系统修改"}
+        detail_vars={}
+        for key in APPROVAL_DEFAULTS:
+            line=tk.Frame(body,bg=C["card"],highlightthickness=1,highlightbackground=C["line"]); line.pack(fill="x",pady=(0,6)); tk.Label(line,text=labels.get(key,key),font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left",padx=12,pady=10); var=tk.StringVar(value=str(policy.get(key) or APPROVAL_DEFAULTS[key])); detail_vars[key]=var; combo(line,var,["allow","ask","always_ask","block"],14).pack(side="right",padx=12,pady=6)
+        ext=tk.StringVar(value=str(security.get("network_external") or "ask")); lan=tk.StringVar(value=str(security.get("network_lan") or "allow"))
+        for title,var in (("外部网络访问",ext),("本地局域网访问",lan)):
+            line=tk.Frame(body,bg=C["card"],highlightthickness=1,highlightbackground=C["line"]); line.pack(fill="x",pady=(0,6)); tk.Label(line,text=title,font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left",padx=12,pady=10); combo(line,var,["allow","ask","always_ask","block"],14).pack(side="right",padx=12,pady=6)
+        footer=tk.Frame(win,bg=C["window"]); footer.pack(fill="x",padx=22,pady=(0,18))
+        def save_details():
+            custom=dict(security); custom["approval_policy"]={k:v.get() for k,v in detail_vars.items()}; custom["network_external"]=ext.get(); custom["network_lan"]=lan.get()
+            access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},"custom",selected,security=custom,enabled=True); user_note.set("详细权限已保存，该用户下一次操作立即生效。"); win.destroy(); refresh_users(uid)
+        button(footer,"保存详细权限",save_details,primary=True).pack(side="right"); button(footer,"取消",win.destroy).pack(side="right",padx=(0,8))
+
+    button(user_actions,"保存权限",save_user_access,primary=True).pack(side="right"); button(user_actions,"详细权限",edit_user_details).pack(side="right",padx=(0,8)); button(user_actions,"撤销访问",revoke_user_access,danger=True).pack(side="right",padx=(0,8)); button(user_actions,"刷新",lambda: refresh_users(selected_user_id["value"])).pack(side="right",padx=(0,8))
     refresh_users()
     c=card(body); row(c,"本地最终授权","VPS 只负责转发用户身份和请求。是否允许执行、实际权限和允许目录都由此 Windows Node 再次检查。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
