@@ -30,28 +30,40 @@ webapp.DASHBOARD_HTML = (
         '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
     )
     .replace(
+        '.logo{height:64px;min-height:64px;padding:4px 10px 14px;',
+        '.logo{height:94px;min-height:94px;padding:10px 8px 12px;',
+    )
+    .replace(
+        '.logo img{display:block;width:184px;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}',
+        '.logo img{display:block;width:210px;max-width:100%;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}',
+    )
+    .replace(
+        '.landing-logo img{display:block;height:44px;width:auto;background:transparent;border-radius:0;padding:0;filter:none}',
+        '.landing-logo img{display:block;height:52px;width:auto;background:transparent;border-radius:0;padding:0;filter:none}',
+    )
+    .replace(
         '<link rel="icon" type="image/png" href="/assets/lucas-logo-square.png" />',
-        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-split-20260830" />',
+        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-clean-20260831" />',
     )
     .replace(
         '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
+        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div class="core-ring"><img src="/assets/lucas-logo-square.png" alt="Lucas" /></div>',
-        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-split-20260830" alt="Lucas" /></div>',
+        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
+        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal-blue.png?v=brand-split-20260830" alt="Lucas" /></div>',
+        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal-blue.png?v=brand-clean-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
+        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
     )
 )
 
