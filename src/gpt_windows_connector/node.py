@@ -322,7 +322,6 @@ def _apply_config(config: dict[str, object]) -> None:
         "GWC_GATEWAY_WS": config.get("gateway_ws_url"),
         "GWC_NODE_ID": config.get("node_id"),
         "GWC_NODE_NAME": config.get("node_name"),
-        "GWC_PERMISSION_LEVEL": config.get("permission_level"),
     }
     for key, value in mapping.items():
         if value is not None and str(value).strip():
