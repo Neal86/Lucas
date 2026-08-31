@@ -11,7 +11,7 @@ from . import gateway, webapp
 
 
 # Brand assets are intentionally split by surface so light/dark UI never share
-# a logo that needs CSS inversion or opacity tricks.
+# a logo that needs different source artwork.
 BRAND_ASSETS = {
     "lucas-logo-home-square-white.png": "lucas-logo-home-square-white.png",
     "lucas-logo-horizontal-blue.png": "lucas-logo-horizontal-blue.png",
@@ -19,8 +19,10 @@ BRAND_ASSETS = {
 }
 
 
-# Apply the surface-specific artwork directly to the existing single-page UI.
-# Keep these replacements narrowly scoped to branding/presentation only.
+# Apply surface-specific artwork directly to the existing single-page UI.
+# The horizontal dark-surface logo uses the same clean source as the blue logo;
+# CSS only changes its rendered color to white. This avoids the corrupted legacy
+# white PNG while preserving the exact logo geometry.
 webapp.DASHBOARD_HTML = (
     webapp.DASHBOARD_HTML
     .replace("filter:brightness(0) invert(1)!important", "filter:none!important")
@@ -31,39 +33,39 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '.logo{height:64px;min-height:64px;padding:4px 10px 14px;',
-        '.logo{height:94px;min-height:94px;padding:10px 8px 12px;',
+        '.logo{height:104px;min-height:104px;padding:10px 10px 12px;',
     )
     .replace(
         '.logo img{display:block;width:184px;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}',
-        '.logo img{display:block;width:210px;max-width:100%;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}',
+        '.logo img{display:block;width:230px;max-width:100%;height:auto;background:transparent;border-radius:0;padding:0;filter:brightness(0) invert(1)!important;opacity:1}',
     )
     .replace(
         '.landing-logo img{display:block;height:44px;width:auto;background:transparent;border-radius:0;padding:0;filter:none}',
-        '.landing-logo img{display:block;height:52px;width:auto;background:transparent;border-radius:0;padding:0;filter:none}',
+        '.landing-logo img{display:block;height:54px;width:auto;background:transparent;border-radius:0;padding:0;filter:brightness(0) invert(1);opacity:1}',
     )
     .replace(
         '<link rel="icon" type="image/png" href="/assets/lucas-logo-square.png" />',
-        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-clean-20260831" />',
+        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-final-20260831" />',
     )
     .replace(
         '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
+        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div class="core-ring"><img src="/assets/lucas-logo-square.png" alt="Lucas" /></div>',
-        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
+        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
+        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal-blue.png?v=brand-clean-20260831" alt="Lucas" /></div>',
+        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal-blue.png?v=brand-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-clean-20260831" alt="Lucas" /></div>',
+        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
     )
 )
 
@@ -80,8 +82,6 @@ async def split_brand_asset(request):
     )
 
 
-# Serve only the three explicitly separated brand resources without widening
-# the legacy webapp asset route.
 for _asset_name in BRAND_ASSETS:
     _asset_path = f"/assets/{_asset_name}"
     if not any(getattr(r, "path", None) == _asset_path for r in webapp.routes):
