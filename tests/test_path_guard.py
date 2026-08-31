@@ -34,10 +34,10 @@ def test_blocks_parent_traversal():
         validate_command_paths(WORKSPACE, ROOTS, r'Get-Content ..\..\secret.txt')
 
 
-def test_operate_cannot_launch_nested_shell():
+def test_computer_launch_cannot_nest_a_shell():
     with pytest.raises(PermissionError, match="SHELL_LAUNCH_BLOCKED"):
-        validate_launch_target(WORKSPACE, ROOTS, "powershell.exe", "-Command Get-ChildItem", "operate")
+        validate_launch_target(WORKSPACE, ROOTS, "powershell.exe", "-Command Get-ChildItem")
 
 
-def test_admin_can_launch_shell_when_paths_are_allowed():
-    validate_launch_target(WORKSPACE, ROOTS, "powershell.exe", r'-Command Get-Content C:\Users\mrwan\project\README.md', "admin")
+def test_normal_launch_target_inside_allowed_path_is_allowed():
+    validate_launch_target(WORKSPACE, ROOTS, r"C:\Users\mrwan\project\tool.exe", "--help")
