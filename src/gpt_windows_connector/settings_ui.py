@@ -366,8 +366,13 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         try: root.after(1000,refresh_connection_status)
         except tk.TclError: pass
 
+    def regenerate_connection_code():
+        new_code=f"{secrets.randbelow(100_000_000):08d}"
+        connection_code.set(new_code)
+        latest=dict(existing); latest["connection_code"]=new_code
+        _save_config(latest); _restart_node_for_apply()
     def build_connection_code(p):
-        f=tk.Frame(p,bg=C["card"]); tk.Label(f,textvariable=connection_code,font=(FONT,14,"bold"),fg=C["blue"],bg=C["card"]).pack(side="left"); button(f,"重新生成",lambda: connection_code.set(f"{secrets.randbelow(100_000_000):08d}")).pack(side="left",padx=(10,0)); return f
+        f=tk.Frame(p,bg=C["card"]); tk.Label(f,textvariable=connection_code,font=(FONT,14,"bold"),fg=C["blue"],bg=C["card"]).pack(side="left"); button(f,"重新生成",regenerate_connection_code).pack(side="left",padx=(10,0)); return f
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)

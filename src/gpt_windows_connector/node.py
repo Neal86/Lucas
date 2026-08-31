@@ -257,6 +257,7 @@ async def _serve_connection(settings: NodeSettings) -> None:
         node_roots = [str(path) for path in settings.allowed_roots]
         session_grants: dict[str, dict[str, object]] = {}
         access_file_mtime = ACCESS_FILE.stat().st_mtime if ACCESS_FILE.exists() else 0.0
+        access_attempts: dict[str, list[float]] = {}
 
         def effective_access(actor: dict[str, object]) -> dict[str, object] | None:
             user_id = str(actor.get("user_id") or "").strip()
@@ -277,9 +278,18 @@ async def _serve_connection(settings: NodeSettings) -> None:
             current = effective_access(actor)
             if current:
                 return {"authorized": True, **current}
+            now = time.time()
+            attempts = [stamp for stamp in access_attempts.get(user_id, []) if now - stamp < 60]
+            access_attempts[user_id] = attempts
+            if len(attempts) >= 5:
+                log.warning("Local connection-code rate limit user=%s", user_id)
+                return {"authorized": False, "error": "too many connection attempts"}
             if not supplied_connection_code or not secrets.compare_digest(connection_code, supplied_connection_code.strip()):
+                attempts.append(now)
+                access_attempts[user_id] = attempts
                 log.warning("Invalid connection code for access request user=%s", user_id)
                 return {"authorized": False, "error": "invalid connection code"}
+            access_attempts.pop(user_id, None)
             decision = await asyncio.to_thread(_prompt_access_request, actor, node_roots)
             choice = str(decision.get("decision") or "deny")
             roots = clamp_roots([str(item) for item in decision.get("allowed_roots") or []], node_roots)

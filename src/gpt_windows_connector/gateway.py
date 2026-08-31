@@ -98,10 +98,10 @@ class NodeAuthStore:
                 """
                 CREATE TABLE IF NOT EXISTS nodes (
                     node_id TEXT PRIMARY KEY,
-                    owner_user_id TEXT NOT NULL,
                     name TEXT NOT NULL,
                     token TEXT NOT NULL,
-                    updated_at REAL NOT NULL
+                    updated_at REAL NOT NULL,
+                    allowed_roots TEXT NOT NULL DEFAULT '[]'
                 )
                 """
             )
