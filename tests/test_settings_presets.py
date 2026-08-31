@@ -3,7 +3,6 @@ from gpt_windows_connector.settings_ui import PRESETS, detect_security_preset, _
 
 def test_full_access_allows_high_risk_actions():
     preset = PRESETS["完全访问权限"]
-    assert preset["permission_level"] == "admin"
     assert preset["network_external"] == "allow"
     assert preset["network_lan"] == "allow"
     assert preset["block_silent_network"] is False
@@ -18,7 +17,6 @@ def test_manual_change_becomes_custom():
     approvals = dict(preset["approval_policy"])
     approvals["git_push"] = "always_ask"
     assert detect_security_preset(
-        preset["permission_level"],
         approvals,
         preset["network_external"],
         preset["network_lan"],
