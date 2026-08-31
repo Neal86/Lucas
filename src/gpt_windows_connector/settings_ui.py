@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import re
+import secrets
 import socket
 import subprocess
 import tempfile
@@ -15,7 +16,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 
-from .access_control import LocalAccessStore, clamp_permission, clamp_roots
+from .access_control import LocalAccessStore, clamp_roots, normalize_preset, preset_security
 from .i18n import localize_tk_tree, system_language, tr
 from .task_runs import TaskRunStore
 
@@ -62,9 +63,9 @@ APPROVAL_DEFAULTS = {
     "git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask",
 }
 PRESETS = {
-    "请求批准（Recommended）": {"permission_level":"operate","approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
-    "帮我批准": {"permission_level":"operate","approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},"browser_transfer":"always_ask","git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask","service_control":"always_ask"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
-    "完全访问权限": {"permission_level":"admin","approval_policy":{k:"allow" for k in APPROVAL_DEFAULTS},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "请求批准（Recommended）": {"approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
+    "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},"browser_transfer":"always_ask","git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask","service_control":"always_ask"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "完全访问权限": {"approval_policy":{k:"allow" for k in APPROVAL_DEFAULTS},"network_external":"allow","network_lan":"allow","block_silent_network":False},
 }
 PRESET_DESCRIPTIONS = {
     "请求批准（Recommended）":"编辑外部文件和使用互联网时始终询问。",
@@ -73,9 +74,9 @@ PRESET_DESCRIPTIONS = {
     "自定义":"使用下方逐项设置。",
 }
 
-def detect_security_preset(permission_level: str, approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool) -> str:
+def detect_security_preset(approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool) -> str:
     for name,preset in PRESETS.items():
-        if permission_level != preset["permission_level"] or network_external != preset["network_external"] or network_lan != preset["network_lan"] or bool(block_silent_network) != bool(preset["block_silent_network"]):
+        if network_external != preset["network_external"] or network_lan != preset["network_lan"] or bool(block_silent_network) != bool(preset["block_silent_network"]):
             continue
         if all(str(approval_policy.get(k)) == str(v) for k,v in preset["approval_policy"].items()):
             return name
@@ -205,9 +206,10 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     gateway = tk.StringVar(value=str(existing.get("gateway_ws_url") or DEFAULT_GATEWAY))
     node_id = tk.StringVar(value=str(existing.get("node_id") or _default_node_id()))
     node_name = tk.StringVar(value=str(os.environ.get("COMPUTERNAME") or socket.gethostname()))
-    permission = tk.StringVar(value=str(existing.get("permission_level") or "operate").lower())
-    if permission.get() not in {"read","operate","admin"}: permission.set("operate")
     roots = [str(x) for x in existing.get("allowed_roots",[]) if str(x).strip()] or [str(Path.home().resolve())]
+    raw_connection_code = str(existing.get("connection_code") or "").strip()
+    if len(raw_connection_code) != 8 or not raw_connection_code.isdigit(): raw_connection_code=f"{secrets.randbelow(100_000_000):08d}"
+    connection_code = tk.StringVar(value=raw_connection_code)
     access_store = LocalAccessStore(ACCESS_FILE)
     security = dict(existing.get("security") or {}) if isinstance(existing.get("security"),dict) else {}
     approval = dict(security.get("approval_policy") or {}) if isinstance(security.get("approval_policy"),dict) else {}
@@ -362,7 +364,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         try: root.after(1000,refresh_connection_status)
         except tk.TclError: pass
 
-    row(c,"连接方式","这台电脑使用固定 Node ID 长期在线。其他 Lucas 账号通过 Node ID 发起访问申请，再由本机批准。",lambda p: tk.Label(p,text="无需 Pairing Code",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
+    def build_connection_code(p):
+        f=tk.Frame(p,bg=C["card"]); tk.Label(f,textvariable=connection_code,font=(FONT,14,"bold"),fg=C["blue"],bg=C["card"]).pack(side="left"); button(f,"重新生成",lambda: connection_code.set(f"{secrets.randbelow(100_000_000):08d}")).pack(side="left",padx=(10,0)); return f
+    row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)
     current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None; update_control=None
@@ -398,19 +402,19 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body); preset_syncing={"value":False}
-    preset_display=tk.StringVar(value=detect_security_preset(permission.get(),{k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get())); preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
+    preset_display=tk.StringVar(value=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get())); preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
     def sync_preset_from_fields(*_):
         if preset_syncing["value"]: return
-        name=detect_security_preset(permission.get(),{k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get()); preset_syncing["value"]=True; preset_display.set(name); preset_desc.set(PRESET_DESCRIPTIONS[name]); preset_syncing["value"]=False
+        name=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get()); preset_syncing["value"]=True; preset_display.set(name); preset_desc.set(PRESET_DESCRIPTIONS[name]); preset_syncing["value"]=False
     def apply_preset(*_):
         if preset_syncing["value"]: return
         name=preset_display.get(); preset_desc.set(PRESET_DESCRIPTIONS.get(name,PRESET_DESCRIPTIONS["自定义"])); preset=PRESETS.get(name)
         if not preset: return
-        preset_syncing["value"]=True; permission.set(str(preset["permission_level"]))
+        preset_syncing["value"]=True
         for k,v in preset["approval_policy"].items(): approval_vars[k].set(str(v))
         network_external.set(str(preset["network_external"])); network_lan.set(str(preset["network_lan"])); block_silent_network.set(bool(preset["block_silent_network"])); preset_syncing["value"]=False
     preset_display.trace_add("write",apply_preset)
-    for var in [permission,network_external,network_lan,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
+    for var in [network_external,network_lan,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
     def preset_control(p):
         f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e"); tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
     row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
@@ -560,7 +564,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): messagebox.showerror("Lucas","电脑名称和 Node ID 不能为空。"); return
         if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
-        updated=dict(existing); updated.pop("pairing_code",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"permission_level":permission.get(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        updated=dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         _save_config(updated); result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
         if save_button is not None: save_button.configure(text="已保存")
         def reset_feedback():
