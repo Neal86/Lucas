@@ -432,13 +432,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     user_list=tk.Listbox(users_shell,width=34,height=13,font=(FONT,9),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); user_list.pack(side="left",fill="y")
     user_editor=tk.Frame(users_shell,bg=C["card"]); user_editor.pack(side="left",fill="both",expand=True,padx=(18,0))
     selected_user_id={"value":""}; user_records=[]
-    user_identity=tk.StringVar(value="选择一个用户"); user_permission=tk.StringVar(value="read")
+    user_identity=tk.StringVar(value="选择一个用户"); user_preset=tk.StringVar(value="请求批准（Recommended）")
+    preset_to_id={"请求批准（Recommended）":"request_approval","帮我批准":"auto_approve","完全访问权限":"full_access","自定义":"custom"}; id_to_preset={v:k for k,v in preset_to_id.items()}
     tk.Label(user_editor,textvariable=user_identity,font=(FONT,11,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",pady=(2,12))
-    perm_row=tk.Frame(user_editor,bg=C["card"]); perm_row.pack(fill="x",pady=(0,10)); tk.Label(perm_row,text="权限",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left"); combo(perm_row,user_permission,["read","operate","admin"],12).pack(side="right")
+    perm_row=tk.Frame(user_editor,bg=C["card"]); perm_row.pack(fill="x",pady=(0,10)); tk.Label(perm_row,text="快捷权限",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left"); combo(perm_row,user_preset,list(preset_to_id),24).pack(side="right")
     tk.Label(user_editor,text="允许访问的文件夹",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
     user_roots=tk.Listbox(user_editor,selectmode="multiple",height=7,font=(FONT,9),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); user_roots.pack(fill="x",pady=(5,10))
     for item in roots: user_roots.insert("end",item)
-    user_note=tk.StringVar(value="用户权限不会超过 Node 总权限，目录不会超出 Allowed Folders。"); tk.Label(user_editor,textvariable=user_note,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=430,justify="left").pack(anchor="w")
+    user_note=tk.StringVar(value="快捷权限决定默认审批策略；文件夹始终受 Node Allowed Folders 硬边界限制。详细权限可单独修改。"); tk.Label(user_editor,textvariable=user_note,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=430,justify="left").pack(anchor="w")
     user_actions=tk.Frame(user_editor,bg=C["card"]); user_actions.pack(fill="x",pady=(14,0))
 
     def refresh_users(select_id=None):
@@ -447,20 +448,20 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         target=None
         for idx,record in enumerate(user_records):
             label=str(record.get("name") or record.get("email") or record.get("user_id") or "未知用户")
-            permission_value=str(record.get("permission_level") or "read")
-            user_list.insert("end",f"{label}   [{permission_value}]")
+            preset_value=id_to_preset.get(normalize_preset(str(record.get("preset") or ("full_access" if record.get("permission_level")=="admin" else "request_approval"))),"请求批准（Recommended）")
+            user_list.insert("end",f"{label}   [{preset_value}]")
             if select_id and str(record.get("user_id"))==str(select_id): target=idx
         if user_records:
             index=target if target is not None else 0; user_list.selection_clear(0,"end"); user_list.selection_set(index); user_list.activate(index); load_user()
         else:
-            selected_user_id["value"]=""; user_identity.set("暂无已授权用户"); user_permission.set("read"); user_roots.selection_clear(0,"end")
+            selected_user_id["value"]=""; user_identity.set("暂无已授权用户"); user_preset.set("请求批准（Recommended）"); user_roots.selection_clear(0,"end")
 
     def load_user(*_):
         sel=user_list.curselection()
         if not sel or sel[0]>=len(user_records): return
         record=user_records[sel[0]]; selected_user_id["value"]=str(record.get("user_id") or "")
         name=str(record.get("name") or record.get("email") or selected_user_id["value"]); email=str(record.get("email") or "")
-        user_identity.set(name + (f"  ·  {email}" if email and email!=name else "")); user_permission.set(str(record.get("permission_level") or "read"))
+        user_identity.set(name + (f"  ·  {email}" if email and email!=name else "")); user_preset.set(id_to_preset.get(normalize_preset(str(record.get("preset") or ("full_access" if record.get("permission_level")=="admin" else "request_approval"))),"请求批准（Recommended）"))
         user_roots.selection_clear(0,"end"); granted={str(Path(v).expanduser().resolve()) for v in (record.get("allowed_roots") or [])}
         for idx,path in enumerate(roots):
             try: resolved=str(Path(path).expanduser().resolve())
@@ -475,9 +476,11 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not record: return
         selected=[roots[i] for i in user_roots.curselection()]; selected=clamp_roots(selected,roots)
         if not selected: messagebox.showerror("Lucas","请至少为该用户选择一个允许访问的文件夹。"); return
-        effective_permission=clamp_permission(user_permission.get(),permission.get())
-        access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},effective_permission,selected,enabled=True)
-        user_note.set("已保存。新权限会在该用户下一次操作时立即生效。"); refresh_users(uid)
+        preset=preset_to_id.get(user_preset.get(),"request_approval")
+        existing_security=record.get("security") if isinstance(record.get("security"),dict) else None
+        security=existing_security if preset=="custom" and existing_security else preset_security(preset)
+        access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},preset,selected,security=security,enabled=True)
+        user_note.set("已保存。快捷权限和文件夹会在该用户下一次操作时立即生效。"); refresh_users(uid)
 
     def revoke_user_access():
         uid=selected_user_id["value"]
