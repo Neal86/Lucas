@@ -5,15 +5,13 @@ from pathlib import Path
 
 from . import browser, computer, files, git_tools, processes, shell
 from .config import resolve_in_workspace, validate_workspace
-from .permissions import NodePolicy
 from .path_guard import validate_command_paths, validate_launch_target
 from .security import LocalSecurityPolicy
 
 
 class Executor:
-    def __init__(self, allowed_roots: tuple[Path, ...], permission_level: str = "operate", config: dict | None = None) -> None:
+    def __init__(self, allowed_roots: tuple[Path, ...], config: dict | None = None) -> None:
         self.allowed_roots = tuple(root.resolve() for root in allowed_roots)
-        self.policy = NodePolicy(permission_level)
         self.security = LocalSecurityPolicy(config or {})
 
     def workspace(self, raw: str) -> Path:
@@ -58,7 +56,6 @@ class Executor:
         }
 
     async def call(self, method: str, params: dict) -> object:
-        self.policy.authorize(method)
         self.security.authorize(method, dict(params or {}))
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
@@ -74,7 +71,6 @@ class Executor:
                 self.allowed_roots,
                 str(p.get("target") or ""),
                 str(p.get("arguments") or ""),
-                self.policy.level,
             )
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},

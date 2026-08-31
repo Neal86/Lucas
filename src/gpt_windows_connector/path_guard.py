@@ -41,10 +41,8 @@ def validate_command_paths(workspace: Path, allowed_roots: tuple[Path, ...], com
     if _PARENT.search(text):
         raise PermissionError("PATH_OUTSIDE_ALLOWED_FOLDERS: parent traversal is not allowed in shell/process commands")
 
-def validate_launch_target(workspace: Path, allowed_roots: tuple[Path, ...], target: str, arguments: str = "", permission_level: str = "operate") -> None:
+def validate_launch_target(workspace: Path, allowed_roots: tuple[Path, ...], target: str, arguments: str = "") -> None:
     validate_command_paths(workspace, allowed_roots, f"{target} {arguments}")
-    if permission_level == "admin":
-        return
     base = ntpath.basename(str(target)).lower()
     if base in {"powershell.exe", "powershell", "pwsh.exe", "pwsh", "cmd.exe", "cmd", "wsl.exe", "wsl", "bash.exe", "bash"}:
         raise PermissionError(f"SHELL_LAUNCH_BLOCKED: {target}; use shell.run inside an Allowed Folder instead")

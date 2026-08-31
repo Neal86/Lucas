@@ -6,13 +6,31 @@ import time
 from pathlib import Path
 from typing import Any
 
-PERMISSION_RANK = {"read": 0, "operate": 1, "admin": 2}
+ACCESS_PRESETS = {"request_approval", "auto_approve", "full_access", "custom"}
 
 
-def clamp_permission(requested: str, maximum: str) -> str:
-    requested = requested if requested in PERMISSION_RANK else "read"
-    maximum = maximum if maximum in PERMISSION_RANK else "operate"
-    return min((requested, maximum), key=lambda value: PERMISSION_RANK[value])
+def preset_security(preset: str) -> dict[str, Any]:
+    from .security import DEFAULT_SECURITY
+
+    base = {**DEFAULT_SECURITY, "approval_policy": dict(DEFAULT_SECURITY["approval_policy"])}
+    if preset == "auto_approve":
+        base["approval_policy"] = {k: "allow" for k in base["approval_policy"]}
+        for key in ("browser_transfer", "git_push", "software_install", "registry_system", "high_risk", "service_control"):
+            base["approval_policy"][key] = "always_ask"
+        base["network_external"] = "allow"
+        base["network_lan"] = "allow"
+        base["block_silent_network"] = False
+    elif preset == "full_access":
+        base["approval_policy"] = {k: "allow" for k in base["approval_policy"]}
+        base["network_external"] = "allow"
+        base["network_lan"] = "allow"
+        base["block_silent_network"] = False
+    return base
+
+
+def normalize_preset(value: str | None) -> str:
+    value = str(value or "").strip()
+    return value if value in ACCESS_PRESETS else "request_approval"
 
 
 def clamp_roots(requested: list[str] | tuple[str, ...], node_roots: list[str] | tuple[str, ...]) -> list[str]:
@@ -66,7 +84,7 @@ class LocalAccessStore:
         record = self.load().get("users", {}).get(str(user_id))
         return dict(record) if isinstance(record, dict) else None
 
-    def upsert(self, actor: dict[str, Any], permission_level: str, allowed_roots: list[str], *, enabled: bool = True) -> dict[str, Any]:
+    def upsert(self, actor: dict[str, Any], preset: str, allowed_roots: list[str], *, security: dict[str, Any] | None = None, enabled: bool = True) -> dict[str, Any]:
         user_id = str(actor.get("user_id") or actor.get("id") or "").strip()
         if not user_id:
             raise ValueError("user_id is required")
@@ -77,7 +95,8 @@ class LocalAccessStore:
         record = {
             "email": str(actor.get("email") or previous.get("email") or ""),
             "name": str(actor.get("name") or previous.get("name") or ""),
-            "permission_level": permission_level if permission_level in PERMISSION_RANK else "read",
+            "preset": normalize_preset(preset),
+            "security": dict(security or preset_security(normalize_preset(preset))),
             "allowed_roots": list(dict.fromkeys(str(root) for root in allowed_roots if str(root).strip())),
             "enabled": bool(enabled),
             "approved_at": float(previous.get("approved_at") or now),
@@ -104,16 +123,15 @@ class LocalAccessStore:
         record["last_access"] = time.time()
         self.save(data)
 
-    def effective(self, user_id: str, node_permission: str, node_roots: list[str] | tuple[str, ...]) -> dict[str, Any] | None:
+    def effective(self, user_id: str, node_roots: list[str] | tuple[str, ...]) -> dict[str, Any] | None:
         record = self.get(user_id)
         if not record or not bool(record.get("enabled", True)):
             return None
         roots = clamp_roots(list(record.get("allowed_roots") or []), list(node_roots))
         if not roots:
             return None
-        return {
-            **record,
-            "user_id": str(user_id),
-            "permission_level": clamp_permission(str(record.get("permission_level") or "read"), node_permission),
-            "allowed_roots": roots,
-        }
+        preset = normalize_preset(record.get("preset") or ("full_access" if record.get("permission_level") == "admin" else "request_approval"))
+        security = record.get("security") if isinstance(record.get("security"), dict) else preset_security(preset)
+        clean = dict(record)
+        clean.pop("permission_level", None)
+        return {**clean, "user_id": str(user_id), "preset": preset, "security": dict(security), "allowed_roots": roots}
