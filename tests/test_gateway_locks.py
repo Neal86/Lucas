@@ -5,15 +5,15 @@ import pytest
 from gpt_windows_connector.gateway import NodeRegistry
 
 
-def test_control_lock_blocks_other_project():
+def test_control_lock_blocks_other_context_until_released():
     registry = NodeRegistry()
-    registry.nodes["Office-PC"] = SimpleNamespace(owner_user_id="user-a")
+    registry.nodes["Office-PC"] = SimpleNamespace()
     first = registry.acquire_control("Office-PC", "user-a", "Project-A", ttl_seconds=60)
-    assert first["project_id"] == "Project-A"
+    assert first["context"] == "Project-A"
     registry.acquire_control("Office-PC", "user-a", "Project-A", ttl_seconds=60)
     with pytest.raises(RuntimeError):
         registry.acquire_control("Office-PC", "user-a", "Project-B", ttl_seconds=60)
-    with pytest.raises(PermissionError):
+    with pytest.raises(RuntimeError):
         registry.acquire_control("Office-PC", "user-b", "Project-A", ttl_seconds=60)
     assert registry.release_control("Office-PC", "user-a", "Project-A")["released"] is True
-    assert registry.acquire_control("Office-PC", "user-a", "Project-B", ttl_seconds=60)["project_id"] == "Project-B"
+    assert registry.acquire_control("Office-PC", "user-b", "Project-B", ttl_seconds=60)["context"] == "Project-B"
