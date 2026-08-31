@@ -197,14 +197,14 @@ class NodeRegistry:
                 continue
             if not isinstance(access, dict) or not access.get("authorized"):
                 continue
-            permission_level = str(access.get("permission_level") or "read")
+            preset = str(access.get("preset") or "request_approval")
             allowed_roots = [str(item) for item in access.get("allowed_roots") or []]
             lock = self.control_locks.get(node.node_id)
             if lock and lock.expires_at <= now:
                 self.control_locks.pop(node.node_id, None)
                 lock = None
             out.append({
-                "node_id": node.node_id, "name": node.name, "permission_level": permission_level,
+                "node_id": node.node_id, "name": node.name, "preset": preset,
                 "allowed_roots": allowed_roots, "online": True, "last_seen": node.last_seen,
                 "shared": True, "local_authority": True,
                 "control_context": lock.context_id if lock and lock.owner_user_id == user.id else None,
@@ -497,7 +497,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. Users request access to a Node ID and the local Lucas Node is the final authority for account approval, permission level, and Allowed folders. Every workspace is validated locally before execution. For every user-requested execution task, pass the same concise task_title (the user's goal, not the tool action) on every execution tool call so Lucas can group tool calls as subtasks under one Task Run.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. For every user-requested execution task, pass the same concise task_title (the user's goal, not the tool action) on every execution tool call so Lucas can group tool calls as subtasks under one Task Run.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -511,13 +511,17 @@ async def node_list() -> list[dict]:
 
 
 @mcp.tool()
-async def node_request_access(node_id: str, requested_permission: str = "operate") -> dict:
+async def node_request_access(node_id: str, connection_code: str) -> dict:
     user = _user()
-    if requested_permission not in {"read", "operate", "admin"}:
-        raise ValueError("requested_permission must be read, operate, or admin")
+    node_id = str(node_id or "").strip()
+    connection_code = str(connection_code or "").strip()
+    if not node_id:
+        raise ValueError("node_id is required")
+    if not connection_code:
+        raise ValueError("connection_code is required for a new account")
     registry.require_online(node_id)
-    result = await registry.rpc(node_id, user.id, "access.request", {"requested_permission": requested_permission}, actor=_actor(user), timeout=180.0)
-    auth.audit(user.id, "node.access_request", node_id, {"requested_permission": requested_permission, "result": result})
+    result = await registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=_actor(user), timeout=180.0)
+    auth.audit(user.id, "node.access_request", node_id, {"authorized": bool(isinstance(result, dict) and result.get("authorized"))})
     return result
 
 
