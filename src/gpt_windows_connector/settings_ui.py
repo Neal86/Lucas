@@ -341,7 +341,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["常规"]=wrap
     section(body,"电脑"); c=card(body)
     row(c,"电脑名称","Windows 设备名称，只读。网页中的显示名称可单独修改。",lambda p: tk.Label(p,textvariable=node_name,font=(FONT,10),fg=C["muted"],bg=C["card"])); divider(c)
-    row(c,"Node ID","设备唯一标识。",lambda p: tk.Label(p,textvariable=node_id,font=(FONT,9),fg=C["muted"],bg=C["card"]))
+    row(c,"Node ID","设备唯一标识。",lambda p: tk.Entry(p,textvariable=node_id,font=(FONT,9),fg=C["text"],readonlybackground=C["control"],relief="flat",bd=0,width=40,state="readonly",cursor="xterm",takefocus=True))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",lambda p: tk.Entry(p,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
     connection_status=tk.StringVar(value=T("检测中…", "Checking…")); connection_status_label=None
