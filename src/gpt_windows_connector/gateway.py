@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import secrets
+import hashlib
 import sqlite3
 import time
 import uuid
@@ -105,10 +106,16 @@ class NodeAuthStore:
                 """
             )
             columns = {row[1] for row in db.execute("PRAGMA table_info(nodes)").fetchall()}
-            if "permission_level" not in columns:
-                db.execute("ALTER TABLE nodes ADD COLUMN permission_level TEXT NOT NULL DEFAULT 'operate'")
             if "allowed_roots" not in columns:
                 db.execute("ALTER TABLE nodes ADD COLUMN allowed_roots TEXT NOT NULL DEFAULT '[]'")
+            if "owner_user_id" in columns or "permission_level" in columns:
+                db.execute("ALTER TABLE nodes RENAME TO nodes_legacy")
+                db.execute("CREATE TABLE nodes (node_id TEXT PRIMARY KEY, name TEXT NOT NULL, token TEXT NOT NULL, updated_at REAL NOT NULL, allowed_roots TEXT NOT NULL DEFAULT '[]')")
+                legacy_cols = {row[1] for row in db.execute("PRAGMA table_info(nodes_legacy)").fetchall()}
+                allowed_expr = "allowed_roots" if "allowed_roots" in legacy_cols else "'[]'"
+                db.execute(f"INSERT INTO nodes(node_id,name,token,updated_at,allowed_roots) SELECT node_id,name,token,updated_at,{allowed_expr} FROM nodes_legacy")
+                db.execute("DROP TABLE nodes_legacy")
+            db.execute("CREATE TABLE IF NOT EXISTS user_node_bindings (user_id TEXT NOT NULL, node_id TEXT NOT NULL, approved_at REAL NOT NULL, updated_at REAL NOT NULL, PRIMARY KEY(user_id,node_id))")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
@@ -126,11 +133,15 @@ class NodeAuthStore:
         with self._connect() as db:
             db.execute(
                 """
-                INSERT INTO nodes(node_id,owner_user_id,name,token,updated_at,permission_level,allowed_roots) VALUES(?,?,?,?,?,?,?)
+                INSERT INTO nodes(node_id,name,token,updated_at,allowed_roots) VALUES(?,?,?,?,?)
                 ON CONFLICT(node_id) DO UPDATE SET name=excluded.name,token=excluded.token,updated_at=excluded.updated_at,allowed_roots=excluded.allowed_roots
                 """,
-                (node_id, "", name, token, time.time(), "operate", roots_json),
+                (node_id, name, token, time.time(), roots_json),
             )
+
+    async def update_token(self, node_id: str, token: str) -> None:
+        with self._connect() as db:
+            db.execute("UPDATE nodes SET token=?,updated_at=? WHERE node_id=?", (token, time.time(), node_id))
 
     async def update_config(self, node_id: str, name: str, allowed_roots: list[str]) -> dict:
         with self._connect() as db:
@@ -142,6 +153,48 @@ class NodeAuthStore:
 
 auth_store = NodeAuthStore(db_path)
 
+
+def _token_digest(token: str) -> str:
+    return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+class UserNodeBindingStore:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self.path, timeout=30)
+        db.row_factory = sqlite3.Row
+        return db
+
+    def node_ids(self, user_id: str) -> list[str]:
+        with self._connect() as db:
+            return [str(r[0]) for r in db.execute("SELECT node_id FROM user_node_bindings WHERE user_id=? ORDER BY updated_at DESC", (user_id,)).fetchall()]
+
+    def users_for_node(self, node_id: str) -> set[str]:
+        with self._connect() as db:
+            return {str(r[0]) for r in db.execute("SELECT user_id FROM user_node_bindings WHERE node_id=?", (node_id,)).fetchall()}
+
+    def upsert(self, user_id: str, node_id: str) -> None:
+        now = time.time()
+        with self._connect() as db:
+            db.execute("INSERT INTO user_node_bindings(user_id,node_id,approved_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id,node_id) DO UPDATE SET updated_at=excluded.updated_at", (user_id,node_id,now,now))
+
+    def remove(self, user_id: str, node_id: str) -> None:
+        with self._connect() as db:
+            db.execute("DELETE FROM user_node_bindings WHERE user_id=? AND node_id=?", (user_id,node_id))
+
+    def reconcile_node(self, node_id: str, authorized_user_ids: list[str]) -> tuple[set[str], set[str]]:
+        wanted = {str(v) for v in authorized_user_ids if str(v).strip()}
+        current = self.users_for_node(node_id)
+        for user_id in wanted:
+            self.upsert(user_id, node_id)
+        for user_id in current - wanted:
+            self.remove(user_id, node_id)
+        return wanted - current, current - wanted
+
+
+bindings = UserNodeBindingStore(db_path)
 
 
 @dataclass
@@ -171,12 +224,16 @@ class NodeRegistry:
         now = time.time()
         out = []
         actor = {"user_id": user.id, "email": user.email, "name": user.name or ""}
-        for node in tuple(self.nodes.values()):
+        for node_id in bindings.node_ids(user.id):
+            node = self.nodes.get(node_id)
+            if not node:
+                continue
             try:
                 access = await self.rpc(node.node_id, user.id, "access.check", {}, actor=actor, timeout=3.0)
             except Exception:
                 continue
             if not isinstance(access, dict) or not access.get("authorized"):
+                bindings.remove(user.id, node.node_id)
                 continue
             preset = str(access.get("preset") or "request_approval")
             allowed_roots = [str(item) for item in access.get("allowed_roots") or []]
@@ -495,7 +552,11 @@ async def node_request_access(node_id: str, connection_code: str) -> dict:
     if not connection_code:
         raise ValueError("connection_code is required for a new account")
     registry.require_online(node_id)
+    if not registration_security.allow(f"node-access:{user.id}:{node_id}", 5, 60):
+        raise PermissionError("Too many connection attempts. Try again in a minute.")
     result = await registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=_actor(user), timeout=180.0)
+    if isinstance(result, dict) and result.get("authorized"):
+        bindings.upsert(user.id, node_id)
     auth.audit(user.id, "node.access_request", node_id, {"authorized": bool(isinstance(result, dict) and result.get("authorized"))})
     return result
 
@@ -616,15 +677,22 @@ async def node_websocket(websocket: WebSocket):
         name = str(hello.get("name") or node_id)
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         supplied_token = str(hello.get("node_token") or "").strip()
+        authorized_user_ids = [str(v) for v in hello.get("authorized_user_ids") or [] if str(v).strip()]
         if not supplied_token:
             await websocket.send_json({"type": "welcome", "ok": False, "error": "node device token required"})
             await websocket.close(code=4401)
             return
         record = await auth_store.record_for(node_id)
         if record:
-            authorized = secrets.compare_digest(str(record["token"]), supplied_token)
+            stored_token = str(record["token"] or "")
+            if stored_token.startswith("sha256:"):
+                authorized = secrets.compare_digest(stored_token, _token_digest(supplied_token))
+            else:
+                authorized = secrets.compare_digest(stored_token, supplied_token)
+                if authorized:
+                    await auth_store.update_token(node_id, _token_digest(supplied_token))
         else:
-            await auth_store.save(node_id, name, supplied_token, hello_roots)
+            await auth_store.save(node_id, name, _token_digest(supplied_token), hello_roots)
             record = await auth_store.record_for(node_id)
             authorized = True
         if not authorized:
@@ -654,6 +722,7 @@ async def node_websocket(websocket: WebSocket):
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
+        bindings.reconcile_node(node_id, authorized_user_ids)
         await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False}})
         while True:
             message = await websocket.receive_json()
@@ -662,6 +731,13 @@ async def node_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat_ack", "time": time.time()})
             elif message.get("type") == "response":
                 registry.resolve(node_id, message)
+            elif message.get("type") == "access.sync":
+                _, removed = bindings.reconcile_node(node_id, [str(v) for v in message.get("authorized_user_ids") or []])
+                for user_id in removed:
+                    current = registry.control_locks.get(node_id)
+                    if current and current.owner_user_id == user_id:
+                        registry.control_locks.pop(node_id, None)
+                    await dashboard_events.publish(user_id, "node.remove", {"node_id": node_id})
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:

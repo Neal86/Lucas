@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 
 import websockets
 
-from .access_control import LocalAccessStore, clamp_roots, normalize_preset, preset_security
+from .access_control import LocalAccessStore, clamp_roots, intersect_security, normalize_preset, preset_security
 from .config import NodeSettings
 from .executor import Executor
 from .i18n import tr
@@ -55,8 +55,7 @@ def _acquire_node_mutex() -> object | None:
 
 
 def _default_node_id() -> str:
-    machine = os.environ.get("COMPUTERNAME") or socket.gethostname() or "windows-node"
-    return f"{machine}-{uuid.getnode():012x}".lower()
+    return f"lucas-{uuid.uuid4().hex}"
 
 
 def _load_config() -> dict[str, object]:
@@ -246,6 +245,7 @@ async def _serve_connection(settings: NodeSettings) -> None:
             "name": settings.node_name,
             "node_token": token,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
+            "authorized_user_ids": [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")],
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
@@ -256,6 +256,7 @@ async def _serve_connection(settings: NodeSettings) -> None:
         _write_status("Online")
         node_roots = [str(path) for path in settings.allowed_roots]
         session_grants: dict[str, dict[str, object]] = {}
+        access_file_mtime = ACCESS_FILE.stat().st_mtime if ACCESS_FILE.exists() else 0.0
 
         def effective_access(actor: dict[str, object]) -> dict[str, object] | None:
             user_id = str(actor.get("user_id") or "").strip()
@@ -263,7 +264,9 @@ async def _serve_connection(settings: NodeSettings) -> None:
                 return None
             temporary = session_grants.get(user_id)
             if temporary:
-                return dict(temporary)
+                if float(temporary.get("expires_at") or 0) > time.time():
+                    return dict(temporary)
+                session_grants.pop(user_id, None)
             saved = local_access.effective(user_id, node_roots)
             return dict(saved) if saved else None
 
@@ -286,6 +289,9 @@ async def _serve_connection(settings: NodeSettings) -> None:
                 log.info("Local access denied for user %s", user_id)
                 return {"authorized": False, "decision": "deny"}
             grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "preset": preset, "security": security, "allowed_roots": roots}
+            if choice == "once":
+                grant["grant_id"] = uuid.uuid4().hex
+                grant["expires_at"] = time.time() + 3600
             if choice == "always":
                 saved = local_access.upsert(actor, preset, roots, security=security)
                 grant.update(saved)
@@ -301,6 +307,15 @@ async def _serve_connection(settings: NodeSettings) -> None:
             async with send_lock:
                 await ws.send(json.dumps(payload, ensure_ascii=False))
 
+        async def sync_local_access_if_changed() -> None:
+            nonlocal access_file_mtime
+            current = ACCESS_FILE.stat().st_mtime if ACCESS_FILE.exists() else 0.0
+            if current == access_file_mtime:
+                return
+            access_file_mtime = current
+            user_ids = [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")]
+            await send_json({"type": "access.sync", "authorized_user_ids": user_ids})
+
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
             wall_started=time.time(); status="success"; error_type=None
             try:
@@ -310,7 +325,9 @@ async def _serve_connection(settings: NodeSettings) -> None:
                 user_id = str(access.get("user_id") or "")
                 roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
                 user_config = _load_config()
-                user_config["security"] = dict(access.get("security") or preset_security(str(access.get("preset") or "request_approval")))
+                node_security = user_config.get("security") if isinstance(user_config.get("security"), dict) else {}
+                account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(str(access.get("preset") or "request_approval"))
+                user_config["security"] = intersect_security(dict(node_security), dict(account_security))
                 active_executor = Executor(roots, user_config)
                 result = await active_executor.call(method, params)
                 if user_id and user_id not in session_grants:
@@ -339,9 +356,11 @@ async def _serve_connection(settings: NodeSettings) -> None:
                     raw = await asyncio.wait_for(ws.recv(), timeout=15)
                 except asyncio.TimeoutError:
                     await send_json({"type": "heartbeat", "time": time.time()})
+                    await sync_local_access_if_changed()
                     _write_status("Online")
                     continue
                 _write_status("Online")
+                await sync_local_access_if_changed()
                 message = json.loads(raw)
                 if message.get("type") != "request":
                     continue

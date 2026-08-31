@@ -117,8 +117,7 @@ def _app_version() -> str:
         return "dev"
 
 def _default_node_id() -> str:
-    machine = os.environ.get("COMPUTERNAME") or socket.gethostname() or "windows-node"
-    return f"{machine}-{uuid.getnode():012x}".lower()
+    return f"lucas-{uuid.uuid4().hex}"
 
 def _save_config(config: dict[str, Any]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)

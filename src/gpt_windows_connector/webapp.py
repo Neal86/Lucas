@@ -278,7 +278,11 @@ async def api_request_node_access(request: Request):
         return JSONResponse({"error": "An 8-digit Connection Code is required"}, status_code=400)
     try:
         gateway.registry.require_online(node_id)
+        if not gateway.registration_security.allow(f"node-access:{user.id}:{node_id}", 5, 60):
+            return JSONResponse({"error": "Too many connection attempts. Try again in a minute."}, status_code=429)
         result = await gateway.registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=gateway._actor(user), timeout=180.0)
+        if isinstance(result, dict) and result.get("authorized"):
+            gateway.bindings.upsert(user.id, node_id)
         gateway.auth.audit(user.id, "node.access_request", node_id, {"authorized": bool(isinstance(result, dict) and result.get("authorized"))})
         return JSONResponse(result if isinstance(result, dict) else {"authorized": False})
     except (RuntimeError, PermissionError, ValueError) as exc:
