@@ -423,17 +423,17 @@ def _prompt_access_request(actor: dict[str, object], node_roots: list[str]) -> d
     return result
 
 
-async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
+async def _serve_connection(settings: NodeSettings) -> None:
     query = urlencode({"node_id": settings.node_id})
     uri = settings.gateway_ws_url + ("&" if "?" in settings.gateway_ws_url else "?") + query
     token = _load_saved_token(settings)
+    connection_code = _ensure_connection_code(_load_config())
     async with websockets.connect(uri, ping_interval=20, ping_timeout=20, max_size=32 * 1024 * 1024) as ws:
         await ws.send(json.dumps({
             "type": "hello",
             "node_id": settings.node_id,
             "name": settings.node_name,
             "node_token": token,
-            "permission_level": settings.permission_level,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
@@ -441,7 +441,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             raise RuntimeError(welcome.get("error") or "Gateway rejected node")
         # Security policy is authoritative on the Windows computer. The gateway may
         # report status, but it is never allowed to overwrite local permissions.
-        log.info("Connected as %s (%s), permission=%s", settings.node_name, settings.node_id, settings.permission_level)
+        log.info("Connected as %s (%s)", settings.node_name, settings.node_id)
         _write_status("Online")
         node_roots = [str(path) for path in settings.allowed_roots]
         session_grants: dict[str, dict[str, object]] = {}
@@ -453,30 +453,34 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
             temporary = session_grants.get(user_id)
             if temporary:
                 return dict(temporary)
-            saved = local_access.effective(user_id, settings.permission_level, node_roots)
+            saved = local_access.effective(user_id, node_roots)
             return dict(saved) if saved else None
 
-        async def request_access(actor: dict[str, object], requested_permission: str) -> dict[str, object]:
+        async def request_access(actor: dict[str, object], supplied_connection_code: str) -> dict[str, object]:
             user_id = str(actor.get("user_id") or "").strip()
             if not user_id:
                 return {"authorized": False, "error": "missing user identity"}
             current = effective_access(actor)
             if current:
                 return {"authorized": True, **current}
-            decision = await asyncio.to_thread(_prompt_access_request, actor, requested_permission, node_roots)
+            if not supplied_connection_code or not secrets.compare_digest(connection_code, supplied_connection_code.strip()):
+                log.warning("Invalid connection code for access request user=%s", user_id)
+                return {"authorized": False, "error": "invalid connection code"}
+            decision = await asyncio.to_thread(_prompt_access_request, actor, node_roots)
             choice = str(decision.get("decision") or "deny")
             roots = clamp_roots([str(item) for item in decision.get("allowed_roots") or []], node_roots)
-            permission_level = clamp_permission(str(decision.get("permission_level") or "read"), settings.permission_level)
+            preset = normalize_preset(str(decision.get("preset") or "request_approval"))
+            security = preset_security(preset)
             if choice not in {"once", "always"} or not roots:
                 log.info("Local access denied for user %s", user_id)
                 return {"authorized": False, "decision": "deny"}
-            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "permission_level": permission_level, "allowed_roots": roots}
+            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "preset": preset, "security": security, "allowed_roots": roots}
             if choice == "always":
-                saved = local_access.upsert(actor, permission_level, roots)
+                saved = local_access.upsert(actor, preset, roots, security=security)
                 grant.update(saved)
             else:
                 session_grants[user_id] = dict(grant)
-            log.info("Local access approved for user %s permission=%s mode=%s", user_id, permission_level, choice)
+            log.info("Local access approved for user %s preset=%s mode=%s", user_id, preset, choice)
             return {"authorized": True, "decision": choice, **grant}
 
         send_lock = asyncio.Lock()
@@ -494,7 +498,9 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                     raise PermissionError("This Lucas user has not been approved on the Windows Node")
                 user_id = str(access.get("user_id") or "")
                 roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
-                active_executor = Executor(roots, str(access.get("permission_level") or "read"), _load_config())
+                user_config = _load_config()
+                user_config["security"] = dict(access.get("security") or preset_security(str(access.get("preset") or "request_approval")))
+                active_executor = Executor(roots, user_config)
                 result = await active_executor.call(method, params)
                 if user_id and user_id not in session_grants:
                     local_access.touch(user_id)
@@ -534,7 +540,7 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                 actor = message.get("actor") if isinstance(message.get("actor"), dict) else {}
                 if method == "access.request":
                     try:
-                        result = await request_access(actor, str(params.get("requested_permission") or "operate"))
+                        result = await request_access(actor, str(params.get("connection_code") or ""))
                         await send_json({"type": "response", "id": request_id, "ok": True, "result": result})
                     except Exception as exc:
                         log.exception("Access approval failed")
@@ -552,8 +558,8 @@ async def _serve_connection(settings: NodeSettings, executor: Executor) -> None:
                     continue
                 if method == "node.logs":
                     log_access = effective_access(actor)
-                    if not log_access or str(log_access.get("permission_level") or "read") != "admin":
-                        await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Admin permission is required for Node logs"})
+                    if not log_access or normalize_preset(str(log_access.get("preset") or "")) != "full_access":
+                        await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Full Access is required for Node logs"})
                         continue
                     try:
                         limit = max(20, min(int(params.get("limit", 200)), 1000))
@@ -580,9 +586,8 @@ async def run_node() -> None:
             config = _load_config()
             _apply_config(config)
             settings = NodeSettings.from_env()
-            executor = Executor(settings.allowed_roots, settings.permission_level, config)
             _write_status("Connecting")
-            await _serve_connection(settings, executor)
+            await _serve_connection(settings)
             delay = 1.0
         except asyncio.CancelledError:
             raise
@@ -601,8 +606,9 @@ def main() -> None:
     config = _load_config()
     if not config:
         settings = NodeSettings.from_env()
-        config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "permission_level": settings.permission_level, "allowed_roots": [str(path) for path in settings.allowed_roots]}
+        config = {"gateway_ws_url": settings.gateway_ws_url, "node_id": settings.node_id, "node_name": settings.node_name, "allowed_roots": [str(path) for path in settings.allowed_roots]}
         _save_config(config)
+    _ensure_connection_code(config)
     if args.configure:
         updated = _configure_gui(config)
         if updated is not None:
