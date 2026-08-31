@@ -35,7 +35,7 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-home-square-white.png?v=brand-split-20260830" alt="Lucas" /></div>',
+        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
     )
     .replace(
         '<div class="core-ring"><img src="/assets/lucas-logo-square.png" alt="Lucas" /></div>',
@@ -43,7 +43,7 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-split-20260830" alt="Lucas" /></div>',
+        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
@@ -51,7 +51,7 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-split-20260830" alt="Lucas" /></div>',
+        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-white-20260830b" alt="Lucas" /></div>',
     )
 )
 
