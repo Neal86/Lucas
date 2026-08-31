@@ -1,0 +1,39 @@
+name: Lucas access hardening refinements
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/apply_access_hardening_refinements.py
+      - .github/workflows/access-hardening-refinements.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply refinements
+        run: python scripts/apply_access_hardening_refinements.py
+      - name: Install
+        run: pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src
+      - name: Regression gate
+        run: >-
+          pytest -q
+          --deselect=tests/test_registration_security.py::test_verification_code_is_single_use_and_attempt_limited
+          --deselect=tests/test_routing_isolation.py::test_ai_connections_are_isolated_by_user
+      - name: Commit
+        run: |
+          git config user.name 'Lucas Security Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm -f scripts/apply_access_hardening_refinements.py .github/workflows/access-hardening-refinements.yml
+          git add -A
+          git commit -m 'Finish Lucas access hardening cleanup'
+          git push origin HEAD:main
