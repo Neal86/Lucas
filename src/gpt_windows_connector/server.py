@@ -4,68 +4,80 @@ import contextlib
 
 import uvicorn
 from starlette.applications import Starlette
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
+from starlette.routing import Route
 
 from . import gateway, webapp
 
 
-def _embedded_logo(filename: str) -> str:
-    """Return an exact bundled PNG as a data URI; never transform the artwork."""
+WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=source-20260901"
+
+
+def _embedded_blue_logo() -> str:
+    """Use the bundled user-supplied blue logo on light/auth surfaces."""
     try:
-        payload = (webapp.BRAND_ASSET_DIR / filename).read_text(encoding="utf-8").strip()
+        payload = (webapp.BRAND_ASSET_DIR / "lucas-logo-auth-blue.png.b64").read_text(encoding="utf-8").strip()
     except OSError:
         payload = ""
-    return f"data:image/png;base64,{payload}" if payload else ""
+    return f"data:image/png;base64,{payload}" if payload else "/assets/lucas-logo-horizontal-blue.png"
 
 
-# Exactly two horizontal brand sources are used on the web UI.
-# Light surfaces use the user's blue original; dark surfaces use the user's white original.
-BLUE_LOGO_SRC = _embedded_logo("lucas-logo-auth-blue.png.b64")
-WHITE_LOGO_SRC = _embedded_logo("lucas-logo-white.png.b64")
-
-
+BLUE_LOGO_SRC = _embedded_blue_logo()
 html = webapp.DASHBOARD_HTML
 
-# Keep the landing navigation text as bright as the adjacent action text.
+# Public navigation text should match the bright adjacent action text.
 html = html.replace(
     '.landing-links a,.landing-footer{color:#8e98ae}',
     '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
 )
 
-# Replace every horizontal brand surface directly with one of the two embedded originals.
-if WHITE_LOGO_SRC:
-    html = html.replace(
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        f'<nav class="landing-nav"><div class="landing-logo"><img src="{WHITE_LOGO_SRC}" alt="Lucas" /></div>',
-    )
-    html = html.replace(
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        f'<footer class="landing-footer"><div class="landing-logo"><img src="{WHITE_LOGO_SRC}" alt="Lucas" /></div>',
-    )
-    html = html.replace(
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        f'<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="{WHITE_LOGO_SRC}" alt="Lucas" /></div>',
-    )
+# Dark surfaces use the real white PNG file directly. No base64, filter, invert,
+# recoloring, or generated artwork is involved.
+html = html.replace(
+    '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
+    f'<nav class="landing-nav"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
+)
+html = html.replace(
+    '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
+    f'<footer class="landing-footer"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
+)
+html = html.replace(
+    '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
+    f'<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
+)
 
-if BLUE_LOGO_SRC:
-    html = html.replace(
-        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_SRC}" alt="Lucas" /></div>',
-    )
+# Light auth surfaces keep the exact blue source.
+html = html.replace(
+    '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
+    f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_SRC}" alt="Lucas" /></div>',
+)
 
-# One sizing block only. No filter, invert, opacity tricks, asset routes, or cache-version chains.
+# Size only; never transform the logo artwork.
 html = html.replace(
     '</head>',
     '<style>'
     '.auth-card .brand{height:140px;display:flex;align-items:center;justify-content:center;margin:0 0 18px}'
     '.auth-card .brand img{display:block;width:300px;max-width:92%;max-height:120px;height:auto;object-fit:contain;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '.side .logo{height:96px!important;min-height:96px!important;padding:10px 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:hidden!important}'
-    '.side .logo img{display:block!important;width:205px!important;max-width:205px!important;max-height:76px!important;height:auto!important;object-fit:contain!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
+    '.side .logo img{display:block!important;width:205px!important;max-width:205px!important;max-height:76px!important;height:auto!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
     '.landing-logo img{display:block!important;height:52px!important;width:auto!important;max-width:220px!important;object-fit:contain!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '</style></head>',
 )
 
 webapp.DASHBOARD_HTML = html
+
+
+async def white_logo_asset(request):
+    return FileResponse(
+        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",
+        media_type="image/png",
+        headers={"Cache-Control": "no-cache, max-age=0"},
+    )
+
+
+WHITE_LOGO_PATH = "/assets/lucas-logo-horizontal-white.png"
+if not any(getattr(r, "path", None) == WHITE_LOGO_PATH for r in webapp.routes):
+    webapp.routes.insert(0, Route(WHITE_LOGO_PATH, white_logo_asset, methods=["GET"]))
 
 
 class DashboardAuthMiddleware:
