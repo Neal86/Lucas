@@ -10,22 +10,15 @@ from starlette.routing import Route
 from . import gateway, webapp
 
 
-WHITE_LOGO_PATH = "/assets/lucas-logo-horizontal-white.png"
-BLUE_LOGO_PATH = "/assets/lucas-logo-horizontal-blue.png"
-WHITE_LOGO_URL = f"{WHITE_LOGO_PATH}?v=brand-20260901"
-BLUE_LOGO_URL = f"{BLUE_LOGO_PATH}?v=brand-20260901"
-
-
+WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=source-20260901b"
+BLUE_LOGO_URL = "/assets/lucas-logo-horizontal-blue.png?v=source-20260901b"
 html = webapp.DASHBOARD_HTML
 
-# Public navigation text should match the bright adjacent action text.
 html = html.replace(
     '.landing-links a,.landing-footer{color:#8e98ae}',
     '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
 )
 
-# Use real PNG files directly on every surface. No base64, filters, recoloring,
-# generated artwork, or fallback chains.
 html = html.replace(
     '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
     f'<nav class="landing-nav"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
@@ -43,39 +36,45 @@ html = html.replace(
     f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_URL}" alt="Lucas" /></div>',
 )
 
-# Size only; never transform the logo artwork.
+# The display boxes have both width and height; object-fit:contain preserves the
+# source aspect ratio. Do not combine fixed width with max-height because that
+# can squash tall source canvases into a horizontal line.
 html = html.replace(
     '</head>',
     '<style>'
     '.auth-card .brand{height:140px;display:flex;align-items:center;justify-content:center;margin:0 0 18px}'
-    '.auth-card .brand img{display:block;width:300px;max-width:92%;max-height:120px;height:auto;object-fit:contain;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
+    '.auth-card .brand img{display:block;width:300px!important;height:120px!important;object-fit:contain!important;object-position:center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '.side .logo{height:96px!important;min-height:96px!important;padding:10px 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:hidden!important}'
-    '.side .logo img{display:block!important;width:205px!important;max-width:205px!important;max-height:76px!important;height:auto!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
-    '.landing-logo img{display:block!important;height:52px!important;width:auto!important;max-width:220px!important;object-fit:contain!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
+    '.side .logo img{display:block!important;width:205px!important;height:76px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
+    '.landing-logo img{display:block!important;width:220px!important;height:52px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '</style></head>',
 )
 
 webapp.DASHBOARD_HTML = html
 
 
-async def brand_logo_asset(request):
-    name = str(request.path_params.get("name") or "")
-    if name == "white":
-        filename = "lucas-logo-horizontal-white.png"
-    elif name == "blue":
-        filename = "lucas-logo-horizontal-blue.png"
-    else:
-        return JSONResponse({"error": "not found"}, status_code=404)
+async def white_logo_asset(request):
     return FileResponse(
-        webapp.BRAND_ASSET_DIR / filename,
+        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",
         media_type="image/png",
-        headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
+        headers={"Cache-Control": "no-store, max-age=0"},
     )
 
 
-for path, name in ((WHITE_LOGO_PATH, "white"), (BLUE_LOGO_PATH, "blue")):
+async def blue_logo_asset(request):
+    return FileResponse(
+        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-blue.png",
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+for path, handler in (
+    ("/assets/lucas-logo-horizontal-white.png", white_logo_asset),
+    ("/assets/lucas-logo-horizontal-blue.png", blue_logo_asset),
+):
     if not any(getattr(r, "path", None) == path for r in webapp.routes):
-        webapp.routes.insert(0, Route(path, brand_logo_asset, methods=["GET"], name=f"brand-logo-{name}"))
+        webapp.routes.insert(0, Route(path, handler, methods=["GET"]))
 
 
 class DashboardAuthMiddleware:
