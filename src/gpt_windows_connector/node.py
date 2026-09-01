@@ -269,7 +269,6 @@ async def _serve_connection(
     base_gateway = (gateway_ws_url or settings.gateway_ws_url).rstrip("/")
     query = urlencode({"node_id": settings.node_id})
     uri = base_gateway + ("&" if "?" in base_gateway else "?") + query
-    token = _load_saved_token(settings)
     connection_code = _ensure_connection_code(_load_config())
     connect_kwargs: dict[str, object] = {
         "ping_interval": 20,
@@ -285,10 +284,8 @@ async def _serve_connection(
             "type": "hello",
             "node_id": settings.node_id,
             "name": settings.node_name,
-            "node_token": token,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
             "authorized_user_ids": [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")],
-            "credential_format": 2,
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):

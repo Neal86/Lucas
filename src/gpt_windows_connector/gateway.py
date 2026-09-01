@@ -678,32 +678,16 @@ async def node_websocket(websocket: WebSocket):
             return
         name = str(hello.get("name") or node_id)
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
-        supplied_token = str(hello.get("node_token") or "").strip()
         authorized_user_ids = [str(v) for v in hello.get("authorized_user_ids") or [] if str(v).strip()]
-        if not supplied_token:
-            await websocket.send_json({"type": "welcome", "ok": False, "error": "node device token required"})
-            await websocket.close(code=4401)
-            return
+        # Node transport authentication is intentionally disabled. Any Lucas Node
+        # that speaks the Node WebSocket protocol and supplies a Node ID may come
+        # online. User access is still protected separately by the local Connection
+        # Code plus explicit approval on the Windows computer.
         record = await auth_store.record_for(node_id)
-        log.info("Node hello received node_id=%s name=%s credential_format=%s", node_id, name, hello.get("credential_format"))
-        if record:
-            stored_token = str(record["token"] or "")
-            if stored_token.startswith("sha256:"):
-                authorized = secrets.compare_digest(stored_token, _token_digest(supplied_token))
-            else:
-                authorized = secrets.compare_digest(stored_token, supplied_token)
-                if authorized:
-                    await auth_store.update_token(node_id, _token_digest(supplied_token))
-        else:
-            await auth_store.save(node_id, name, _token_digest(supplied_token), hello_roots)
+        log.info("Node hello received node_id=%s name=%s node_auth=disabled", node_id, name)
+        if not record:
+            await auth_store.save(node_id, name, "", hello_roots)
             record = await auth_store.record_for(node_id)
-            authorized = True
-        if not authorized:
-            log.warning("Node credential rejected node_id=%s; device token does not match stored credential", node_id)
-            await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token; local credential does not match the registered Node ID"})
-            await websocket.close(code=4401)
-            return
-        record = record or await auth_store.record_for(node_id)
         stored_roots: list[str] = []
         if record:
             try:
@@ -718,8 +702,7 @@ async def node_websocket(websocket: WebSocket):
         # reports its real machine name and local security state; reconnecting must
         # never overwrite a display name the user chose on the website.
         display_name = str(record.get("name") or name) if record else name
-        if authorized:
-            await auth_store.update_config(node_id, display_name, allowed_roots)
+        await auth_store.update_config(node_id, display_name, allowed_roots)
         connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket)
         old = registry.nodes.get(node_id)
         if old:
@@ -728,7 +711,7 @@ async def node_websocket(websocket: WebSocket):
         registry.nodes[node_id] = connection
         log.info("Node connected node_id=%s name=%s authorized_users=%d", node_id, display_name, len(authorized_user_ids))
         bindings.reconcile_node(node_id, authorized_user_ids)
-        await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False}})
+        await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False, "node_auth_required": False}})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
