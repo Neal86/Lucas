@@ -638,7 +638,11 @@ async def computer_tool(node_id: str, workspace: str, action: str, params: dict 
 
 
 async def health(_: Request):
-    return JSONResponse({"ok": True, "online_nodes": len(registry.nodes), "auth": "multi-user"})
+    try:
+        version = importlib.metadata.version("gpt-windows-connector")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+    return JSONResponse({"ok": True, "version": version, "online_nodes": len(registry.nodes), "auth": "multi-user"})
 
 
 async def browser_events_websocket(websocket: WebSocket):
