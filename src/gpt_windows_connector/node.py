@@ -190,6 +190,24 @@ def _save_token(settings: NodeSettings, token: str) -> None:
     _write_token_file(DEVICE_CREDENTIAL_FILE, settings.node_id, token)
 
 
+class DeviceIdentityRotated(RuntimeError):
+    pass
+
+
+def _rotate_device_identity(settings: NodeSettings) -> str:
+    """Recover safely when an old server record no longer matches this PC."""
+    config = _load_config()
+    old_node_id = settings.node_id
+    new_node_id = _default_node_id()
+    token = secrets.token_urlsafe(32)
+    config["node_id"] = new_node_id
+    _save_config(config)
+    _write_token_file(settings.state_file, new_node_id, token)
+    _write_token_file(DEVICE_CREDENTIAL_FILE, new_node_id, token)
+    log.warning("Rotated stale Node identity old=%s new=%s; local access policy was preserved", old_node_id, new_node_id)
+    return new_node_id
+
+
 def _grants_full_access(access: dict[str, object]) -> bool:
     preset = normalize_preset(str(access.get("preset") or "request_approval"))
     security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(preset)
@@ -264,11 +282,12 @@ async def _serve_connection(
     gateway_ws_url: str | None = None,
     *,
     force_ipv4: bool = False,
-    proxy_mode: bool | None = True,
+    proxy_mode: bool | None = None,
 ) -> None:
     base_gateway = (gateway_ws_url or settings.gateway_ws_url).rstrip("/")
     query = urlencode({"node_id": settings.node_id})
     uri = base_gateway + ("&" if "?" in base_gateway else "?") + query
+    token = _load_saved_token(settings)
     connection_code = _ensure_connection_code(_load_config())
     connect_kwargs: dict[str, object] = {
         "ping_interval": 20,
@@ -284,12 +303,17 @@ async def _serve_connection(
             "type": "hello",
             "node_id": settings.node_id,
             "name": settings.node_name,
+            "node_token": token,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
             "authorized_user_ids": [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")],
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
-            raise RuntimeError(welcome.get("error") or "Gateway rejected node")
+            error = str(welcome.get("error") or "Gateway rejected node")
+            if error == "invalid node device token":
+                new_node_id = _rotate_device_identity(settings)
+                raise DeviceIdentityRotated(f"Recovered stale Node identity; new Node ID is {new_node_id}")
+            raise RuntimeError(error)
         # Security policy is authoritative on the Windows computer. The gateway may
         # report status, but it is never allowed to overwrite local permissions.
         log.info("Connected as %s (%s)", settings.node_name, settings.node_id)
@@ -473,10 +497,14 @@ async def run_node() -> None:
                 alternate = FALLBACK_GATEWAY.rstrip("/") if primary == DEFAULT_GATEWAY.rstrip("/") else DEFAULT_GATEWAY.rstrip("/")
                 if alternate not in candidates:
                     candidates.append(alternate)
+            # Prefer a direct connection. websockets 15 automatically uses Windows /
+            # environment proxies when proxy=True; a stale system proxy can surface as
+            # WinError 1225 before the request ever reaches Lucas. Direct mode matches
+            # Lucas' intended always-online transport; proxy mode is a last fallback.
             strategies = [
-                ("auto", False, True),
-                ("ipv4", True, True),
+                ("direct", False, None),
                 ("direct-ipv4", True, None),
+                ("system-proxy", False, True),
             ]
             last_error: Exception | None = None
             connected = False
@@ -499,6 +527,8 @@ async def run_node() -> None:
                         break
                     except asyncio.CancelledError:
                         raise
+                    except DeviceIdentityRotated:
+                        raise
                     except Exception as candidate_error:
                         last_error = candidate_error
                         log.warning(
@@ -519,6 +549,11 @@ async def run_node() -> None:
                 raise RuntimeError("No Gateway connection strategy succeeded")
         except asyncio.CancelledError:
             raise
+        except DeviceIdentityRotated as exc:
+            log.warning("%s; reconnecting immediately", exc)
+            _write_status("Reconnecting", str(exc))
+            delay = 1.0
+            continue
         except Exception as exc:
             log.warning("Disconnected: %s; retrying in %.1fs", exc, delay)
             _write_status("Reconnecting", str(exc))

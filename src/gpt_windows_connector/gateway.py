@@ -679,15 +679,38 @@ async def node_websocket(websocket: WebSocket):
         name = str(hello.get("name") or node_id)
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         authorized_user_ids = [str(v) for v in hello.get("authorized_user_ids") or [] if str(v).strip()]
-        # Node transport authentication is intentionally disabled. Any Lucas Node
-        # that speaks the Node WebSocket protocol and supplies a Node ID may come
-        # online. User access is still protected separately by the local Connection
-        # Code plus explicit approval on the Windows computer.
+        supplied_token = str(hello.get("node_token") or "").strip()
+        if not supplied_token:
+            log.warning("Node rejected node_id=%s reason=missing-device-token", node_id)
+            await websocket.send_json({"type": "welcome", "ok": False, "error": "node device token required"})
+            await websocket.close(code=4401)
+            return
         record = await auth_store.record_for(node_id)
-        log.info("Node hello received node_id=%s name=%s node_auth=disabled", node_id, name)
+        log.info("Node hello received node_id=%s name=%s", node_id, name)
         if not record:
-            await auth_store.save(node_id, name, "", hello_roots)
+            # Every legitimate Node may self-register. Account ownership is not part
+            # of Node transport authentication; user access is authorized later by
+            # Connection Code plus local approval.
+            await auth_store.save(node_id, name, _token_digest(supplied_token), hello_roots)
             record = await auth_store.record_for(node_id)
+        else:
+            stored_token = str(record.get("token") or "")
+            if not stored_token:
+                # One-time migration from the temporary credential-free build.
+                await auth_store.update_token(node_id, _token_digest(supplied_token))
+            elif stored_token.startswith("sha256:"):
+                if not secrets.compare_digest(stored_token, _token_digest(supplied_token)):
+                    log.warning("Node rejected node_id=%s reason=device-token-mismatch", node_id)
+                    await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token"})
+                    await websocket.close(code=4401)
+                    return
+            elif secrets.compare_digest(stored_token, supplied_token):
+                await auth_store.update_token(node_id, _token_digest(supplied_token))
+            else:
+                log.warning("Node rejected node_id=%s reason=legacy-device-token-mismatch", node_id)
+                await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token"})
+                await websocket.close(code=4401)
+                return
         stored_roots: list[str] = []
         if record:
             try:
@@ -711,7 +734,7 @@ async def node_websocket(websocket: WebSocket):
         registry.nodes[node_id] = connection
         log.info("Node connected node_id=%s name=%s authorized_users=%d", node_id, display_name, len(authorized_user_ids))
         bindings.reconcile_node(node_id, authorized_user_ids)
-        await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False, "node_auth_required": False}})
+        await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False, "node_auth_required": True}})
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
