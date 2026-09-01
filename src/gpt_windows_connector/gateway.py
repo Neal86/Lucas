@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import secrets
 import hashlib
@@ -44,6 +45,7 @@ auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 registration_security = RegistrationSecurity(db_path)
 task_runs = TaskRunStore(db_path)
+log = logging.getLogger("lucas.gateway")
 
 
 class AuthMiddleware:
@@ -683,6 +685,7 @@ async def node_websocket(websocket: WebSocket):
             await websocket.close(code=4401)
             return
         record = await auth_store.record_for(node_id)
+        log.info("Node hello received node_id=%s name=%s credential_format=%s", node_id, name, hello.get("credential_format"))
         if record:
             stored_token = str(record["token"] or "")
             if stored_token.startswith("sha256:"):
@@ -696,7 +699,8 @@ async def node_websocket(websocket: WebSocket):
             record = await auth_store.record_for(node_id)
             authorized = True
         if not authorized:
-            await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token"})
+            log.warning("Node credential rejected node_id=%s; device token does not match stored credential", node_id)
+            await websocket.send_json({"type": "welcome", "ok": False, "error": "invalid node device token; local credential does not match the registered Node ID"})
             await websocket.close(code=4401)
             return
         record = record or await auth_store.record_for(node_id)
@@ -722,6 +726,7 @@ async def node_websocket(websocket: WebSocket):
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
+        log.info("Node connected node_id=%s name=%s authorized_users=%d", node_id, display_name, len(authorized_user_ids))
         bindings.reconcile_node(node_id, authorized_user_ids)
         await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False}})
         while True:

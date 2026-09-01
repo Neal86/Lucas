@@ -57,6 +57,8 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $Venv = Join-Path $InstallDir "runtime"
 $ConfigFile = Join-Path $InstallDir "node-config.json"
 $StateFile = Join-Path $InstallDir "node-state.json"
+$DeviceCredentialFile = Join-Path $InstallDir "node-device-credential.json"
+$StateBackupFile = "$StateFile.pre-update"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
 $TrayPidFile = Join-Path $InstallDir "lucas-tray.pid"
@@ -68,6 +70,20 @@ if (Test-Path $StateFile) {
   try {
     $SavedState = Get-Content -Raw -Path $StateFile | ConvertFrom-Json
     $HasSavedToken = -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_token)
+    if ($HasSavedToken) { Copy-Item -Force -Path $StateFile -Destination $StateBackupFile }
+  } catch {
+    $SavedState = $null
+    $HasSavedToken = $false
+  }
+}
+if (-not $HasSavedToken -and (Test-Path $DeviceCredentialFile)) {
+  try {
+    $SavedState = Get-Content -Raw -Path $DeviceCredentialFile | ConvertFrom-Json
+    $HasSavedToken = -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_token)
+    if ($HasSavedToken) {
+      $SavedState | ConvertTo-Json -Depth 5 | Set-Content -Path $StateFile -Encoding UTF8
+      Copy-Item -Force -Path $StateFile -Destination $StateBackupFile
+    }
   } catch {
     $SavedState = $null
     $HasSavedToken = $false

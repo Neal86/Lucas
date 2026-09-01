@@ -30,6 +30,7 @@ LOG_FILE = CONFIG_DIR / "lucas-node.log"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 ACCESS_FILE = CONFIG_DIR / "node-access.json"
+DEVICE_CREDENTIAL_FILE = CONFIG_DIR / "node-device-credential.json"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
 local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
@@ -143,26 +144,50 @@ def _setup_logging() -> None:
         root_logger.addHandler(file_handler)
 
 
-def _load_saved_token(settings: NodeSettings) -> str:
-    if settings.node_token:
-        return settings.node_token
+def _read_token_file(path: Path, node_id: str) -> str:
     try:
-        data = json.loads(settings.state_file.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        stored_node_id = str(data.get("node_id") or "").strip()
         token = str(data.get("node_token") or "").strip()
-        if token:
+        if token and (not stored_node_id or stored_node_id == node_id):
             return token
     except (OSError, json.JSONDecodeError):
         pass
+    return ""
+
+
+def _load_saved_token(settings: NodeSettings) -> str:
+    if settings.node_token:
+        return settings.node_token
+    candidates = [
+        settings.state_file,
+        DEVICE_CREDENTIAL_FILE,
+        settings.state_file.with_name(settings.state_file.name + ".pre-update"),
+        settings.state_file.with_name(settings.state_file.name + ".bak"),
+    ]
+    for path in candidates:
+        token = _read_token_file(path, settings.node_id)
+        if token:
+            # Heal all credential stores so future updates cannot silently create a
+            # second token for the same Node ID.
+            _save_token(settings, token)
+            return token
     token = secrets.token_urlsafe(32)
     _save_token(settings, token)
+    log.warning("No existing device credential found for %s; generated a new credential", settings.node_id)
     return token
 
 
+def _write_token_file(path: Path, node_id: str, token: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps({"node_id": node_id, "node_token": token}, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
 def _save_token(settings: NodeSettings, token: str) -> None:
-    settings.state_file.parent.mkdir(parents=True, exist_ok=True)
-    temporary = settings.state_file.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"node_id": settings.node_id, "node_token": token}, indent=2), encoding="utf-8")
-    temporary.replace(settings.state_file)
+    _write_token_file(settings.state_file, settings.node_id, token)
+    _write_token_file(DEVICE_CREDENTIAL_FILE, settings.node_id, token)
 
 
 def _grants_full_access(access: dict[str, object]) -> bool:
@@ -263,6 +288,7 @@ async def _serve_connection(
             "node_token": token,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
             "authorized_user_ids": [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")],
+            "credential_format": 2,
         }))
         welcome = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
         if not welcome.get("ok"):
