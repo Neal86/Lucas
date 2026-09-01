@@ -1,0 +1,44 @@
+name: Retry Lucas connection management update
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lucas-connection-management-retry.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply prepared patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+          workflow = Path('.github/workflows/lucas-connection-management-patch.yml').read_text(encoding='utf-8')
+          marker = "python - <<'PY'\n"
+          block = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          exec(compile(textwrap.dedent(block), '<lucas-patch>', 'exec'))
+          PY
+      - name: Install test dependencies
+        run: python -m pip install -e . pytest
+      - name: Validate
+        run: |
+          python -m compileall -q src
+          python -m pytest -q
+      - name: Commit patch and remove temporary workflows
+        shell: bash
+        run: |
+          git config user.name "Lucas Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/lucas-connection-management-patch.yml .github/workflows/lucas-connection-management-retry.yml
+          git add src/gpt_windows_connector/webapp.py tests/test_dashboard_connection_metadata.py
+          git commit -m "Add editable node and AI connection metadata"
+          git push origin HEAD:main
