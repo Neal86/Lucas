@@ -243,10 +243,23 @@ if ($ExistingConfig -and $null -ne $ExistingConfig.launch_at_startup) { $LaunchA
 $SecurityConfig = $null
 if ($ExistingConfig -and $null -ne $ExistingConfig.security) { $SecurityConfig = $ExistingConfig.security }
 if ($ExistingConfig -and $ExistingConfigRaw) {
-  # Updating an existing installation must preserve the complete local
-  # configuration byte-for-byte. This intentionally retains unknown
-  # future fields instead of rebuilding a partial allow-list of keys.
-  $ExistingConfigRaw | Set-Content -Path $ConfigFile -Encoding UTF8
+  # Preserve existing settings, but repair Gateway values persisted by old local
+  # development builds. A production Node must never keep dialing its own 127.0.0.1.
+  $ExistingGateway = ([string]$ExistingConfig.gateway_ws_url).Trim().TrimEnd('/')
+  $StaleLocalGateways = @(
+    "ws://127.0.0.1:8787/ws/node",
+    "ws://localhost:8787/ws/node",
+    "wss://127.0.0.1:8787/ws/node",
+    "wss://localhost:8787/ws/node"
+  )
+  if ($ExistingGateway -in $StaleLocalGateways) {
+    $ExistingConfig.gateway_ws_url = $GatewayUrl.TrimEnd('/')
+    $ExistingConfig | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigFile -Encoding UTF8
+    Write-Host "[Lucas] Repaired old local Gateway -> $($ExistingConfig.gateway_ws_url)" -ForegroundColor Yellow
+  } else {
+    # Keep unknown future fields byte-for-byte when no migration is required.
+    $ExistingConfigRaw | Set-Content -Path $ConfigFile -Encoding UTF8
+  }
   $Config = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
 } else {
   $Config = [ordered]@{

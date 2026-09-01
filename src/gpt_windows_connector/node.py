@@ -62,8 +62,23 @@ def _default_node_id() -> str:
 
 def _load_config() -> dict[str, object]:
     try:
-        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict):
+            return {}
+        gateway = str(data.get("gateway_ws_url") or "").strip().rstrip("/")
+        # Older local-development builds persisted localhost as the Gateway. Once
+        # installed on another PC that makes the Node connect back to itself forever.
+        # Heal those stale configs automatically; users never need to edit JSON.
+        if gateway in {
+            "ws://127.0.0.1:8787/ws/node",
+            "ws://localhost:8787/ws/node",
+            "wss://127.0.0.1:8787/ws/node",
+            "wss://localhost:8787/ws/node",
+        }:
+            data["gateway_ws_url"] = DEFAULT_GATEWAY
+            _save_config(data)
+            log.warning("Migrated stale local Gateway %s -> %s", gateway, DEFAULT_GATEWAY)
+        return data
     except (OSError, json.JSONDecodeError):
         return {}
 

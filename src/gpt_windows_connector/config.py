@@ -113,7 +113,7 @@ class NodeSettings:
         return cls(
             node_id=node_id,
             node_name=node_name,
-            gateway_ws_url=os.environ.get("GWC_GATEWAY_WS", "ws://127.0.0.1:8787/ws/node").strip(),
+            gateway_ws_url=os.environ.get("GWC_GATEWAY_WS", "wss://lucasmcp.com/ws/node").strip(),
             node_token=os.environ.get("GWC_NODE_TOKEN") or None,
             state_file=state_file,
             allowed_roots=roots,
