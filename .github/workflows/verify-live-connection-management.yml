@@ -1,0 +1,45 @@
+name: Verify Lucas connection management live deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/verify-live-connection-management.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Wait for production deployment
+        shell: bash
+        run: |
+          set -e
+          urls=("https://lucasmcp.com/nodes" "https://lucas.autozon.xyz/nodes")
+          for i in $(seq 1 60); do
+            for url in "${urls[@]}"; do
+              body="$(curl -fsSL --max-time 15 "$url" || true)"
+              if printf '%s' "$body" | grep -q 'Computer name' && printf '%s' "$body" | grep -q 'deleteAiConnection'; then
+                echo "Live Lucas dashboard verified at $url"
+                exit 0
+              fi
+            done
+            echo "Attempt $i: requested UI not live yet"
+            sleep 10
+          done
+          echo "Timed out waiting for production deployment"
+          exit 1
+      - name: Remove one-time verification workflow
+        if: success()
+        shell: bash
+        run: |
+          git config user.name "Lucas Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/verify-live-connection-management.yml
+          git commit -m "Remove live deployment verification workflow"
+          git push origin HEAD:main
