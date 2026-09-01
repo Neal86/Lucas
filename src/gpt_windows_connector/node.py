@@ -234,13 +234,28 @@ def _prompt_access_request(actor: dict[str, object], node_roots: list[str]) -> d
     return result
 
 
-async def _serve_connection(settings: NodeSettings, gateway_ws_url: str | None = None) -> None:
+async def _serve_connection(
+    settings: NodeSettings,
+    gateway_ws_url: str | None = None,
+    *,
+    force_ipv4: bool = False,
+    proxy_mode: bool | None = True,
+) -> None:
     base_gateway = (gateway_ws_url or settings.gateway_ws_url).rstrip("/")
     query = urlencode({"node_id": settings.node_id})
     uri = base_gateway + ("&" if "?" in base_gateway else "?") + query
     token = _load_saved_token(settings)
     connection_code = _ensure_connection_code(_load_config())
-    async with websockets.connect(uri, ping_interval=20, ping_timeout=20, max_size=32 * 1024 * 1024) as ws:
+    connect_kwargs: dict[str, object] = {
+        "ping_interval": 20,
+        "ping_timeout": 20,
+        "open_timeout": 12,
+        "max_size": 32 * 1024 * 1024,
+        "proxy": proxy_mode,
+    }
+    if force_ipv4:
+        connect_kwargs["family"] = socket.AF_INET
+    async with websockets.connect(uri, **connect_kwargs) as ws:
         await ws.send(json.dumps({
             "type": "hello",
             "node_id": settings.node_id,
@@ -435,22 +450,50 @@ async def run_node() -> None:
                 alternate = FALLBACK_GATEWAY.rstrip("/") if primary == DEFAULT_GATEWAY.rstrip("/") else DEFAULT_GATEWAY.rstrip("/")
                 if alternate not in candidates:
                     candidates.append(alternate)
-            for index, candidate in enumerate(candidates):
-                try:
-                    _write_status("Connecting", f"Connecting to {candidate}")
-                    if index:
-                        log.warning("Primary Gateway unavailable; trying fallback %s", candidate)
-                    await _serve_connection(settings, candidate)
-                    delay = 1.0
+            strategies = [
+                ("auto", False, True),
+                ("ipv4", True, True),
+                ("direct-ipv4", True, None),
+            ]
+            last_error: Exception | None = None
+            connected = False
+            for candidate_index, candidate in enumerate(candidates):
+                if candidate_index:
+                    log.warning("Primary Gateway unavailable; trying fallback %s", candidate)
+                for strategy_name, force_ipv4, proxy_mode in strategies:
+                    try:
+                        detail = f"Connecting to {candidate} via {strategy_name}"
+                        _write_status("Connecting", detail)
+                        log.info("Gateway attempt %s via %s", candidate, strategy_name)
+                        await _serve_connection(
+                            settings,
+                            candidate,
+                            force_ipv4=force_ipv4,
+                            proxy_mode=proxy_mode,
+                        )
+                        delay = 1.0
+                        connected = True
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as candidate_error:
+                        last_error = candidate_error
+                        log.warning(
+                            "Gateway connection failed %s via %s: %s",
+                            candidate,
+                            strategy_name,
+                            candidate_error,
+                        )
+                        _write_status(
+                            "Reconnecting",
+                            f"{candidate_error}; failed {candidate} via {strategy_name}",
+                        )
+                if connected:
                     break
-                except asyncio.CancelledError:
-                    raise
-                except Exception as candidate_error:
-                    log.warning("Gateway connection failed %s: %s", candidate, candidate_error)
-                    if index + 1 < len(candidates):
-                        _write_status("Reconnecting", f"{candidate_error}; switching to {candidates[index + 1]}")
-                        continue
-                    raise
+            if not connected:
+                if last_error is not None:
+                    raise last_error
+                raise RuntimeError("No Gateway connection strategy succeeded")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
