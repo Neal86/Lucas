@@ -33,6 +33,7 @@ ACCESS_FILE = CONFIG_DIR / "node-access.json"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
 local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
+FALLBACK_GATEWAY = "wss://lucas.autozon.xyz/ws/node"
 log = logging.getLogger("lucas.node")
 
 
@@ -233,9 +234,10 @@ def _prompt_access_request(actor: dict[str, object], node_roots: list[str]) -> d
     return result
 
 
-async def _serve_connection(settings: NodeSettings) -> None:
+async def _serve_connection(settings: NodeSettings, gateway_ws_url: str | None = None) -> None:
+    base_gateway = (gateway_ws_url or settings.gateway_ws_url).rstrip("/")
     query = urlencode({"node_id": settings.node_id})
-    uri = settings.gateway_ws_url + ("&" if "?" in settings.gateway_ws_url else "?") + query
+    uri = base_gateway + ("&" if "?" in base_gateway else "?") + query
     token = _load_saved_token(settings)
     connection_code = _ensure_connection_code(_load_config())
     async with websockets.connect(uri, ping_interval=20, ping_timeout=20, max_size=32 * 1024 * 1024) as ws:
@@ -426,9 +428,29 @@ async def run_node() -> None:
             config = _load_config()
             _apply_config(config)
             settings = NodeSettings.from_env()
-            _write_status("Connecting")
-            await _serve_connection(settings)
-            delay = 1.0
+            primary = settings.gateway_ws_url.rstrip("/")
+            candidates = [primary]
+            aliases = {DEFAULT_GATEWAY.rstrip("/"), FALLBACK_GATEWAY.rstrip("/")}
+            if primary in aliases:
+                alternate = FALLBACK_GATEWAY.rstrip("/") if primary == DEFAULT_GATEWAY.rstrip("/") else DEFAULT_GATEWAY.rstrip("/")
+                if alternate not in candidates:
+                    candidates.append(alternate)
+            for index, candidate in enumerate(candidates):
+                try:
+                    _write_status("Connecting", f"Connecting to {candidate}")
+                    if index:
+                        log.warning("Primary Gateway unavailable; trying fallback %s", candidate)
+                    await _serve_connection(settings, candidate)
+                    delay = 1.0
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as candidate_error:
+                    log.warning("Gateway connection failed %s: %s", candidate, candidate_error)
+                    if index + 1 < len(candidates):
+                        _write_status("Reconnecting", f"{candidate_error}; switching to {candidates[index + 1]}")
+                        continue
+                    raise
         except asyncio.CancelledError:
             raise
         except Exception as exc:

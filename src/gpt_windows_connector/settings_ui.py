@@ -307,7 +307,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def button(parent,text,command,primary=False,danger=False):
         bg=C["blue"] if primary else C["control"]; fg=C["white"] if primary else (C["red"] if danger else C["text"])
         active=C["blue_dark"] if primary else C["control_hover"]
-        return tk.Button(parent,text=text,command=command,font=(FONT,9),bg=bg,fg=fg,activebackground=active,activeforeground=fg,relief="flat",bd=0,padx=14,pady=7,cursor="hand2")
+        return tk.Button(parent,text=text,command=command,font=(FONT,9),bg=bg,fg=fg,activebackground=active,activeforeground=fg,disabledforeground=fg,relief="flat",bd=0,padx=14,pady=7,cursor="hand2")
     def copy_to_clipboard(value):
         root.clipboard_clear(); root.clipboard_append(str(value)); root.update_idletasks()
     def copy_icon(parent,var):
@@ -365,6 +365,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         value=str(status_data.get("status") or "").strip(); detail=str(status_data.get("detail") or "").strip().lower()
         if value == "Online": text,color=T("已连接","Connected"),C["green"]
         elif value == "Connecting": text,color=T("正在连接…","Connecting…"),C["orange"]
+        elif value == "Reconnecting" and ("winerror 1225" in detail or "refused" in detail or "拒绝网络连接" in detail): text,color=T("远程连接被拒绝 · 正在切换备用 Gateway…","Connection refused · trying fallback Gateway…"),C["red"]
         elif value == "Reconnecting": text,color=T("正在重新连接…","Reconnecting…"),C["orange"]
         elif value in {"Disconnected","Offline"}: text,color=T("未连接","Disconnected"),C["muted"]
         elif "token" in detail: text,color=T("设备认证失败","Device authentication failed"),C["red"]
