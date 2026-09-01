@@ -18,11 +18,16 @@ BRAND_ASSETS = {
     "lucas-logo-horizontal-white.png": "lucas-logo-horizontal-white.png",
 }
 
+# The auth-page blue logo is stored as base64 text so the exact user-supplied
+# artwork can be embedded directly without another image-processing step.
+try:
+    AUTH_LOGO_B64 = (webapp.BRAND_ASSET_DIR / "lucas-logo-auth-blue.png.b64").read_text(encoding="utf-8").strip()
+    AUTH_LOGO_SRC = f"data:image/png;base64,{AUTH_LOGO_B64}" if AUTH_LOGO_B64 else "/assets/lucas-logo-horizontal-blue.png"
+except OSError:
+    AUTH_LOGO_SRC = "/assets/lucas-logo-horizontal-blue.png"
+
 
 # Apply surface-specific artwork directly to the existing single-page UI.
-# The horizontal dark-surface logo uses the same clean source as the blue logo;
-# CSS only changes its rendered color to white. This avoids the corrupted legacy
-# white PNG while preserving the exact logo geometry.
 webapp.DASHBOARD_HTML = (
     webapp.DASHBOARD_HTML
     .replace("filter:brightness(0) invert(1)!important", "filter:none!important")
@@ -45,27 +50,31 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '<link rel="icon" type="image/png" href="/assets/lucas-logo-square.png" />',
-        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-final-20260831" />',
+        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-auth-final-20260831" />',
     )
     .replace(
         '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
+        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div class="core-ring"><img src="/assets/lucas-logo-square.png" alt="Lucas" /></div>',
-        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
+        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
+        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal-blue.png?v=brand-final-20260831" alt="Lucas" /></div>',
+        f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{AUTH_LOGO_SRC}" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-final-20260831" alt="Lucas" /></div>',
+        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
+    )
+    .replace(
+        '</head>',
+        '<style>.auth-card .brand{height:150px;display:flex;align-items:center;justify-content:center;margin:0 0 18px}.auth-card .brand img{display:block;width:310px;max-width:92%;height:auto;object-fit:contain;filter:none!important;opacity:1}</style></head>',
     )
 )
 
