@@ -40,7 +40,7 @@ SETTINGS_EN = {
     "Windows 权限": "Windows privileges", "当前 Windows 权限": "Current Windows privilege", "管理员": "Administrator", "标准用户": "Standard user", "未启用": "Disabled", "重要": "Important",
     "保存更改": "Save changes", "恢复默认": "Restore defaults", "取消": "Cancel", "安全策略仅在此电脑上生效": "Security policy applies only on this computer",
     "请求批准（Recommended）": "Ask for approval (Recommended)", "帮我批准": "Auto-approve safe actions", "完全访问权限": "Full Access", "自定义": "Custom",
-    "更新 Node": "Update Node", "自动检查新版本；仅检测到新版时显示更新按钮。": "Checks for updates automatically and shows the update button only when a newer version exists."
+    "更新 Node": "Update Node", "检测更新": "Check for updates", "自动检查新版本；也可手动检测并在有新版本时更新。": "Checks for updates automatically; you can also check manually and update when a newer version is available."
 }
 
 APP_NAME = "Lucas"
@@ -383,12 +383,13 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)
-    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None; update_control=None
+    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None; check_update_button=None; update_control=None
     def run_update():
         if not messagebox.askyesno("Lucas","更新 Lucas Node？现有 Node ID、用户权限、Allowed Folders 和安全设置会保留。"): return
         try:
             version_status.set("正在启动更新…")
             if update_button is not None: update_button.configure(state="disabled")
+            if check_update_button is not None: check_update_button.configure(state="disabled")
             script_path=Path(tempfile.gettempdir())/"Lucas-Node-update.ps1"
             request=urllib.request.Request(f"{INSTALLER_URL}?t={int(time.time())}",headers={"Cache-Control":"no-cache","Pragma":"no-cache","User-Agent":"Lucas-Node-Updater"})
             with urllib.request.urlopen(request,timeout=15) as response: script_path.write_bytes(response.read())
@@ -396,22 +397,36 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         except Exception as exc:
             version_status.set(f"更新启动失败：{exc}")
             if update_button is not None: update_button.configure(state="normal")
+            if check_update_button is not None: check_update_button.configure(state="normal")
             messagebox.showerror("Lucas",f"无法启动更新：{exc}")
-    def build_update_control(p):
-        nonlocal update_button,update_control
-        update_control=tk.Frame(p,bg=C["card"]); tk.Label(update_control,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]).pack(side="left"); update_button=button(update_control,"更新 Node",run_update); return update_control
-    row(c,"Lucas Node","自动检查新版本；仅检测到新版时显示更新按钮。",build_update_control)
-    def check_update_worker():
+    def check_update_worker(manual=False):
+        def set_checking():
+            version_status.set(f"当前版本 {current_version} · 正在检查更新…")
+            if check_update_button is not None: check_update_button.configure(state="disabled")
+            if update_button is not None: update_button.configure(state="disabled")
+        try: root.after(0,set_checking)
+        except tk.TclError: return
         latest=_fetch_latest_version()
         def apply_result():
-            if update_button is not None: update_button.pack_forget()
-            if not latest: version_status.set(f"当前版本 {current_version} · 无法检查更新"); return
+            if check_update_button is not None: check_update_button.configure(state="normal")
+            if not latest:
+                version_status.set(f"当前版本 {current_version} · 无法检查更新")
+                if update_button is not None: update_button.configure(state="disabled")
+                return
             if current_version != "dev" and _version_key(latest)>_version_key(current_version):
-                version_status.set(f"新版本 {latest} 可用")
-                if update_button is not None: update_button.configure(state="normal"); update_button.pack(side="left",padx=(10,0))
-            else: version_status.set(f"当前版本 {current_version} · 已是最新版本")
+                version_status.set(f"当前版本 {current_version} · 新版本 {latest} 可用")
+                if update_button is not None: update_button.configure(state="normal")
+            else:
+                version_status.set(f"当前版本 {current_version} · 已是最新版本")
+                if update_button is not None: update_button.configure(state="disabled")
         try: root.after(0,apply_result)
         except tk.TclError: pass
+    def start_update_check():
+        threading.Thread(target=check_update_worker,args=(True,),daemon=True).start()
+    def build_update_control(p):
+        nonlocal update_button,check_update_button,update_control
+        update_control=tk.Frame(p,bg=C["card"]); tk.Label(update_control,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]).pack(side="left"); check_update_button=button(update_control,"检测更新",start_update_check); check_update_button.pack(side="left",padx=(12,0)); update_button=button(update_control,"更新 Node",run_update,primary=True); update_button.pack(side="left",padx=(8,0)); update_button.configure(state="disabled"); return update_control
+    row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",build_update_control)
     threading.Thread(target=check_update_worker,daemon=True).start()
 
     wrap,body=scroll_page(); pages["安全"]=wrap
