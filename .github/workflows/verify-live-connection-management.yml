@@ -20,13 +20,16 @@ jobs:
         shell: bash
         run: |
           set -e
-          for i in $(seq 1 40); do
-            body="$(curl -fsSL --max-time 15 https://lucasmcp.com/nodes || true)"
-            if printf '%s' "$body" | grep -q 'Computer name' && printf '%s' "$body" | grep -q 'deleteAiConnection'; then
-              echo "Live Lucas dashboard contains requested connection-management UI."
-              exit 0
-            fi
-            echo "Attempt $i: new dashboard not live yet"
+          urls=("https://lucasmcp.com/nodes" "https://lucas.autozon.xyz/nodes")
+          for i in $(seq 1 30); do
+            for url in "${urls[@]}"; do
+              body="$(curl -fsSL --max-time 15 "$url" || true)"
+              if printf '%s' "$body" | grep -q 'Computer name' && printf '%s' "$body" | grep -q 'deleteAiConnection'; then
+                echo "Live Lucas dashboard verified at $url"
+                exit 0
+              fi
+            done
+            echo "Attempt $i: requested UI not live yet"
             sleep 10
           done
           echo "Timed out waiting for live deployment"
