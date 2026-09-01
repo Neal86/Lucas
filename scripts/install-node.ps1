@@ -62,6 +62,7 @@ $StateBackupFile = "$StateFile.pre-update"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
 $TrayPidFile = Join-Path $InstallDir "lucas-tray.pid"
+$StatusFile = Join-Path $InstallDir "node-status.json"
 $TaskName = "Lucas Node"
 
 $SavedState = $null
@@ -173,20 +174,25 @@ if (-not (Test-Path $VenvPython)) {
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) { throw "Failed to create the Lucas Python runtime." }
 }
 
-# Stop every old Lucas tray/node process, including the base-Python child processes
-# created behind venv launchers. Leaving those children alive causes duplicate tray
-# agents and stale local status after upgrades.
-$LucasRuntimePattern = [regex]::Escape((Join-Path $InstallDir "runtime"))
+# Stop every old Lucas tray/node process before replacing the runtime. Older builds
+# can leave a base-Python Node behind whose command line no longer contains the venv
+# path. That stale process owns the single-instance mutex and keeps the old Node ID
+# online while the Settings UI shows the new configuration. Match Lucas modules
+# directly so upgrades cannot leave a ghost Node behind.
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $CommandLine = [string]$_.CommandLine
   $CommandLine -and (
     $CommandLine -match 'gpt_windows_connector\.tray' -or
-    (($CommandLine -match $LucasRuntimePattern) -and ($CommandLine -match 'lucas-node\.exe|gwc-node\.exe|gpt_windows_connector\.node'))
+    $CommandLine -match 'gpt_windows_connector\.node' -or
+    $CommandLine -match 'lucas-node\.exe' -or
+    $CommandLine -match 'gwc-node\.exe'
   )
 } | ForEach-Object {
   try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {}
 }
+Start-Sleep -Milliseconds 500
 Remove-Item -Force -ErrorAction SilentlyContinue $TrayPidFile
+Remove-Item -Force -ErrorAction SilentlyContinue $StatusFile
 
 Write-Host "[Lucas] Installing the latest Lucas Node..." -ForegroundColor Yellow
 & $VenvPython -m pip install --disable-pip-version-check --upgrade pip | Out-Null
