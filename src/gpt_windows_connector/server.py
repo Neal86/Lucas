@@ -18,8 +18,8 @@ BRAND_ASSETS = {
     "lucas-logo-horizontal-white.png": "lucas-logo-horizontal-white.png",
 }
 
-# The auth-page blue logo is stored as base64 text so the exact user-supplied
-# artwork can be embedded directly without another image-processing step.
+# Exact user-supplied clean Lucas artwork. The same geometry is used on light
+# and dark surfaces; dark surfaces render it white via CSS only.
 try:
     AUTH_LOGO_B64 = (webapp.BRAND_ASSET_DIR / "lucas-logo-auth-blue.png.b64").read_text(encoding="utf-8").strip()
     AUTH_LOGO_SRC = f"data:image/png;base64,{AUTH_LOGO_B64}" if AUTH_LOGO_B64 else "/assets/lucas-logo-horizontal-blue.png"
@@ -27,7 +27,6 @@ except OSError:
     AUTH_LOGO_SRC = "/assets/lucas-logo-horizontal-blue.png"
 
 
-# Apply surface-specific artwork directly to the existing single-page UI.
 webapp.DASHBOARD_HTML = (
     webapp.DASHBOARD_HTML
     .replace("filter:brightness(0) invert(1)!important", "filter:none!important")
@@ -37,32 +36,20 @@ webapp.DASHBOARD_HTML = (
         '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
     )
     .replace(
-        '.logo{height:64px;min-height:64px;padding:4px 10px 14px;',
-        '.logo{height:104px;min-height:104px;padding:10px 10px 12px;',
-    )
-    .replace(
-        '.logo img{display:block;width:184px;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}',
-        '.logo img{display:block;width:230px;max-width:100%;height:auto;background:transparent;border-radius:0;padding:0;filter:brightness(0) invert(1)!important;opacity:1}',
-    )
-    .replace(
-        '.landing-logo img{display:block;height:44px;width:auto;background:transparent;border-radius:0;padding:0;filter:none}',
-        '.landing-logo img{display:block;height:54px;width:auto;background:transparent;border-radius:0;padding:0;filter:brightness(0) invert(1);opacity:1}',
-    )
-    .replace(
         '<link rel="icon" type="image/png" href="/assets/lucas-logo-square.png" />',
-        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=brand-auth-final-20260831" />',
+        '<link rel="icon" type="image/png" href="/assets/lucas-logo-home-square-white.png?v=dashboard-logo-20260831" />',
     )
     .replace(
         '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
+        '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=dashboard-logo-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div class="core-ring"><img src="/assets/lucas-logo-square.png" alt="Lucas" /></div>',
-        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
+        '<div class="core-ring"><img src="/assets/lucas-logo-home-square-white.png?v=dashboard-logo-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
+        '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal-white.png?v=dashboard-logo-20260831" alt="Lucas" /></div>',
     )
     .replace(
         '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
@@ -70,11 +57,16 @@ webapp.DASHBOARD_HTML = (
     )
     .replace(
         '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-        '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal-white.png?v=brand-auth-final-20260831" alt="Lucas" /></div>',
+        f'<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="{AUTH_LOGO_SRC}" alt="Lucas" /></div>',
     )
     .replace(
         '</head>',
-        '<style>.auth-card .brand{height:150px;display:flex;align-items:center;justify-content:center;margin:0 0 18px}.auth-card .brand img{display:block;width:310px;max-width:92%;height:auto;object-fit:contain;filter:none!important;opacity:1}</style></head>',
+        '<style>'
+        '.auth-card .brand{height:150px;display:flex;align-items:center;justify-content:center;margin:0 0 18px}'
+        '.auth-card .brand img{display:block;width:310px;max-width:92%;height:auto;object-fit:contain;filter:none!important;opacity:1}'
+        '.side .logo{height:112px!important;min-height:112px!important;padding:16px 18px 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:visible!important}'
+        '.side .logo img{display:block!important;width:218px!important;max-width:218px!important;height:auto!important;object-fit:contain!important;filter:brightness(0) invert(1)!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
+        '</style></head>',
     )
 )
 
