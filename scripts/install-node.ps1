@@ -58,6 +58,7 @@ $Venv = Join-Path $InstallDir "runtime"
 $ConfigFile = Join-Path $InstallDir "node-config.json"
 $StateFile = Join-Path $InstallDir "node-state.json"
 $DeviceCredentialFile = Join-Path $InstallDir "node-device-credential.json"
+$DeviceIdFile = Join-Path $InstallDir "node-device-id.txt"
 $StateBackupFile = "$StateFile.pre-update"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
 $VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
@@ -220,8 +221,18 @@ try {
 }
 $GeneratedNodeId = (("{0}-{1}" -f $env:COMPUTERNAME, $MachineGuid.Substring(0, [Math]::Min(12, $MachineGuid.Length))).ToLower() -replace '[^a-z0-9._-]', '-')
 $NodeId = $GeneratedNodeId
-if ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_id)) { $NodeId = [string]$ExistingConfig.node_id }
-elseif ($SavedState -and -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_id)) { $NodeId = [string]$SavedState.node_id }
+$LockedNodeId = ""
+if (Test-Path $DeviceIdFile) {
+  try { $LockedNodeId = (Get-Content -Raw -Path $DeviceIdFile).Trim() } catch { $LockedNodeId = "" }
+}
+if (-not [string]::IsNullOrWhiteSpace($LockedNodeId)) {
+  $NodeId = $LockedNodeId
+} elseif ($ExistingConfig -and -not [string]::IsNullOrWhiteSpace([string]$ExistingConfig.node_id)) {
+  $NodeId = [string]$ExistingConfig.node_id
+} elseif ($SavedState -and -not [string]::IsNullOrWhiteSpace([string]$SavedState.node_id)) {
+  $NodeId = [string]$SavedState.node_id
+}
+Set-Content -Path $DeviceIdFile -Value $NodeId -Encoding UTF8
 
 # The local node name is always the real Windows computer name. User-facing
 # aliases are managed on the Lucas website and must not be written back locally.

@@ -31,6 +31,7 @@ STATUS_FILE = CONFIG_DIR / "node-status.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 ACCESS_FILE = CONFIG_DIR / "node-access.json"
 DEVICE_CREDENTIAL_FILE = CONFIG_DIR / "node-device-credential.json"
+DEVICE_ID_FILE = CONFIG_DIR / "node-device-id.txt"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
 local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
@@ -60,6 +61,32 @@ def _default_node_id() -> str:
     return f"lucas-{uuid.uuid4().hex}"
 
 
+def _lock_device_id(config: dict[str, object]) -> dict[str, object]:
+    """Persist the first production Node ID forever; updates may never rotate it."""
+    configured = str(config.get("node_id") or "").strip()
+    locked = ""
+    try:
+        locked = DEVICE_ID_FILE.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        pass
+    if locked:
+        if configured != locked:
+            config["node_id"] = locked
+            _save_config(config)
+            log.warning("Restored permanent Node ID %s (ignored transient value %s)", locked, configured or "<empty>")
+        return config
+    if not configured:
+        configured = _default_node_id()
+        config["node_id"] = configured
+        _save_config(config)
+    try:
+        DEVICE_ID_FILE.parent.mkdir(parents=True, exist_ok=True)
+        DEVICE_ID_FILE.write_text(configured, encoding="utf-8")
+    except OSError as exc:
+        log.warning("Could not persist permanent Node ID lock: %s", exc)
+    return config
+
+
 def _load_config() -> dict[str, object]:
     try:
         data = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
@@ -78,7 +105,7 @@ def _load_config() -> dict[str, object]:
             data["gateway_ws_url"] = DEFAULT_GATEWAY
             _save_config(data)
             log.warning("Migrated stale local Gateway %s -> %s", gateway, DEFAULT_GATEWAY)
-        return data
+        return _lock_device_id(data)
     except (OSError, json.JSONDecodeError):
         return {}
 
@@ -205,24 +232,6 @@ def _save_token(settings: NodeSettings, token: str) -> None:
     _write_token_file(DEVICE_CREDENTIAL_FILE, settings.node_id, token)
 
 
-class DeviceIdentityRotated(RuntimeError):
-    pass
-
-
-def _rotate_device_identity(settings: NodeSettings) -> str:
-    """Recover safely when an old server record no longer matches this PC."""
-    config = _load_config()
-    old_node_id = settings.node_id
-    new_node_id = _default_node_id()
-    token = secrets.token_urlsafe(32)
-    config["node_id"] = new_node_id
-    _save_config(config)
-    _write_token_file(settings.state_file, new_node_id, token)
-    _write_token_file(DEVICE_CREDENTIAL_FILE, new_node_id, token)
-    log.warning("Rotated stale Node identity old=%s new=%s; local access policy was preserved", old_node_id, new_node_id)
-    return new_node_id
-
-
 def _grants_full_access(access: dict[str, object]) -> bool:
     preset = normalize_preset(str(access.get("preset") or "request_approval"))
     security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(preset)
@@ -326,8 +335,7 @@ async def _serve_connection(
         if not welcome.get("ok"):
             error = str(welcome.get("error") or "Gateway rejected node")
             if error == "invalid node device token":
-                new_node_id = _rotate_device_identity(settings)
-                raise DeviceIdentityRotated(f"Recovered stale Node identity; new Node ID is {new_node_id}")
+                raise RuntimeError("device credential mismatch; permanent Node ID preserved")
             raise RuntimeError(error)
         # Security policy is authoritative on the Windows computer. The gateway may
         # report status, but it is never allowed to overwrite local permissions.
@@ -542,8 +550,6 @@ async def run_node() -> None:
                         break
                     except asyncio.CancelledError:
                         raise
-                    except DeviceIdentityRotated:
-                        raise
                     except Exception as candidate_error:
                         last_error = candidate_error
                         log.warning(
@@ -564,11 +570,6 @@ async def run_node() -> None:
                 raise RuntimeError("No Gateway connection strategy succeeded")
         except asyncio.CancelledError:
             raise
-        except DeviceIdentityRotated as exc:
-            log.warning("%s; reconnecting immediately", exc)
-            _write_status("Reconnecting", str(exc))
-            delay = 1.0
-            continue
         except Exception as exc:
             log.warning("Disconnected: %s; retrying in %.1fs", exc, delay)
             _write_status("Reconnecting", str(exc))
