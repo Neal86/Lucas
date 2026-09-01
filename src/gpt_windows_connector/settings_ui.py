@@ -51,6 +51,7 @@ STATE_FILE = CONFIG_DIR / "node-state.json"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
 TRAY_PID_FILE = CONFIG_DIR / "lucas-tray.pid"
+STATUS_STALE_SECONDS = 45.0
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 ACCESS_FILE = CONFIG_DIR / "node-access.json"
@@ -363,6 +364,11 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             if isinstance(loaded,dict): status_data=loaded
         except (OSError,json.JSONDecodeError): pass
         value=str(status_data.get("status") or "").strip(); detail=str(status_data.get("detail") or "").strip().lower()
+        try: status_time=float(status_data.get("time") or 0.0)
+        except (TypeError,ValueError): status_time=0.0
+        age=(time.time()-status_time) if status_time else float("inf")
+        if value == "Online" and age > STATUS_STALE_SECONDS:
+            value="Reconnecting"; detail=f"stale node heartbeat ({int(age)}s)"
         if value == "Online": text,color=T("已连接","Connected"),C["green"]
         elif value == "Connecting": text,color=T("正在连接…","Connecting…"),C["orange"]
         elif value == "Reconnecting" and ("winerror 1225" in detail or "refused" in detail or "拒绝网络连接" in detail): text,color=T("远程连接被拒绝 · 正在切换备用 Gateway…","Connection refused · trying fallback Gateway…"),C["red"]
@@ -607,22 +613,31 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     log_text.pack(fill="both",expand=True,padx=18,pady=(0,10))
     log_status=tk.StringVar(value="")
     tk.Label(log_card,textvariable=log_status,font=(FONT,8),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,8))
-    def refresh_logs():
+    log_last_mtime={"value":None}
+    def refresh_logs(force=True):
         try:
             if LOG_FILE.exists():
-                data=LOG_FILE.read_text(encoding="utf-8",errors="replace")
-                lines=data.splitlines()[-1000:]; text="\n".join(lines)
-                log_status.set(f"{len(lines)} 行 · 最后更新 {time.strftime('%H:%M:%S')}")
+                stat=LOG_FILE.stat(); mtime=stat.st_mtime
+                if force or log_last_mtime["value"] != mtime:
+                    data=LOG_FILE.read_text(encoding="utf-8",errors="replace")
+                    lines=data.splitlines()[-1000:]; text="\n".join(lines)
+                    log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled"); log_text.see("end")
+                    log_last_mtime["value"]=mtime
+                log_status.set(f"{len(data.splitlines()[-1000:]) if 'data' in locals() else 1000} 行以内 · 文件更新 {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(mtime))} · 自动刷新")
             else:
                 text="日志文件尚未生成。Lucas Node 启动后会在这里显示连接、认证和重连信息。"
-                log_status.set("等待日志文件")
+                log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled")
+                log_status.set("等待日志文件 · 自动刷新")
         except Exception as exc:
-            text=f"读取日志失败：{exc}"; log_status.set("读取失败")
-        log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled"); log_text.see("end")
+            log_status.set(f"读取失败：{exc}")
+    def auto_refresh_logs():
+        refresh_logs(False)
+        try: root.after(1000,auto_refresh_logs)
+        except tk.TclError: pass
     log_actions=tk.Frame(log_card,bg=C["card"]); log_actions.pack(fill="x",padx=18,pady=(0,14))
     button(log_actions,"复制全部",lambda: copy_to_clipboard(log_text.get("1.0","end-1c"))).pack(side="right")
-    button(log_actions,"刷新",refresh_logs).pack(side="right",padx=(0,8))
-    refresh_logs()
+    button(log_actions,"刷新",lambda: refresh_logs(True)).pack(side="right",padx=(0,8))
+    refresh_logs(True); root.after(1000,auto_refresh_logs)
 
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
