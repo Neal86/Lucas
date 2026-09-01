@@ -10,19 +10,12 @@ from starlette.routing import Route
 from . import gateway, webapp
 
 
-WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=source-20260901"
+WHITE_LOGO_PATH = "/assets/lucas-logo-horizontal-white.png"
+BLUE_LOGO_PATH = "/assets/lucas-logo-horizontal-blue.png"
+WHITE_LOGO_URL = f"{WHITE_LOGO_PATH}?v=brand-20260901"
+BLUE_LOGO_URL = f"{BLUE_LOGO_PATH}?v=brand-20260901"
 
 
-def _embedded_blue_logo() -> str:
-    """Use the bundled user-supplied blue logo on light/auth surfaces."""
-    try:
-        payload = (webapp.BRAND_ASSET_DIR / "lucas-logo-auth-blue.png.b64").read_text(encoding="utf-8").strip()
-    except OSError:
-        payload = ""
-    return f"data:image/png;base64,{payload}" if payload else "/assets/lucas-logo-horizontal-blue.png"
-
-
-BLUE_LOGO_SRC = _embedded_blue_logo()
 html = webapp.DASHBOARD_HTML
 
 # Public navigation text should match the bright adjacent action text.
@@ -31,8 +24,8 @@ html = html.replace(
     '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
 )
 
-# Dark surfaces use the real white PNG file directly. No base64, filter, invert,
-# recoloring, or generated artwork is involved.
+# Use real PNG files directly on every surface. No base64, filters, recoloring,
+# generated artwork, or fallback chains.
 html = html.replace(
     '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
     f'<nav class="landing-nav"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
@@ -45,11 +38,9 @@ html = html.replace(
     '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
     f'<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
 )
-
-# Light auth surfaces keep the exact blue source.
 html = html.replace(
     '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-    f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_SRC}" alt="Lucas" /></div>',
+    f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_URL}" alt="Lucas" /></div>',
 )
 
 # Size only; never transform the logo artwork.
@@ -67,17 +58,24 @@ html = html.replace(
 webapp.DASHBOARD_HTML = html
 
 
-async def white_logo_asset(request):
+async def brand_logo_asset(request):
+    name = str(request.path_params.get("name") or "")
+    if name == "white":
+        filename = "lucas-logo-horizontal-white.png"
+    elif name == "blue":
+        filename = "lucas-logo-horizontal-blue.png"
+    else:
+        return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(
-        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",
+        webapp.BRAND_ASSET_DIR / filename,
         media_type="image/png",
-        headers={"Cache-Control": "no-cache, max-age=0"},
+        headers={"Cache-Control": "no-cache, max-age=0, must-revalidate"},
     )
 
 
-WHITE_LOGO_PATH = "/assets/lucas-logo-horizontal-white.png"
-if not any(getattr(r, "path", None) == WHITE_LOGO_PATH for r in webapp.routes):
-    webapp.routes.insert(0, Route(WHITE_LOGO_PATH, white_logo_asset, methods=["GET"]))
+for path, name in ((WHITE_LOGO_PATH, "white"), (BLUE_LOGO_PATH, "blue")):
+    if not any(getattr(r, "path", None) == path for r in webapp.routes):
+        webapp.routes.insert(0, Route(path, brand_logo_asset, methods=["GET"], name=f"brand-logo-{name}"))
 
 
 class DashboardAuthMiddleware:
