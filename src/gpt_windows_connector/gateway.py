@@ -7,6 +7,7 @@ import logging
 import os
 import secrets
 import hashlib
+import importlib.metadata
 import sqlite3
 import time
 import uuid
