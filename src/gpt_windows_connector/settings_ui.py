@@ -22,7 +22,7 @@ from .task_runs import TaskRunStore
 
 SETTINGS_EN = {
     "搜索设置...": "Search settings...", "常规": "General", "安全": "Security", "用户与权限": "Users & Permissions",
-    "文件访问": "File Access", "网络": "Network", "规则": "Rules", "任务记录": "Task History", "系统访问": "System Access",
+    "文件访问": "File Access", "网络": "Network", "规则": "Rules", "任务记录": "Task History", "日志": "Logs", "系统访问": "System Access",
     "电脑": "Computer", "电脑名称": "Computer name", "Windows 设备名称，只读。网页中的显示名称可单独修改。": "Windows device name, read-only.",
     "设备唯一标识。": "Unique device identifier.", "连接": "Connection", "安全 WebSocket 地址。": "Secure WebSocket address.",
     "连接状态": "Connection status", "实时显示 Lucas Node 与 Gateway 的连接状态。": "Shows the live connection between Lucas Node and the Gateway.",
@@ -49,6 +49,7 @@ CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
 CONFIG_FILE = CONFIG_DIR / "node-config.json"
 STATE_FILE = CONFIG_DIR / "node-state.json"
 STATUS_FILE = CONFIG_DIR / "node-status.json"
+LOG_FILE = CONFIG_DIR / "lucas-node.log"
 TRAY_PID_FILE = CONFIG_DIR / "lucas-tray.pid"
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
@@ -126,7 +127,7 @@ def _save_config(config: dict[str, Any]) -> None:
     temp.replace(CONFIG_FILE)
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "规则", "任务记录", "系统访问"}
+    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "规则", "任务记录", "日志", "系统访问"}
     try:
         data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
         page = str(data.get("last_page") or "") if isinstance(data, dict) else ""
@@ -175,7 +176,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     language = system_language()
     T = lambda zh, en: tr(zh, en, language)
-    NAV_EN = {"常规":"General","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","规则":"Rules","任务记录":"Task History","系统访问":"System Access"}
+    NAV_EN = {"常规":"General","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","规则":"Rules","任务记录":"Task History","日志":"Logs","系统访问":"System Access"}
     C = {
         "window":"#FFFFFF","sidebar":"#F3F3F3","sidebar_hover":"#EAEAEA","card":"#FFFFFF",
         "line":"#E5E5E5","text":"#1F1F1F","muted":"#6B6B6B","subtle":"#8A8A8A",
@@ -307,6 +308,12 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         bg=C["blue"] if primary else C["control"]; fg=C["white"] if primary else (C["red"] if danger else C["text"])
         active=C["blue_dark"] if primary else C["control_hover"]
         return tk.Button(parent,text=text,command=command,font=(FONT,9),bg=bg,fg=fg,activebackground=active,activeforeground=fg,relief="flat",bd=0,padx=14,pady=7,cursor="hand2")
+    def copy_to_clipboard(value):
+        root.clipboard_clear(); root.clipboard_append(str(value)); root.update_idletasks()
+    def copy_icon(parent,var):
+        return tk.Button(parent,text="⧉",command=lambda: copy_to_clipboard(var.get()),font=(FONT,11),bg=C["card"],fg=C["muted"],activebackground=C["control_hover"],activeforeground=C["text"],relief="flat",bd=0,padx=6,pady=2,cursor="hand2")
+    def selectable_value(parent,var,width=40,bold=False,blue=False):
+        f=tk.Frame(parent,bg=C["card"]); e=tk.Entry(f,textvariable=var,font=(FONT,10,"bold" if bold else "normal"),fg=(C["blue"] if blue else C["text"]),readonlybackground=C["control"],relief="flat",bd=0,width=width,state="readonly",cursor="xterm",takefocus=True); e.pack(side="left"); copy_icon(f,var).pack(side="left",padx=(6,0)); return f
     def combo(parent,var,values,width=14):
         return ttk.Combobox(parent,textvariable=var,values=values,state="readonly",width=width,style="Lucas.TCombobox")
     def switch(parent,var):
@@ -341,7 +348,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["常规"]=wrap
     section(body,"电脑"); c=card(body)
     row(c,"电脑名称","Windows 设备名称，只读。网页中的显示名称可单独修改。",lambda p: tk.Label(p,textvariable=node_name,font=(FONT,10),fg=C["muted"],bg=C["card"])); divider(c)
-    row(c,"Node ID","设备唯一标识。",lambda p: tk.Entry(p,textvariable=node_id,font=(FONT,9),fg=C["text"],readonlybackground=C["control"],relief="flat",bd=0,width=40,state="readonly",cursor="xterm",takefocus=True))
+    row(c,"Node ID","设备唯一标识。",lambda p: selectable_value(p,node_id,40))
     section(body,"连接"); c=card(body)
     row(c,"Gateway","安全 WebSocket 地址。",lambda p: tk.Entry(p,textvariable=gateway,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=38)); divider(c)
     connection_status=tk.StringVar(value=T("检测中…", "Checking…")); connection_status_label=None
@@ -372,7 +379,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         latest=dict(existing); latest["connection_code"]=new_code
         _save_config(latest); _restart_node_for_apply()
     def build_connection_code(p):
-        f=tk.Frame(p,bg=C["card"]); tk.Label(f,textvariable=connection_code,font=(FONT,14,"bold"),fg=C["blue"],bg=C["card"]).pack(side="left"); button(f,"重新生成",regenerate_connection_code).pack(side="left",padx=(10,0)); return f
+        f=tk.Frame(p,bg=C["card"]); selectable_value(f,connection_code,10,bold=True,blue=True).pack(side="left"); button(f,"重新生成",regenerate_connection_code).pack(side="left",padx=(10,0)); return f
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)
@@ -575,10 +582,36 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     button(task_card,"刷新",refresh_local_tasks).pack(anchor="e",padx=18,pady=(0,14))
     refresh_local_tasks()
 
+    logs_wrapper,logs_body=scroll_page(); pages["日志"]=logs_wrapper
+    section(logs_body,"日志")
+    log_card=card(logs_body)
+    log_header=tk.Frame(log_card,bg=C["card"]); log_header.pack(fill="x",padx=18,pady=(14,8))
+    tk.Label(log_header,text=str(LOG_FILE),font=(FONT,8),fg=C["muted"],bg=C["card"]).pack(side="left")
+    log_text=tk.Text(log_card,height=25,font=("Consolas",9),bg="#111111",fg="#E6E6E6",insertbackground="#FFFFFF",relief="flat",bd=0,wrap="none",padx=10,pady=10,state="disabled")
+    log_text.pack(fill="both",expand=True,padx=18,pady=(0,10))
+    log_status=tk.StringVar(value="")
+    tk.Label(log_card,textvariable=log_status,font=(FONT,8),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,8))
+    def refresh_logs():
+        try:
+            if LOG_FILE.exists():
+                data=LOG_FILE.read_text(encoding="utf-8",errors="replace")
+                lines=data.splitlines()[-1000:]; text="\n".join(lines)
+                log_status.set(f"{len(lines)} 行 · 最后更新 {time.strftime('%H:%M:%S')}")
+            else:
+                text="日志文件尚未生成。Lucas Node 启动后会在这里显示连接、认证和重连信息。"
+                log_status.set("等待日志文件")
+        except Exception as exc:
+            text=f"读取日志失败：{exc}"; log_status.set("读取失败")
+        log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled"); log_text.see("end")
+    log_actions=tk.Frame(log_card,bg=C["card"]); log_actions.pack(fill="x",padx=18,pady=(0,14))
+    button(log_actions,"复制全部",lambda: copy_to_clipboard(log_text.get("1.0","end-1c"))).pack(side="right")
+    button(log_actions,"刷新",refresh_logs).pack(side="right",padx=(0,8))
+    refresh_logs()
+
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
 
-    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","用户与权限":"管理哪些 Lucas 用户可以操作此电脑，以及每个用户的权限和允许目录。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
+    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","用户与权限":"管理哪些 Lucas 用户可以操作此电脑，以及每个用户的权限和允许目录。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","日志":"查看本机 Node 实时日志，用于排查连接、认证和重连问题。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
     def show_page(name):
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
@@ -586,7 +619,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name if language=="zh" else NAV_EN[name]); subtitle.set(desc[name] if language=="zh" else SETTINGS_EN.get(desc[name], desc[name])); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
-    for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","系统访问"):
+    for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","日志","系统访问"):
         b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
