@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/fix_pending_access_flow.py'
+      - 'scripts/reduce_settings_ui_size.py'
       - '.github/workflows/fix-pending-access-flow.yml'
   workflow_dispatch:
 
@@ -23,7 +24,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply pending access flow fix
-        run: python scripts/fix_pending_access_flow.py
+        run: |
+          python scripts/fix_pending_access_flow.py
+          python scripts/reduce_settings_ui_size.py
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
@@ -37,6 +40,7 @@ jobs:
       - name: Remove one-shot machinery
         run: |
           rm scripts/fix_pending_access_flow.py
+          rm scripts/reduce_settings_ui_size.py
           rm .github/workflows/fix-pending-access-flow.yml
       - name: Commit fix
         run: |
