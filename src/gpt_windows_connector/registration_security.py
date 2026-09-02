@@ -135,6 +135,7 @@ class RegistrationSecurity:
             actual = hashlib.sha256(code.encode()).hexdigest()
             if not secrets.compare_digest(expected, actual):
                 db.execute("UPDATE pending_registrations SET attempts=attempts+1,updated_at=? WHERE email=? COLLATE NOCASE", (now, email))
+                db.commit()
                 raise ValueError("Invalid verification code")
             existing = db.execute("SELECT id FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
             if existing:
@@ -187,9 +188,11 @@ class RegistrationSecurity:
                 raise ValueError("Login verification session expired")
             if float(row["expires_at"]) < now:
                 db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
+                db.commit()
                 raise ValueError("Verification code expired")
             if str(row["ip_address"]) != str(ip_address):
                 db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
+                db.commit()
                 raise ValueError("Login network changed. Please sign in again.")
             if int(row["attempts"]) >= 5:
                 raise ValueError("Too many verification attempts")
@@ -197,6 +200,7 @@ class RegistrationSecurity:
             actual = hashlib.sha256(code.encode()).hexdigest()
             if not secrets.compare_digest(expected, actual):
                 db.execute("UPDATE login_verifications SET attempts=attempts+1,updated_at=? WHERE challenge_id=?", (now, challenge_id))
+                db.commit()
                 raise ValueError("Invalid verification code")
             user_id = str(row["user_id"])
             remember = bool(row["remember_device"])
