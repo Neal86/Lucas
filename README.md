@@ -1,5 +1,7 @@
 # GPT Windows Connector
 
+**Website:** [https://lucasmcp.com/](https://lucasmcp.com/)
+
 Remote-first, multi-user Windows execution MCP for ChatGPT, Claude, Gemini, and other MCP-compatible AI clients.
 
 The product exposes local project files, Shell, long-running processes, Git, browser automation, and Windows desktop/UI Automation through a VPS Gateway. Codex, Claude Code, and Gemini CLI are not used as an execution layer.

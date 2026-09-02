@@ -10,7 +10,7 @@ from urllib.parse import unquote
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 
 from . import gateway
@@ -73,14 +73,29 @@ def _landing_html() -> str:
     section_end = DASHBOARD_HTML.index('\n<div id="auth"', section_start)
     landing = DASHBOARD_HTML[section_start:section_end]
     landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\'/dashboard\'"')
+    seo_copy = """<section aria-label="About Lucas MCP" style="max-width:980px;margin:0 auto;padding:40px 28px 90px;color:#9aa4bd;font:15px/1.8 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif"><h2 style="color:#f5f7ff;font-size:28px;margin:0 0 12px">Lucas MCP computer connector</h2><p>Lucas MCP is a secure bridge between MCP-compatible AI assistants and your computer. Connect ChatGPT, Claude, Gemini and other AI tools to work with files, projects, browsers, terminals and desktop applications while local permissions remain under your control.</p><p>Lucas is designed for model-agnostic computer automation and remote access, with activity visibility and local permission boundaries instead of unrestricted cloud-side control.</p></section>"""
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta name="theme-color" content="#05070d" />
-<meta name="description" content="Lucas connects any MCP-compatible AI to any computer with secure, token-free execution." />
-<title>Lucas — Any AI. Any Computer.</title>
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+<meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+<meta name="description" content="Lucas MCP securely connects ChatGPT, Claude, Gemini and other MCP-compatible AI assistants to your computer for files, browser, terminal and desktop automation without extra execution tokens." />
+<link rel="canonical" href="https://lucasmcp.com/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Lucas MCP" />
+<meta property="og:title" content="Lucas MCP — Connect Any AI to Your Computer" />
+<meta property="og:description" content="Secure MCP computer connector for ChatGPT, Claude, Gemini and other AI assistants. Control files, browser, terminal and desktop with local permissions." />
+<meta property="og:url" content="https://lucasmcp.com/" />
+<meta property="og:image" content="https://lucasmcp.com/assets/lucas-logo-square.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Lucas MCP — Connect Any AI to Your Computer" />
+<meta name="twitter:description" content="Secure MCP computer connector for ChatGPT, Claude, Gemini and other AI assistants." />
+<meta name="twitter:image" content="https://lucasmcp.com/assets/lucas-logo-square.png" />
+<script type="application/ld+json">{{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lucas MCP","alternateName":"Lucas","url":"https://lucasmcp.com/","applicationCategory":"DeveloperApplication","operatingSystem":"Windows; macOS; Linux","description":"Lucas MCP securely connects MCP-compatible AI assistants such as ChatGPT, Claude and Gemini to computers for files, browser, terminal and desktop automation with local permission controls.","image":"https://lucasmcp.com/assets/lucas-logo-square.png","offers":{{"@type":"Offer","price":"0","priceCurrency":"USD"}}}}</script>
+<title>Lucas MCP — Connect Any AI to Your Computer</title>
 <style>
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth;background:#05070d}}body{{margin:0;background:#05070d}}button{{font:inherit}}
 {landing_css}
@@ -88,7 +103,7 @@ def _landing_html() -> str:
 </head>
 <body>{landing}<script>
 if((navigator.language||'en').toLowerCase().startsWith('zh')){{document.documentElement.lang='zh-CN';const Z={{'Capabilities':'功能','Security':'安全','How it works':'工作原理','Sign in':'登录','Dashboard':'控制台','Connect your computer':'连接电脑','See how it works ↓':'查看工作原理 ↓','Model agnostic':'不限模型','Cross-platform':'跨平台','Token-free execution':'无额外执行 Token','WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正执行工作。','Terminal & Code':'终端与代码','Files & Projects':'文件与项目','Browser':'浏览器','Computer Use':'电脑操作','Remote Access':'远程访问','A DIFFERENT ARCHITECTURE':'不同的架构','Token-free':'无额外 Token','execution.':'执行。','CONTROL WITHOUT COMPROMISE':'安全控制，不做妥协','Your computer.':'你的电脑。','Your boundaries.':'你的边界。','Project-scoped access':'项目范围访问','Local permission control':'本地权限控制','OAuth-secured MCP':'OAuth 安全 MCP','Activity visibility':'操作记录可见','THREE STEPS':'三个步骤','From AI to action.':'从 AI 到实际执行。','Connect a computer':'连接电脑','Add Lucas MCP':'添加 Lucas MCP','Start working':'开始工作','THE BRIDGE IS READY':'连接已经准备好','Any AI.':'任何 AI。','Any computer.':'任何电脑。','Get started with Lucas':'开始使用 Lucas'}};const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const a=[];while(w.nextNode())a.push(w.currentNode);for(const n of a){{const t=n.nodeValue.trim();if(Z[t])n.nodeValue=n.nodeValue.replace(t,Z[t])}}}}
-</script></body>
+</script>{seo_copy}</body>
 </html>"""
 
 
@@ -103,6 +118,7 @@ def _dashboard_html() -> str:
     section_start = html.index('<section id="landing" class="landing">')
     section_end = html.index('\n<div id="auth"', section_start)
     html = html[:section_start] + html[section_end + 1:]
+    html = html.replace('<head>', '<head>\n<meta name="robots" content="noindex,nofollow,noarchive" />', 1)
     return html
 
 
@@ -117,7 +133,7 @@ async def home(request: Request):
 
 
 async def dashboard(_: Request):
-    return HTMLResponse(_dashboard_html())
+    return HTMLResponse(_dashboard_html(), headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})
 
 
 async def admin_page(request: Request):
@@ -127,7 +143,37 @@ async def admin_page(request: Request):
         return RedirectResponse("/dashboard", status_code=302)
     if user.role not in {"admin", "super_admin"}:
         return RedirectResponse("/dashboard", status_code=302)
-    return HTMLResponse(_dashboard_html())
+    return HTMLResponse(_dashboard_html(), headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})
+
+
+async def robots_txt(_: Request):
+    body = """User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /nodes
+Disallow: /ai-connections
+Disallow: /logs
+Disallow: /account
+Disallow: /admin
+Disallow: /api/
+Disallow: /oauth/
+
+Sitemap: https://lucasmcp.com/sitemap.xml
+"""
+    return PlainTextResponse(body, media_type="text/plain")
+
+
+async def sitemap_xml(_: Request):
+    body = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://lucasmcp.com/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>
+"""
+    return Response(body, media_type="application/xml")
 
 
 async def download_lucas_node(_: Request):
@@ -328,6 +374,8 @@ async def brand_asset(request: Request):
 
 
 routes = [
+    Route("/robots.txt", robots_txt, methods=["GET"]),
+    Route("/sitemap.xml", sitemap_xml, methods=["GET"]),
     Route("/assets/{name:str}", brand_asset, methods=["GET"]),
     Route("/", home, methods=["GET"]),
     Route("/dashboard", dashboard, methods=["GET"]),
