@@ -19,7 +19,11 @@ jobs:
       - name: Build exact uploaded PNG
         shell: bash
         run: |
+          wc -c scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
           cat scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3 | base64 -d > src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+          stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+          sha256sum src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+          file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
           test "$(stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png)" = "26714"
           echo "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3c6ce733a2bfeef  src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png" | sha256sum -c -
           file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png | grep -q 'PNG image data, 400 x 157'
@@ -56,4 +60,4 @@ jobs:
           git add -A
           git commit -m 'Use exact uploaded white Lucas logo PNG directly'
           git push origin main
-# all exact image chunks are now present
+# diagnostics rerun
