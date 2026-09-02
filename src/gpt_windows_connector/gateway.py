@@ -629,7 +629,16 @@ async def node_websocket(websocket: WebSocket):
             elif message.get("type") == "response":
                 registry.resolve(node_id, message)
             elif message.get("type") == "access.sync":
-                _, removed = bindings.reconcile_node(node_id, [str(v) for v in message.get("authorized_user_ids") or []])
+                added, removed = bindings.reconcile_node(node_id, [str(v) for v in message.get("authorized_user_ids") or []])
+                for user_id in added:
+                    try:
+                        user = auth.get_user(user_id)
+                        visible = await registry.list(user)
+                        node_payload = next((item for item in visible if item.get("node_id") == node_id), None)
+                        if node_payload:
+                            await dashboard_events.publish(user_id, "node.upsert", {"node": node_payload})
+                    except Exception:
+                        log.exception("Could not publish approved node for user=%s node=%s", user_id, node_id)
                 for user_id in removed:
                     current = registry.control_locks.get(node_id)
                     if current and current.owner_user_id == user_id:

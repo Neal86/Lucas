@@ -150,8 +150,48 @@ class LocalAccessStore:
             "last_access": float(previous.get("last_access") or 0),
         }
         users[user_id] = record
+        pending = data.setdefault("pending", {})
+        if isinstance(pending, dict):
+            pending.pop(user_id, None)
         self.save(data)
         return {"user_id": user_id, **record}
+
+    def list_pending(self) -> list[dict[str, Any]]:
+        pending = self.load().get("pending", {})
+        if not isinstance(pending, dict):
+            return []
+        out: list[dict[str, Any]] = []
+        for user_id, record in pending.items():
+            if not isinstance(record, dict):
+                continue
+            out.append({"user_id": str(user_id), **record, "_pending": True})
+        return sorted(out, key=lambda item: float(item.get("requested_at") or 0), reverse=True)
+
+    def add_pending(self, actor: dict[str, Any]) -> dict[str, Any]:
+        user_id = str(actor.get("user_id") or actor.get("id") or "").strip()
+        if not user_id:
+            raise ValueError("user_id is required")
+        data = self.load()
+        pending = data.setdefault("pending", {})
+        now = time.time()
+        previous = pending.get(user_id) if isinstance(pending.get(user_id), dict) else {}
+        record = {
+            "email": str(actor.get("email") or previous.get("email") or ""),
+            "name": str(actor.get("name") or previous.get("name") or ""),
+            "requested_at": float(previous.get("requested_at") or now),
+            "updated_at": now,
+        }
+        pending[user_id] = record
+        self.save(data)
+        return {"user_id": user_id, **record, "_pending": True}
+
+    def remove_pending(self, user_id: str) -> bool:
+        data = self.load()
+        pending = data.setdefault("pending", {})
+        removed = pending.pop(str(user_id), None) is not None
+        if removed:
+            self.save(data)
+        return removed
 
     def remove(self, user_id: str) -> bool:
         data = self.load()

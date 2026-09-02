@@ -57,6 +57,10 @@ def _ensure_dashboard_metadata_schema(db: sqlite3.Connection) -> None:
         user_id TEXT NOT NULL, client_id TEXT NOT NULL, display_name TEXT, note TEXT, updated_at REAL NOT NULL,
         PRIMARY KEY(user_id,client_id)
     );
+    CREATE TABLE IF NOT EXISTS dashboard_pending_node_access(
+        user_id TEXT NOT NULL, node_id TEXT NOT NULL, node_name TEXT, requested_at REAL NOT NULL, updated_at REAL NOT NULL,
+        PRIMARY KEY(user_id,node_id)
+    );
     """)
 
 
@@ -157,8 +161,20 @@ async def api_nodes(request: Request):
         _ensure_dashboard_metadata_schema(db)
         rows = db.execute("SELECT node_id,display_name FROM dashboard_node_metadata WHERE user_id=?", (user.id,)).fetchall()
     aliases = {r["node_id"]: r["display_name"] for r in rows if r["display_name"]}
+    authorized_ids = {str(node.get("node_id")) for node in nodes}
+    with _db() as db:
+        _ensure_dashboard_metadata_schema(db)
+        for node_id in authorized_ids:
+            db.execute("DELETE FROM dashboard_pending_node_access WHERE user_id=? AND node_id=?", (user.id,node_id))
+        pending_rows = db.execute("SELECT node_id,node_name,requested_at,updated_at FROM dashboard_pending_node_access WHERE user_id=? ORDER BY updated_at DESC", (user.id,)).fetchall()
     for node in nodes:
         node["display_name"] = aliases.get(node["node_id"]) or node.get("name") or node["node_id"]
+    for row in pending_rows:
+        node_id=str(row["node_id"])
+        if node_id in authorized_ids: continue
+        live=gateway.registry.nodes.get(node_id)
+        name=str(row["node_name"] or (live.name if live else node_id))
+        nodes.append({"node_id":node_id,"name":name,"display_name":aliases.get(node_id) or name,"pending":True,"online":bool(live),"preset":"request_approval","allowed_roots":[],"last_seen":live.last_seen if live else row["updated_at"],"requested_at":row["requested_at"]})
     return JSONResponse({"nodes": nodes})
 
 
@@ -197,7 +213,13 @@ async def api_request_node_access(request: Request):
         result = await gateway.registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=gateway._actor(user), timeout=180.0)
         if isinstance(result, dict) and result.get("authorized"):
             gateway.bindings.upsert(user.id, node_id)
-        gateway.auth.audit(user.id, "node.access_request", node_id, {"authorized": bool(isinstance(result, dict) and result.get("authorized"))})
+            with _db() as db:
+                _ensure_dashboard_metadata_schema(db); db.execute("DELETE FROM dashboard_pending_node_access WHERE user_id=? AND node_id=?", (user.id,node_id))
+        elif isinstance(result, dict) and result.get("pending"):
+            live=gateway.registry.nodes.get(node_id); node_name=live.name if live else node_id; now=time.time()
+            with _db() as db:
+                _ensure_dashboard_metadata_schema(db); db.execute("INSERT INTO dashboard_pending_node_access(user_id,node_id,node_name,requested_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,node_id) DO UPDATE SET node_name=excluded.node_name,updated_at=excluded.updated_at", (user.id,node_id,node_name,float(result.get("requested_at") or now),now))
+        gateway.auth.audit(user.id, "node.access_request", node_id, {"authorized": bool(isinstance(result, dict) and result.get("authorized")), "pending": bool(isinstance(result, dict) and result.get("pending"))})
         return JSONResponse(result if isinstance(result, dict) else {"authorized": False})
     except (RuntimeError, PermissionError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

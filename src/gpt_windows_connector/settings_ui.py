@@ -39,6 +39,7 @@ from .settings_constants import (
     APPROVAL_DEFAULTS,
     PRESETS,
     PRESET_DESCRIPTIONS,
+    PERMISSION_ROWS,
 )
 
 def detect_security_preset(approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool, allowed_domains: list[str] | tuple[str, ...] | None = None) -> str:
@@ -94,6 +95,9 @@ def _save_config(config: dict[str, Any]) -> None:
 
 def _load_last_page() -> str:
     allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "规则", "任务记录", "日志", "系统访问"}
+    requested = str(os.environ.get("LUCAS_SETTINGS_PAGE") or "").strip()
+    if requested in allowed:
+        return requested
     try:
         data = json.loads(UI_STATE_FILE.read_text(encoding="utf-8"))
         page = str(data.get("last_page") or "") if isinstance(data, dict) else ""
@@ -422,7 +426,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e"); tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
     row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
     section(body,"审批策略"); c=card(body)
-    prs=[("system_info","系统信息读取","读取进程、窗口、系统状态及项目只读信息。"),("shell","普通 PowerShell / 命令行","运行不属于高风险分类的普通命令。"),("file_write","文件写入与修改","创建、编辑、移动或复制文件。"),("file_delete","文件删除","删除已授权目录中的文件或文件夹。"),("process_control","进程启动 / 停止","启动程序、终止 Lucas 管理的进程或控制进程生命周期。"),("service_control","Windows 服务启动 / 停止","启动、停止、重启或修改 Windows 服务。"),("registry_system","注册表与系统配置","修改注册表、系统配置、电源、账户及受保护系统设置。"),("software_install","安装 / 卸载软件","安装包管理器、MSI、winget、Chocolatey 或卸载软件。"),("desktop_control","电脑操控","鼠标、键盘、窗口激活、输入、点击、滚动和 UI 自动化。"),("screenshots","屏幕截图","读取当前屏幕内容用于 Computer Use。"),("clipboard","剪贴板","读取或写入 Windows 剪贴板。"),("browser_control","浏览器操控","打开页面、点击、输入、选择和浏览器自动化。"),("browser_transfer","浏览器上传 / 下载","上传本地文件或下载文件到允许目录。"),("git_write","Git 本地修改","add、commit、切换/创建分支等本地仓库写操作。"),("git_push","Git Push / 远程写入","向远端仓库推送代码或其他远程写操作。"),("high_risk","其他高风险系统修改","磁盘、账户、安全软件、关机重启等高风险操作。")]
+    prs=PERMISSION_ROWS
     for i,(k,h,d) in enumerate(prs):
         row(c,h,d,lambda p,k=k: decision_control(p,approval_vars[k]));
         if i<len(prs)-1: divider(c)
@@ -447,12 +451,13 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     def refresh_users(select_id=None):
         nonlocal user_records
-        user_records=access_store.list_users(); user_list.delete(0,"end")
+        user_records=access_store.list_pending()+access_store.list_users(); user_list.delete(0,"end")
         target=None
         for idx,record in enumerate(user_records):
             label=str(record.get("name") or record.get("email") or record.get("user_id") or "未知用户")
             preset_value=id_to_preset.get(normalize_preset(str(record.get("preset") or ("full_access" if record.get("permission_level")=="admin" else "request_approval"))),"请求批准（Recommended）")
-            user_list.insert("end",f"{label}   [{preset_value}]")
+            status = "待批准" if record.get("_pending") else preset_value
+            user_list.insert("end",f"{label}   [{status}]")
             if select_id and str(record.get("user_id"))==str(select_id): target=idx
         if user_records:
             index=target if target is not None else 0; user_list.selection_clear(0,"end"); user_list.selection_set(index); user_list.activate(index); load_user()
@@ -469,7 +474,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         for idx,path in enumerate(roots):
             try: resolved=str(Path(path).expanduser().resolve())
             except Exception: resolved=path
-            if resolved in granted: user_roots.selection_set(idx)
+            if record.get("_pending") or resolved in granted: user_roots.selection_set(idx)
+        if record.get("_pending"):
+            user_note.set("待批准申请：选择快捷权限和允许文件夹后点击“保存权限”即批准；点击“撤销访问”即拒绝。")
     user_list.bind("<<ListboxSelect>>",load_user)
 
     def save_user_access():
@@ -482,13 +489,17 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         preset=preset_to_id.get(user_preset.get(),"request_approval")
         existing_security=record.get("security") if isinstance(record.get("security"),dict) else None
         security=existing_security if preset=="custom" and existing_security else preset_security(preset)
+        was_pending=bool(record.get("_pending"))
         access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},preset,selected,security=security,enabled=True)
-        user_note.set("已保存。快捷权限和文件夹会在该用户下一次操作时立即生效。"); refresh_users(uid)
+        user_note.set("申请已批准。" if was_pending else "已保存。快捷权限和文件夹会在该用户下一次操作时立即生效。"); refresh_users(uid)
 
     def revoke_user_access():
         uid=selected_user_id["value"]
         if not uid: return
         record=next((r for r in user_records if str(r.get("user_id"))==uid),None); label=str((record or {}).get("name") or (record or {}).get("email") or uid)
+        if record and record.get("_pending"):
+            if not messagebox.askyesno("Lucas",f"拒绝 {label} 的访问申请？"): return
+            access_store.remove_pending(uid); user_note.set("已拒绝访问申请。"); refresh_users(); return
         if not messagebox.askyesno("Lucas",f"撤销 {label} 对这台电脑的访问权限？\n\n撤销后，该用户必须重新在本机获得批准。"): return
         access_store.remove(uid); user_note.set("已撤销访问。"); refresh_users()
     def edit_user_details():
@@ -530,10 +541,18 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     acts=tk.Frame(lw,bg=C["card"]); acts.pack(side="left",fill="y",padx=(10,0))
     def add_root():
         p=filedialog.askdirectory(title="选择 Lucas 可以访问的文件夹")
-        if p and p not in roots_list.get(0,"end"): roots_list.insert("end",p)
+        if p and p not in roots_list.get(0,"end"):
+            roots_list.insert("end",p)
+            if p not in roots: roots.append(p)
+            if p not in user_roots.get(0,"end"): user_roots.insert("end",p)
     def remove_root():
         sel=roots_list.curselection()
-        if sel: roots_list.delete(sel[0])
+        if sel:
+            value=str(roots_list.get(sel[0])); roots_list.delete(sel[0])
+            roots[:] = [r for r in roots if str(r) != value]
+            values=list(user_roots.get(0,"end"))
+            if value in values: user_roots.delete(values.index(value))
+            refresh_users(selected_user_id["value"] or None)
     button(acts,"添加文件夹",add_root,primary=True).pack(fill="x",pady=(0,8)); button(acts,"移除",remove_root,danger=True).pack(fill="x"); c=card(body); row(c,"硬边界","不允许通过 shell、浏览器上传/下载、进程启动或路径参数绕过 Allowed Folders。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
     wrap,body=scroll_page(); pages["网络"]=wrap

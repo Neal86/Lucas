@@ -248,7 +248,7 @@ def _grants_full_access(access: dict[str, object]) -> bool:
     )
 
 
-from .node_approval import prompt_access_request as _prompt_access_request
+from .node_approval import notify_access_request as _notify_access_request
 
 
 async def _serve_connection(
@@ -327,25 +327,10 @@ async def _serve_connection(
                 log.warning("Invalid connection code for access request user=%s", user_id)
                 return {"authorized": False, "error": "invalid connection code"}
             access_attempts.pop(user_id, None)
-            decision = await asyncio.to_thread(_prompt_access_request, actor, node_roots)
-            choice = str(decision.get("decision") or "deny")
-            roots = clamp_roots([str(item) for item in decision.get("allowed_roots") or []], node_roots)
-            preset = normalize_preset(str(decision.get("preset") or "request_approval"))
-            security = preset_security(preset)
-            if choice not in {"once", "always"} or not roots:
-                log.info("Local access denied for user %s", user_id)
-                return {"authorized": False, "decision": "deny"}
-            grant = {"user_id": user_id, "email": str(actor.get("email") or ""), "name": str(actor.get("name") or ""), "preset": preset, "security": security, "allowed_roots": roots}
-            if choice == "once":
-                grant["grant_id"] = uuid.uuid4().hex
-                grant["expires_at"] = time.time() + 3600
-            if choice == "always":
-                saved = local_access.upsert(actor, preset, roots, security=security)
-                grant.update(saved)
-            else:
-                session_grants[user_id] = dict(grant)
-            log.info("Local access approved for user %s preset=%s mode=%s", user_id, preset, choice)
-            return {"authorized": True, "decision": choice, **grant}
+            pending = local_access.add_pending(actor)
+            asyncio.create_task(asyncio.to_thread(_notify_access_request, actor))
+            log.info("Local access request pending approval for user %s", user_id)
+            return {"authorized": False, "pending": True, "decision": "pending", "user_id": user_id, "requested_at": pending.get("requested_at")}
 
         send_lock = asyncio.Lock()
         request_tasks: set[asyncio.Task[None]] = set()
