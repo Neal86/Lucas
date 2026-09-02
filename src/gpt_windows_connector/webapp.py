@@ -318,7 +318,7 @@ async def api_logs(request: Request):
 
 async def brand_asset(request: Request):
     name = str(request.path_params.get("name") or "")
-    if name not in {"lucas-logo-horizontal.png", "lucas-logo-square.png"}:
+    if name not in {"lucas-logo-horizontal.png", "lucas-logo-horizontal-white.png", "lucas-logo-square.png"}:
         return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(
         BRAND_ASSET_DIR / name,
