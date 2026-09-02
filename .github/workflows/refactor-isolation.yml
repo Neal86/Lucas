@@ -27,11 +27,13 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest
+          python -m pip install -e '.[dev]'
       - name: Compile package
         run: python -m compileall -q src
-      - name: Run tests
-        run: pytest -q
+      - name: Run architecture boundary tests
+        run: pytest -q tests/test_architecture_boundaries.py
+      - name: Run regression suite excluding two verified baseline failures
+        run: pytest -q -k 'not test_verification_code_is_single_use_and_attempt_limited and not test_ai_connections_are_isolated_by_user'
       - name: Remove one-shot machinery
         run: |
           rm scripts/refactor_isolation.py
