@@ -1,0 +1,100 @@
+name: Apply Lucas SEO
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-seo.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch SEO
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/gpt_windows_connector/webapp.py')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace(
+              'from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse\n',
+              'from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response\n',
+              1,
+          )
+
+          old_head = '''<meta name="theme-color" content="#05070d" />\n<meta name="description" content="Lucas connects any MCP-compatible AI to any computer with secure, token-free execution." />\n<title>Lucas — Any AI. Any Computer.</title>'''
+          new_head = '''<meta name="theme-color" content="#05070d" />\n<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />\n<meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />\n<meta name="description" content="Lucas MCP securely connects ChatGPT, Claude, Gemini and other MCP-compatible AI assistants to your computer for files, browser, terminal and desktop automation without extra execution tokens." />\n<link rel="canonical" href="https://lucasmcp.com/" />\n<meta property="og:type" content="website" />\n<meta property="og:site_name" content="Lucas MCP" />\n<meta property="og:title" content="Lucas MCP — Connect Any AI to Your Computer" />\n<meta property="og:description" content="Secure MCP computer connector for ChatGPT, Claude, Gemini and other AI assistants. Control files, browser, terminal and desktop with local permissions." />\n<meta property="og:url" content="https://lucasmcp.com/" />\n<meta property="og:image" content="https://lucasmcp.com/assets/lucas-logo-square.png" />\n<meta name="twitter:card" content="summary_large_image" />\n<meta name="twitter:title" content="Lucas MCP — Connect Any AI to Your Computer" />\n<meta name="twitter:description" content="Secure MCP computer connector for ChatGPT, Claude, Gemini and other AI assistants." />\n<meta name="twitter:image" content="https://lucasmcp.com/assets/lucas-logo-square.png" />\n<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lucas MCP","alternateName":"Lucas","url":"https://lucasmcp.com/","applicationCategory":"DeveloperApplication","operatingSystem":"Windows; macOS; Linux","description":"Lucas MCP securely connects MCP-compatible AI assistants such as ChatGPT, Claude and Gemini to computers for files, browser, terminal and desktop automation with local permission controls.","image":"https://lucasmcp.com/assets/lucas-logo-square.png","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>\n<title>Lucas MCP — Connect Any AI to Your Computer</title>'''
+          if old_head not in s:
+              raise SystemExit('landing SEO head marker not found')
+          s = s.replace(old_head, new_head, 1)
+
+          old_return = '''    landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\\'/dashboard\\'"')\n    return f"""<!doctype html>'''
+          new_return = '''    landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\\'/dashboard\\'"')\n    seo_copy = """<section aria-label="About Lucas MCP" style="max-width:980px;margin:0 auto;padding:40px 28px 90px;color:#9aa4bd;font:15px/1.8 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif"><h2 style="color:#f5f7ff;font-size:28px;margin:0 0 12px">Lucas MCP computer connector</h2><p>Lucas MCP is a secure bridge between MCP-compatible AI assistants and your computer. Connect ChatGPT, Claude, Gemini and other AI tools to work with files, projects, browsers, terminals and desktop applications while local permissions remain under your control.</p><p>Lucas is designed for model-agnostic computer automation and remote access, with activity visibility and local permission boundaries instead of unrestricted cloud-side control.</p></section>"""\n    return f"""<!doctype html>'''
+          if old_return not in s:
+              raise SystemExit('landing return marker not found')
+          s = s.replace(old_return, new_return, 1)
+          s = s.replace('</script></body>\n</html>"""', '</script>{seo_copy}</body>\n</html>"""', 1)
+
+          old_dash_return = '''    html = html[:section_start] + html[section_end + 1:]\n    return html'''
+          new_dash_return = '''    html = html[:section_start] + html[section_end + 1:]\n    html = html.replace('<head>', '<head>\\n<meta name="robots" content="noindex,nofollow,noarchive" />', 1)\n    return html'''
+          if old_dash_return not in s:
+              raise SystemExit('dashboard marker not found')
+          s = s.replace(old_dash_return, new_dash_return, 1)
+
+          old_dashboard = '''async def dashboard(_: Request):\n    return HTMLResponse(_dashboard_html())'''
+          new_dashboard = '''async def dashboard(_: Request):\n    return HTMLResponse(_dashboard_html(), headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})'''
+          if old_dashboard not in s:
+              raise SystemExit('dashboard response marker not found')
+          s = s.replace(old_dashboard, new_dashboard, 1)
+
+          old_admin = '''    return HTMLResponse(_dashboard_html())\n\n\nasync def download_lucas_node'''
+          new_admin = '''    return HTMLResponse(_dashboard_html(), headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})\n\n\nasync def robots_txt(_: Request):\n    body = """User-agent: *\nAllow: /\nDisallow: /dashboard\nDisallow: /nodes\nDisallow: /ai-connections\nDisallow: /logs\nDisallow: /account\nDisallow: /admin\nDisallow: /api/\nDisallow: /oauth/\n\nSitemap: https://lucasmcp.com/sitemap.xml\n"""\n    return PlainTextResponse(body, media_type="text/plain")\n\n\nasync def sitemap_xml(_: Request):\n    body = """<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url>\n    <loc>https://lucasmcp.com/</loc>\n    <changefreq>weekly</changefreq>\n    <priority>1.0</priority>\n  </url>\n</urlset>\n"""\n    return Response(body, media_type="application/xml")\n\n\nasync def download_lucas_node'''
+          if old_admin not in s:
+              raise SystemExit('admin marker not found')
+          s = s.replace(old_admin, new_admin, 1)
+
+          route_marker = '''routes = [\n    Route("/assets/{name:str}", brand_asset, methods=["GET"]),'''
+          route_new = '''routes = [\n    Route("/robots.txt", robots_txt, methods=["GET"]),\n    Route("/sitemap.xml", sitemap_xml, methods=["GET"]),\n    Route("/assets/{name:str}", brand_asset, methods=["GET"]),'''
+          if route_marker not in s:
+              raise SystemExit('routes marker not found')
+          s = s.replace(route_marker, route_new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('README.md')
+          r = p.read_text(encoding='utf-8')
+          website = '[Lucas MCP Website](https://lucasmcp.com/)'
+          if website not in r:
+              insert = '# Lucas\n\n**Website:** [https://lucasmcp.com/](https://lucasmcp.com/)\n\n'
+              if r.startswith('# '):
+                  first_end = r.find('\n')
+                  r = r[:first_end+1] + '\n**Website:** [https://lucasmcp.com/](https://lucasmcp.com/)\n' + r[first_end+1:]
+              else:
+                  r = insert + r
+              p.write_text(r, encoding='utf-8')
+
+          test = Path('tests/test_seo.py')
+          test.write_text('''from gpt_windows_connector import webapp\n\n\ndef test_public_home_has_search_metadata():\n    html = webapp._landing_html()\n    assert "Lucas MCP — Connect Any AI to Your Computer" in html\n    assert 'rel="canonical" href="https://lucasmcp.com/"' in html\n    assert 'property="og:title"' in html\n    assert 'name="twitter:card"' in html\n    assert 'application/ld+json' in html\n    assert 'name="robots" content="index,follow' in html\n    assert 'Lucas MCP computer connector' in html\n\n\ndef test_dashboard_is_noindex():\n    html = webapp._dashboard_html()\n    assert 'name="robots" content="noindex,nofollow,noarchive"' in html\n\n\ndef test_robots_and_sitemap_routes_are_registered():\n    paths = {getattr(route, "path", None) for route in webapp.routes}\n    assert "/robots.txt" in paths\n    assert "/sitemap.xml" in paths\n''', encoding='utf-8')
+          PY
+      - name: Validate
+        run: |
+          python -m pip install -q -e ".[dev]"
+          python -m compileall -q src
+          pytest -q tests/test_seo.py tests/test_architecture_boundaries.py
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/gpt_windows_connector/webapp.py README.md tests/test_seo.py
+          git commit -m 'Add search engine SEO for Lucas MCP'
+          git push origin HEAD:main
