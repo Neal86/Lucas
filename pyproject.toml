@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gpt-windows-connector"
-version = "1.7.25"
+version = "1.7.26"
 description = "Multi-user remote Windows execution MCP with VPS web dashboard for ChatGPT, Claude, Gemini and other MCP clients"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,7 +24,6 @@ dependencies = [
   "pyautogui>=0.9.54; platform_system == 'Windows'",
   "pyperclip>=1.9; platform_system == 'Windows'",
   "pywinauto>=0.6.9; platform_system == 'Windows'",
-  "pywin32>=311; platform_system == 'Windows'",
   "pystray>=0.19.5,<1; platform_system == 'Windows'",
   "Pillow>=10,<12; platform_system == 'Windows'",
 ]
