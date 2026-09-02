@@ -20,6 +20,7 @@ from .access_control import LocalAccessStore, clamp_roots, normalize_preset, pre
 from .i18n import localize_tk_tree, system_language, tr
 from .task_runs import TaskRunStore
 from .update_ui import InAppUpdater
+from .app_icon import make_square_icon, set_windows_app_id
 
 from .settings_constants import (
     SETTINGS_EN,
@@ -155,6 +156,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         "green":"#107C10","orange":"#C45F00","red":"#C42B1C","white":"#FFFFFF",
     }
     FONT = "Segoe UI"
+    set_windows_app_id()
     root = tk.Tk()
     root.title(T("Lucas 设置", "Lucas Settings"))
     width,height=1180,780
@@ -165,9 +167,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     root.configure(bg=C["window"])
     window_icon_image=None
     try:
-        icon=Image.open(Path(__file__).with_name("assets")/"lucas-logo-square.png").convert("RGBA")
-        icon.thumbnail((64,64),Image.Resampling.LANCZOS)
-        window_icon_image=ImageTk.PhotoImage(icon)
+        # Use the same square white-tile Lucas branding as the tray icon.
+        # Explicit AppUserModelID above prevents Windows from showing pythonw.exe.
+        window_icon_image=ImageTk.PhotoImage(make_square_icon(size=64))
         root.iconphoto(True,window_icon_image)
     except Exception:
         pass

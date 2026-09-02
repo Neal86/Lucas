@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .i18n import tr
+from .app_icon import make_square_icon
 
 APP_NAME = "Lucas"
 TASK_NAME = "Lucas Node"
@@ -369,39 +370,7 @@ class LucasTray:
                 self._restart_attempts = 0
 
     def _make_icon(self, status: str) -> Any:
-        from PIL import Image, ImageDraw, ImageFont
-        # The Windows notification area is tiny and often dark. Use a solid white
-        # tile so the blue Lucas octopus stays recognizable on every taskbar theme.
-        image = Image.new("RGBA", (64, 64), (255, 255, 255, 255))
-        draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((1, 1, 62, 62), radius=11, fill=(255, 255, 255, 255), outline=(224, 228, 235, 255), width=1)
-        try:
-            asset = Path(__file__).with_name("assets") / "lucas-logo-square.png"
-            source = Image.open(asset).convert("RGBA")
-            source.thumbnail((50, 50), Image.Resampling.LANCZOS)
-            image.alpha_composite(source, ((64 - source.width) // 2, (64 - source.height) // 2))
-        except Exception:
-            # Branding must never be able to kill the background tray agent.
-            log.exception("Could not load Lucas tray logo; using built-in fallback")
-            draw = ImageDraw.Draw(image)
-            draw.rounded_rectangle((8, 8, 55, 55), radius=10, fill=(21, 94, 239, 255))
-            try:
-                font = ImageFont.truetype("arialbd.ttf", 30)
-            except Exception:
-                font = ImageFont.load_default()
-            box = draw.textbbox((0, 0), "L", font=font)
-            draw.text(((64-(box[2]-box[0]))/2, (64-(box[3]-box[1]))/2-2), "L", font=font, fill=(255,255,255,255))
-        palette = {
-            "Online": (33, 180, 92, 255),
-            "Connecting": (245, 166, 35, 255),
-            "Reconnecting": (245, 166, 35, 255),
-            "Disconnected": (120, 126, 137, 255),
-            "Offline": (120, 126, 137, 255),
-        }
-        draw = ImageDraw.Draw(image)
-        draw.ellipse((45, 45, 63, 63), fill=(255, 255, 255, 255))
-        draw.ellipse((49, 49, 60, 60), fill=palette.get(status, palette["Offline"]))
-        return image
+        return make_square_icon(status=status, size=64)
 
     def _refresh_icon(self, force: bool = False) -> None:
         icon = self._icon
