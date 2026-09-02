@@ -1,0 +1,58 @@
+name: Replace white Lucas logo direct
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/replace-white-logo-direct.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  replace-logo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Build exact uploaded PNG
+        shell: bash
+        run: |
+          cat scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3 | base64 -d > src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+          test "$(stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png)" = "26714"
+          echo "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3c6ce733a2bfeef  src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png" | sha256sum -c -
+          file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png | grep -q 'PNG image data, 400 x 157'
+      - name: Serve PNG file directly
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/gpt_windows_connector/server.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('import base64\n', '')
+          s = s.replace('from starlette.responses import FileResponse, JSONResponse, Response', 'from starlette.responses import FileResponse, JSONResponse')
+          s = s.replace('WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=source-b64-20260902"', 'WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"')
+          start = s.index('def _load_white_logo_bytes() -> bytes:')
+          end = s.index('\n\nasync def blue_logo_asset', start)
+          direct = '''async def white_logo_asset(request):\n    return FileResponse(\n        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",\n        media_type="image/png",\n        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},\n    )\n'''
+          s = s[:start] + direct + s[end:]
+          p.write_text(s, encoding='utf-8')
+      - name: Remove temporary transport files
+        shell: bash
+        run: |
+          rm -f scripts/.logo_upload_chunk0 scripts/.logo_upload_chunk1 scripts/.logo_upload_chunk2
+          rm -f scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
+          rm -f .github/workflows/replace-white-logo-direct.yml
+      - name: Validate server
+        shell: bash
+        run: |
+          python -m compileall -q src/gpt_windows_connector/server.py
+          ! grep -q 'lucas-logo-white.png.b64' src/gpt_windows_connector/server.py
+      - name: Commit exact PNG and direct serving
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Use exact uploaded white Lucas logo PNG directly'
+          git push origin main
