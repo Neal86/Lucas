@@ -4,11 +4,18 @@ param(
   [string]$AllowedRoot = "$env:USERPROFILE",
   [ValidateSet("read", "operate", "admin")]
   [string]$Permission = "operate",
-  [string]$InstallDir = "$env:LOCALAPPDATA\Lucas"
+  [string]$InstallDir = "$env:LOCALAPPDATA\Lucas",
+  [switch]$UpdateFromApp,
+  [int]$KeepProcessId = 0
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+function Write-LucasProgress {
+  param([int]$Percent, [string]$Stage)
+  if ($UpdateFromApp) { Write-Output ("LUCAS_PROGRESS|{0}|{1}" -f $Percent, $Stage) }
+}
 
 function Test-Python311 {
   param([string]$Command, [string[]]$Arguments)
@@ -105,6 +112,7 @@ if (Test-Path $ConfigFile) {
   }
 }
 
+Write-LucasProgress 5 "prepare"
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "          LUCAS WINDOWS NODE" -ForegroundColor Cyan
@@ -156,6 +164,7 @@ if (-not $Python) {
 $PythonCommand = [string]$Python.Command
 $PythonArgs = @($Python.Arguments)
 Write-Host "[Lucas] Python runtime ready." -ForegroundColor Green
+Write-LucasProgress 20 "runtime"
 
 if (Test-Path $VenvPython) {
   $VenvOk = $false
@@ -182,7 +191,7 @@ if (-not (Test-Path $VenvPython)) {
 # directly so upgrades cannot leave a ghost Node behind.
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $CommandLine = [string]$_.CommandLine
-  $CommandLine -and (
+  ($_.ProcessId -ne $KeepProcessId) -and $CommandLine -and (
     $CommandLine -match 'gpt_windows_connector\.tray' -or
     $CommandLine -match 'gpt_windows_connector\.node' -or
     $CommandLine -match 'lucas-node\.exe' -or
@@ -196,13 +205,20 @@ Remove-Item -Force -ErrorAction SilentlyContinue $TrayPidFile
 Remove-Item -Force -ErrorAction SilentlyContinue $StatusFile
 
 Write-Host "[Lucas] Installing the latest Lucas Node..." -ForegroundColor Yellow
-& $VenvPython -m pip install --disable-pip-version-check --upgrade pip | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Failed to update pip." }
+Write-LucasProgress 35 "install"
+if (-not $UpdateFromApp) {
+  & $VenvPython -m pip install --disable-pip-version-check --upgrade pip | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Failed to update pip." }
+}
 
 & $VenvPython -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('gpt_windows_connector') else 1)" 2>$null
 $PackageAlreadyInstalled = ($LASTEXITCODE -eq 0)
 $PackageUrl = "https://github.com/Neal86/Lucas/archive/refs/heads/main.zip"
-if ($PackageAlreadyInstalled) {
+if ($UpdateFromApp) {
+  # In-app updates replace only Lucas itself. Existing dependencies stay in place,
+  # preventing needless downloads and avoiding locked native dependency files.
+  & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-deps --no-cache-dir $PackageUrl
+} elseif ($PackageAlreadyInstalled) {
   & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-cache-dir $PackageUrl
 } else {
   & $VenvPython -m pip install --disable-pip-version-check --no-cache-dir $PackageUrl
@@ -212,6 +228,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
 $InstalledVersion = (& $VenvPython -c "import importlib.metadata; print(importlib.metadata.version('gpt-windows-connector'))").Trim()
 if ([string]::IsNullOrWhiteSpace($InstalledVersion)) { throw "Lucas Node installation verification failed." }
 Write-Host "[Lucas] Installed Lucas Node $InstalledVersion" -ForegroundColor Green
+Write-LucasProgress 75 "verify"
 
 $MachineGuid = ""
 try {
@@ -306,6 +323,7 @@ Write-Host "  Node:      $($Config.node_name)"
 Write-Host "  Gateway:   $($Config.gateway_ws_url)"
 Write-Host "  Permission:$($Config.permission_level)"
 Write-Host ""
+Write-LucasProgress 85 "startup"
 Write-Host "[Lucas] Installing background startup..." -ForegroundColor Green
 
 if (-not (Test-Path $VenvPythonw)) { throw "Lucas background launcher was not installed correctly." }
@@ -376,10 +394,15 @@ if (-not $TrayStarted) {
   Start-Sleep -Seconds 2
 }
 
-# Installation always finishes by opening the Lucas app (Settings). The tray and
-# node are already running in the background; Settings is the visible app surface.
-Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
-Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
+# Fresh installs open Settings. During an in-app update the existing Settings
+# window stays alive to show progress, then restarts itself when the user returns.
+if (-not $UpdateFromApp) {
+  Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
+  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
+} else {
+  Write-Host "[Lucas] App update finished; waiting for Settings to restart itself." -ForegroundColor Green
+}
+Write-LucasProgress 100 "complete"
 
 Write-Host ""
 Write-Host "[Lucas] Installed successfully." -ForegroundColor Green
