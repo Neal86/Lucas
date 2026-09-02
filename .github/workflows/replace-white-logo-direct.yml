@@ -19,11 +19,8 @@ jobs:
       - name: Build exact uploaded PNG
         shell: bash
         run: |
-          wc -c scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
-          cat scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3 | base64 -d > src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          sha256sum src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+          wc -c scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
+          cat scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3 | base64 -d > src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
           test "$(stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png)" = "26714"
           echo "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3c6ce733a2bfeef  src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png" | sha256sum -c -
           file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png | grep -q 'PNG image data, 400 x 157'
@@ -45,7 +42,7 @@ jobs:
         shell: bash
         run: |
           rm -f scripts/.logo_upload_chunk0 scripts/.logo_upload_chunk1 scripts/.logo_upload_chunk2
-          rm -f scripts/.logo2_0 scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
+          rm -f scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
           rm -f .github/workflows/replace-white-logo-direct.yml
       - name: Validate server
         shell: bash
@@ -56,8 +53,8 @@ jobs:
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+Neal86@users.noreply.github.com'
           git add -A
           git commit -m 'Use exact uploaded white Lucas logo PNG directly'
           git push origin main
-# diagnostics rerun
+# complete exact source present
