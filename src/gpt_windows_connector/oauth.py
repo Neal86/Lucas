@@ -125,8 +125,13 @@ class OAuthProvider:
         actual=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("="); return bool(verifier) and secrets.compare_digest(actual,challenge)
 
     def refresh(self,cid: str,uid: str,scope: str) -> str:
-        t=secrets.token_urlsafe(48)
-        with self.db() as db: db.execute("INSERT INTO oauth_refresh_tokens VALUES(?,?,?,?,?,NULL)",(self.h(t),cid,uid,scope,time.time()+7776000))
+        t=secrets.token_urlsafe(48); now=time.time()
+        with self.db() as db:
+            # A refresh token proves a client is authorized for this user. Keep
+            # the durable ownership index in sync here as well as in consent so
+            # every token creation path preserves dashboard/user isolation.
+            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(cid,uid,now))
+            db.execute("INSERT INTO oauth_refresh_tokens VALUES(?,?,?,?,?,NULL)",(self.h(t),cid,uid,scope,now+7776000))
         return t
 
     def tokens(self,u: User,cid: str,scope: str,want_refresh: bool):
