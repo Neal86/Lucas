@@ -1,0 +1,54 @@
+name: Fix Lucas sidebar logo exact asset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/fix_sidebar_logo_exact.py'
+      - '.github/workflows/fix-sidebar-logo-exact.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact sidebar logo fix
+        run: python scripts/fix_sidebar_logo_exact.py
+      - name: Verify source asset exists
+        run: test -f src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
+      - name: Compile package
+        run: python -m compileall -q src
+      - name: Verify no sidebar image filter
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          t=Path('src/gpt_windows_connector/web_assets.py').read_text(encoding='utf-8')
+          assert '<div class="logo"><img src="/assets/lucas-logo-horizontal-white.png" alt="Lucas" /></div>' in t
+          assert '.logo img{display:block;width:184px;height:auto;background:transparent;border-radius:0;padding:0;filter:none!important}' in t
+          w=Path('src/gpt_windows_connector/webapp.py').read_text(encoding='utf-8')
+          assert '"lucas-logo-horizontal-white.png"' in w
+          print('exact sidebar logo verified')
+          PY
+      - name: Remove one-shot files
+        run: |
+          rm -f scripts/fix_sidebar_logo_exact.py
+          rm -f scripts/sidebar_logo_exact.b64
+          rm -f .github/workflows/fix-sidebar-logo-exact.yml
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'Use exact white Lucas logo in dashboard sidebar'
+          git push origin HEAD:main
