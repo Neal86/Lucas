@@ -7,7 +7,6 @@ import re
 import secrets
 import socket
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -20,6 +19,7 @@ from typing import Any
 from .access_control import LocalAccessStore, clamp_roots, normalize_preset, preset_security
 from .i18n import localize_tk_tree, system_language, tr
 from .task_runs import TaskRunStore
+from .update_ui import InAppUpdater
 
 from .settings_constants import (
     SETTINGS_EN,
@@ -360,136 +360,15 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)
-    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); update_button=None; check_update_button=None; update_control=None
-    update_state={"frame":None,"active":False,"return_page":"常规","success":False,"target":""}
-    update_widgets={}
-    update_stage_labels={
-        "prepare":T("准备更新…","Preparing update…"),
-        "runtime":T("检查运行环境…","Checking runtime…"),
-        "install":T("下载并安装 Lucas…","Downloading and installing Lucas…"),
-        "verify":T("验证新版本…","Verifying the new version…"),
-        "startup":T("重新启动后台服务…","Restarting background services…"),
-        "complete":T("更新完成","Update complete"),
-    }
-    def _append_update_log(line):
-        widget=update_widgets.get("log")
-        if widget is None or not widget.winfo_exists(): return
-        widget.configure(state="normal"); widget.insert("end",line.rstrip()+"\n"); widget.configure(state="disabled"); widget.see("end")
-    def _set_update_progress(percent,stage):
-        progress=update_widgets.get("progress"); phase=update_widgets.get("phase")
-        if progress is not None: progress.set(max(0,min(100,int(percent))))
-        if phase is not None: phase.set(update_stage_labels.get(stage,stage))
-    def _set_nav_enabled(enabled):
-        for nav in nav_buttons.values():
-            try: nav.configure(state=("normal" if enabled else "disabled"))
-            except tk.TclError: pass
-    def _show_update_page(target_version=""):
-        if not update_state["active"]:
-            update_state["return_page"]=_load_last_page()
-        update_state["active"]=True; update_state["success"]=False; update_state["target"]=target_version or update_state.get("target") or ""
-        for p in pages.values(): p.pack_forget()
-        try: footer.pack_forget()
-        except Exception: pass
-        _set_nav_enabled(False)
-        title.set(T("正在更新 Lucas","Updating Lucas")); subtitle.set(T("更新过程中请保持 Lucas 打开。完成后点击返回即可回到原界面。","Keep Lucas open during the update. When it finishes, use Return to go back."))
-        frame=update_state.get("frame")
-        if frame is None or not frame.winfo_exists():
-            frame=tk.Frame(page_host,bg=C["window"]); update_state["frame"]=frame
-            card_frame=tk.Frame(frame,bg=C["card"],highlightthickness=1,highlightbackground=C["line"]); card_frame.pack(fill="both",expand=True,pady=(8,14))
-            top=tk.Frame(card_frame,bg=C["card"]); top.pack(fill="x",padx=24,pady=(22,10))
-            version_var=tk.StringVar(value=""); update_widgets["version"]=version_var
-            tk.Label(top,textvariable=version_var,font=(FONT,11,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
-            phase=tk.StringVar(value=update_stage_labels["prepare"]); update_widgets["phase"]=phase
-            tk.Label(top,textvariable=phase,font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",pady=(5,0))
-            progress=tk.IntVar(value=0); update_widgets["progress"]=progress
-            ttk.Progressbar(card_frame,maximum=100,variable=progress,mode="determinate").pack(fill="x",padx=24,pady=(4,14))
-            log=tk.Text(card_frame,height=20,font=("Consolas",9),bg="#111111",fg="#E6E6E6",insertbackground="#FFFFFF",relief="flat",bd=0,wrap="word",padx=10,pady=10,state="disabled"); log.pack(fill="both",expand=True,padx=24,pady=(0,14)); update_widgets["log"]=log
-            actions=tk.Frame(card_frame,bg=C["card"]); actions.pack(fill="x",padx=24,pady=(0,20))
-            return_btn=button(actions,T("返回","Return"),lambda: _leave_update_page(update_state.get("success",False)),primary=True); update_widgets["return_button"]=return_btn
-            retry_btn=button(actions,T("重试更新","Retry update"),run_update); update_widgets["retry_button"]=retry_btn
-        frame.pack(fill="both",expand=True)
-        update_widgets["version"].set((f"Lucas {current_version}  →  {target_version}" if target_version else f"Lucas {current_version}"))
-        log=update_widgets["log"]; log.configure(state="normal"); log.delete("1.0","end"); log.configure(state="disabled")
-        for key in ("return_button","retry_button"):
-            update_widgets[key].pack_forget()
-        _set_update_progress(3,"prepare")
-    def _leave_update_page(restart_after_update=False):
-        update_state["active"]=False; frame=update_state.get("frame")
-        if frame is not None and frame.winfo_exists(): frame.pack_forget()
-        _set_nav_enabled(True)
-        if restart_after_update:
-            page=update_state.get("return_page") or "常规"; _save_last_page(page)
-            env=os.environ.copy(); env["LUCAS_SETTINGS_PAGE"]=page
-            flags=getattr(subprocess,"CREATE_NO_WINDOW",0)
-            try: subprocess.Popen([sys.executable,"-m","gpt_windows_connector.node","--configure"],env=env,creationflags=flags)
-            finally: root.destroy()
-            return
-        footer.pack(fill="x",side="bottom"); show_page(update_state.get("return_page") or "常规")
-    def _finish_update(success,target_version,message=""):
-        update_state["success"]=bool(success); update_state["target"]=target_version or update_state.get("target") or ""
-        if success:
-            _set_update_progress(100,"complete"); update_widgets["version"].set(T(f"Lucas 已更新至 {target_version}",f"Lucas has been updated to {target_version}")); update_widgets["return_button"].pack(side="right")
-        else:
-            update_widgets["phase"].set(T("更新失败","Update failed")); update_widgets["retry_button"].pack(side="right"); update_widgets["return_button"].pack(side="right",padx=(0,8)); _append_update_log(message or T("更新失败，请重试。","Update failed. Please retry."))
-    def run_update():
-        _show_update_page(update_state.get("target") or "")
-        def worker():
-            target=_fetch_latest_version() or update_state.get("target") or T("最新版本","latest")
-            try:
-                root.after(0,lambda: update_widgets["version"].set(f"Lucas {current_version}  →  {target}"))
-                root.after(0,lambda: _set_update_progress(8,"prepare"))
-                script_path=Path(tempfile.gettempdir())/"Lucas-Node-update.ps1"
-                request=urllib.request.Request(f"{INSTALLER_URL}?t={int(time.time())}",headers={"Cache-Control":"no-cache","Pragma":"no-cache","User-Agent":"Lucas-Node-Updater"})
-                with urllib.request.urlopen(request,timeout=30) as response: script_path.write_bytes(response.read())
-                root.after(0,lambda: _set_update_progress(15,"runtime"))
-                flags=getattr(subprocess,"CREATE_NO_WINDOW",0)|getattr(subprocess,"CREATE_NEW_PROCESS_GROUP",0)
-                process=subprocess.Popen(["powershell.exe","-NoProfile","-ExecutionPolicy","Bypass","-File",str(script_path),"-UpdateFromApp","-KeepProcessId",str(os.getpid())],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,errors="replace",bufsize=1,creationflags=flags)
-                if process.stdout is not None:
-                    for raw in process.stdout:
-                        line=raw.rstrip("\r\n")
-                        if line.startswith("LUCAS_PROGRESS|"):
-                            parts=line.split("|",2)
-                            if len(parts)==3:
-                                try: percent=int(parts[1])
-                                except ValueError: percent=0
-                                root.after(0,lambda p=percent,s=parts[2]: _set_update_progress(p,s))
-                                continue
-                        root.after(0,lambda value=line: _append_update_log(value))
-                code=process.wait()
-                if code != 0: raise RuntimeError(f"PowerShell updater exited with code {code}")
-                root.after(0,lambda: _finish_update(True,target))
-            except Exception as exc:
-                root.after(0,lambda err=str(exc): _finish_update(False,target,err))
-        threading.Thread(target=worker,daemon=True).start()
-    def check_update_worker(manual=False):
-        def set_checking():
-            version_status.set(f"当前版本 {current_version} · 正在检查更新…")
-            if check_update_button is not None: check_update_button.configure(state="disabled")
-            if update_button is not None: update_button.configure(state="disabled")
-        try: root.after(0,set_checking)
-        except tk.TclError: return
-        latest=_fetch_latest_version()
-        def apply_result():
-            if check_update_button is not None: check_update_button.configure(state="normal")
-            if not latest:
-                version_status.set(f"当前版本 {current_version} · 无法检查更新")
-                if update_button is not None: update_button.configure(state="disabled")
-                return
-            if current_version != "dev" and _version_key(latest)>_version_key(current_version):
-                version_status.set(f"当前版本 {current_version} · 新版本 {latest} 可用"); update_state["target"]=latest
-                if update_button is not None: update_button.configure(state="normal")
-            else:
-                version_status.set(f"当前版本 {current_version} · 已是最新版本")
-                if update_button is not None: update_button.configure(state="disabled")
-        try: root.after(0,apply_result)
-        except tk.TclError: pass
-    def start_update_check():
-        threading.Thread(target=check_update_worker,args=(True,),daemon=True).start()
-    def build_update_control(p):
-        nonlocal update_button,check_update_button,update_control
-        update_control=tk.Frame(p,bg=C["card"]); tk.Label(update_control,textvariable=version_status,font=(FONT,9,"bold"),fg=C["muted"],bg=C["card"]).pack(side="left"); check_update_button=button(update_control,"检测更新",start_update_check); check_update_button.pack(side="left",padx=(12,0)); update_button=button(update_control,"更新 Node",run_update,primary=True); update_button.pack(side="left",padx=(8,0)); update_button.configure(state="disabled"); return update_control
-    row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",build_update_control)
-    threading.Thread(target=check_update_worker,daemon=True).start()
+    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…")
+    updater=InAppUpdater(
+        root=root,tk=tk,ttk=ttk,page_host=page_host,pages=pages,nav_buttons=nav_buttons,button_factory=button,
+        get_footer=lambda: footer,show_page=lambda name: show_page(name),title=title,subtitle=subtitle,translate=T,colors=C,font=FONT,
+        current_version=current_version,version_status=version_status,fetch_latest_version=_fetch_latest_version,version_key=_version_key,
+        installer_url=INSTALLER_URL,load_last_page=_load_last_page,save_last_page=_save_last_page,
+    )
+    row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",updater.build_control)
+    updater.start_auto_check()
 
     wrap,body=scroll_page(); pages["安全"]=wrap
     section(body,"权限"); c=card(body); preset_syncing={"value":False}

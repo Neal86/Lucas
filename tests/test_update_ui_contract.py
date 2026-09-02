@@ -1,15 +1,19 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+PKG = ROOT / "src" / "gpt_windows_connector"
 
-def test_settings_update_stays_inside_app_and_hides_console():
-    text = (ROOT / "src/gpt_windows_connector/settings_ui.py").read_text(encoding="utf-8")
-    assert "CREATE_NO_WINDOW" in text
-    assert '"-UpdateFromApp"' in text
-    assert "LUCAS_PROGRESS|" in text
-    assert "root.after(300,root.destroy)" not in text
-    assert 'title.set(T("正在更新 Lucas","Updating Lucas"))' in text
-    assert 'update_widgets["return_button"]' in text
+def test_settings_uses_extracted_in_app_updater():
+    settings = (PKG / "settings_ui.py").read_text(encoding="utf-8")
+    updater = (PKG / "update_ui.py").read_text(encoding="utf-8")
+    assert "from .update_ui import InAppUpdater" in settings
+    assert "updater.start_auto_check()" in settings
+    assert "CREATE_NO_WINDOW" in updater
+    assert '"-UpdateFromApp"' in updater
+    assert "LUCAS_PROGRESS|" in updater
+    assert "root.after(300,root.destroy)" not in settings
+    assert "Updating Lucas" in updater
+    assert "return_button" in updater
 
 def test_installer_has_fast_in_app_update_mode():
     text = (ROOT / "scripts/install-node.ps1").read_text(encoding="utf-8")
