@@ -217,7 +217,7 @@ $PackageUrl = "https://github.com/Neal86/Lucas/archive/refs/heads/main.zip"
 if ($UpdateFromApp) {
   # In-app updates replace only Lucas itself. Existing dependencies stay in place,
   # preventing needless downloads and avoiding locked native dependency files.
-  & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-deps --no-cache-dir $PackageUrl
+  & $VenvPython -m pip install --disable-pip-version-check --upgrade --no-cache-dir $PackageUrl
 } elseif ($PackageAlreadyInstalled) {
   & $VenvPython -m pip install --disable-pip-version-check --force-reinstall --no-cache-dir $PackageUrl
 } else {

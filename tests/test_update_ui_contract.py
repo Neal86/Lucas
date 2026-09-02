@@ -19,6 +19,7 @@ def test_installer_has_fast_in_app_update_mode():
     text = (ROOT / "scripts/install-node.ps1").read_text(encoding="utf-8")
     assert "[switch]$UpdateFromApp" in text
     assert "[int]$KeepProcessId = 0" in text
-    assert "--force-reinstall --no-deps --no-cache-dir" in text
+    assert "--upgrade --no-cache-dir $PackageUrl" in text
+    assert "--force-reinstall --no-deps" not in text
     assert 'Write-LucasProgress 100 "complete"' in text
     assert '($_.ProcessId -ne $KeepProcessId)' in text
