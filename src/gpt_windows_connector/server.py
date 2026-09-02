@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 
 import uvicorn
 from starlette.applications import Starlette
-from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 from . import gateway, webapp
 
 
-WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=source-b64-20260902"
+WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"
 BLUE_LOGO_URL = "/assets/lucas-logo-horizontal-blue.png?v=source-20260901b"
 html = webapp.DASHBOARD_HTML
 
@@ -54,20 +53,9 @@ html = html.replace(
 webapp.DASHBOARD_HTML = html
 
 
-def _load_white_logo_bytes() -> bytes:
-    # Use the checked-in base64 source as the canonical web logo payload.
-    # This avoids serving a damaged/corrupted binary PNG from the asset path.
-    encoded = (webapp.BRAND_ASSET_DIR / "lucas-logo-white.png.b64").read_text(encoding="utf-8").strip()
-    return base64.b64decode(encoded, validate=True)
-
-
 async def white_logo_asset(request):
-    try:
-        payload = _load_white_logo_bytes()
-    except Exception:
-        return JSONResponse({"error": "white_logo_unavailable"}, status_code=500)
-    return Response(
-        payload,
+    return FileResponse(
+        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",
         media_type="image/png",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
     )
