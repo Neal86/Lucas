@@ -4,10 +4,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/replace-white-logo-direct.yml'
-
 permissions:
   contents: write
-
 jobs:
   replace-logo:
     runs-on: ubuntu-latest
@@ -16,24 +14,20 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Verify source chunks and build exact PNG
+      - name: Verify and replace exact uploaded PNG
         shell: bash
         run: |
-          wc -c scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
-          cat scripts/.logo2_0 scripts/.logo2_0_tail | sha256sum
-          sha256sum scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
+          sha256sum scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
+          test "$(sha256sum scripts/.logo2_0 | cut -d' ' -f1)" = "f8f0f352804e60dc5d82b6f1b6ad9e0b2b562c11a5d5b9bbbfef0d752753d31d"
+          test "$(sha256sum scripts/.logo2_0_tail | cut -d' ' -f1)" = "cd5db595677168b87ba8cc85f77dd91a9f5aa3b16e43d7c708cb13f00308c907"
+          test "$(sha256sum scripts/.logo2_1 | cut -d' ' -f1)" = "38daf71a3b55a3d05a474197c081410ebc76ab3f73d89fa0e7f7f83d516a62cc"
+          test "$(sha256sum scripts/.logo2_2 | cut -d' ' -f1)" = "7f765774287928f89a33f646fcf7f996a64cb858a5aa6287dfa73ffcfe6687dc"
+          test "$(sha256sum scripts/.logo2_3 | cut -d' ' -f1)" = "b78d14caab0d0e73c2d7453e053c9bb5a8b818ea0b44c519b5f3bdc053a8f0d1"
           cat scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3 | base64 -d > src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          sha256sum src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png
-          echo "34633d6dce62f6bf78fc90ed7954ed8f0579acebb327912391af87076251ff34  -" | sha256sum -c - < <(cat scripts/.logo2_0 scripts/.logo2_0_tail)
-          echo "38daf71a3b55a3d05a474197c081410ebc76ab3f73d89fa0e7f7f83d516a62cc  scripts/.logo2_1" | sha256sum -c -
-          echo "7f765774287928f89a33f646fcf7f996a64cb858a5aa6287dfa73ffcfe6687dc  scripts/.logo2_2" | sha256sum -c -
-          echo "b78d14caab0d0e73c2d7453e053c9bb5a8b818ea0b44c519b5f3bdc053a8f0d1  scripts/.logo2_3" | sha256sum -c -
           test "$(stat -c%s src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png)" = "26714"
-          echo "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3c6ce733a2bfeef  src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png" | sha256sum -c -
+          test "$(sha256sum src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png | cut -d' ' -f1)" = "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3c6ce733a2bfeef"
           file src/gpt_windows_connector/assets/lucas-logo-horizontal-white.png | grep -q 'PNG image data, 400 x 157'
-      - name: Serve PNG file directly
+      - name: Switch server to direct PNG
         shell: python
         run: |
           from pathlib import Path
@@ -45,25 +39,21 @@ jobs:
           start = s.index('def _load_white_logo_bytes() -> bytes:')
           end = s.index('\n\nasync def blue_logo_asset', start)
           direct = '''async def white_logo_asset(request):\n    return FileResponse(\n        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",\n        media_type="image/png",\n        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},\n    )\n'''
-          s = s[:start] + direct + s[end:]
-          p.write_text(s, encoding='utf-8')
-      - name: Remove temporary transport files
+          p.write_text(s[:start] + direct + s[end:], encoding='utf-8')
+      - name: Clean transport files and validate
         shell: bash
         run: |
           rm -f scripts/.logo_upload_chunk0 scripts/.logo_upload_chunk1 scripts/.logo_upload_chunk2
           rm -f scripts/.logo2_0 scripts/.logo2_0_tail scripts/.logo2_1 scripts/.logo2_2 scripts/.logo2_3
           rm -f .github/workflows/replace-white-logo-direct.yml
-      - name: Validate server
-        shell: bash
-        run: |
           python -m compileall -q src/gpt_windows_connector/server.py
           ! grep -q 'lucas-logo-white.png.b64' src/gpt_windows_connector/server.py
-      - name: Commit exact PNG and direct serving
+      - name: Commit
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+Neal86@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git commit -m 'Use exact uploaded white Lucas logo PNG directly'
           git push origin main
-# verify exact chunk hashes
+# segment verification
