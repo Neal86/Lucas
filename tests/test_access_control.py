@@ -54,3 +54,17 @@ def test_disabled_user_is_denied(tmp_path):
     store = LocalAccessStore(tmp_path / "node-access.json")
     store.upsert({"user_id": "disabled"}, "request_approval", [str(root)], enabled=False)
     assert store.effective("disabled", [str(root)]) is None
+
+
+def test_prune_root_permanently_removes_user_grants(tmp_path):
+    store = LocalAccessStore(tmp_path / "node-access.json")
+    root = tmp_path / "root"
+    nested = root / "project"
+    other = tmp_path / "other"
+    nested.mkdir(parents=True)
+    other.mkdir()
+    store.upsert({"user_id": "u1"}, "full_access", [str(nested), str(other)])
+    assert store.prune_root(str(root)) == 1
+    record = store.get("u1")
+    assert record is not None
+    assert record["allowed_roots"] == [str(other)]

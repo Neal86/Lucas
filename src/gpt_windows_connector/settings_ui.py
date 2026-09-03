@@ -572,6 +572,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if sel:
             value=str(roots_list.get(sel[0])); roots_list.delete(sel[0])
             roots[:] = [r for r in roots if str(r) != value]
+            access_store.prune_root(value)
             refresh_users(selected_user_id["value"] or None)
             schedule_auto_save()
     button(acts,"添加文件夹",add_root,primary=True).pack(fill="x",pady=(0,8)); button(acts,"移除",remove_root,danger=True).pack(fill="x"); c=card(body); row(c,"硬边界","不允许通过 shell、浏览器上传/下载、进程启动或路径参数绕过 Allowed Folders。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))

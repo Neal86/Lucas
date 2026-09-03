@@ -201,6 +201,37 @@ class LocalAccessStore:
             self.save(data)
         return removed
 
+    def prune_root(self, removed_root: str) -> int:
+        """Permanently remove a deleted Node root from every user's grants."""
+        try:
+            target = Path(removed_root).expanduser().resolve()
+        except Exception:
+            return 0
+        data = self.load()
+        users = data.setdefault("users", {})
+        changed = 0
+        for record in users.values():
+            if not isinstance(record, dict):
+                continue
+            kept: list[str] = []
+            removed = False
+            for raw in record.get("allowed_roots") or []:
+                try:
+                    candidate = Path(str(raw)).expanduser().resolve()
+                except Exception:
+                    candidate = Path(str(raw))
+                if candidate == target or target in candidate.parents:
+                    removed = True
+                    continue
+                kept.append(str(raw))
+            if removed:
+                record["allowed_roots"] = kept
+                record["updated_at"] = time.time()
+                changed += 1
+        if changed:
+            self.save(data)
+        return changed
+
     def touch(self, user_id: str) -> None:
         data = self.load()
         record = data.setdefault("users", {}).get(str(user_id))
