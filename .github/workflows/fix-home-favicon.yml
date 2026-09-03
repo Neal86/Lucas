@@ -1,0 +1,35 @@
+name: Fix homepage favicon
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-home-favicon.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use the standard Lucas square icon on the public homepage
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/gpt_windows_connector/webapp.py')
+          s = p.read_text(encoding='utf-8')
+          old = '<link rel="canonical" href="https://lucasmcp.com/" />\n'
+          new = '<link rel="canonical" href="https://lucasmcp.com/" />\n<link rel="icon" type="image/png" sizes="32x32" href="/assets/lucas-logo-square.png?v=20260903" />\n<link rel="shortcut icon" type="image/png" href="/assets/lucas-logo-square.png?v=20260903" />\n'
+          if old not in s:
+              raise SystemExit('homepage canonical marker not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+      - name: Commit patch and remove one-shot workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-home-favicon.yml
+          git add src/gpt_windows_connector/webapp.py
+          git commit -m "Use standard Lucas favicon on homepage"
+          git push
