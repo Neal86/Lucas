@@ -246,13 +246,16 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
-    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
-    resolved_workspace = str(verified["path"])
+    # Do not preflight every operation with a separate workspace.info RPC. The
+    # Windows Node is the final security authority and Executor._prepare_call()
+    # validates local approval, Allowed Folders and the workspace immediately
+    # before the requested operation. A Gateway preflight only duplicated that
+    # check, added a full network round trip, and could block for up to 180s.
     task_title = " ".join(str(task_title or "").split())[:180] or None
-    run_context = resolved_workspace
+    run_context = workspace
     payload = dict(params or {})
     if include_workspace:
-        payload["workspace"] = resolved_workspace
+        payload["workspace"] = workspace
     wall_started = time.time()
     started = time.monotonic()
     try:
@@ -260,19 +263,23 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration)
-        auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=run_context,task_title=task_title)
+        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration)
-    auth.audit(user.id, method, resolved_workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=resolved_workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=run_context,task_title=task_title)
+    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=run_context,task_title=task_title)
     return result
 
 
 async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) -> None:
     user = _user()
-    await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
+    workspace = str(workspace or "").strip()
+    if not workspace:
+        raise ValueError("workspace is required")
+    # The lock itself has no file-system capability. The actual browser/computer
+    # operation performs the authoritative Node-side workspace validation once.
     registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
@@ -448,8 +455,13 @@ async def node_request_access(node_id: str, connection_code: str) -> dict:
 @mcp.tool()
 async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) -> dict:
     user = _user()
-    verified = await registry.rpc(node_id, user.id, "workspace.info", {"workspace": workspace}, actor=_actor(user))
-    return registry.acquire_control(node_id, user.id, str(verified["path"]), ttl_seconds)
+    workspace = str(workspace or "").strip()
+    if not workspace:
+        raise ValueError("workspace is required")
+    # Acquiring a coordination lock does not touch files or execute anything, so
+    # a remote workspace preflight is unnecessary. The first real operation is
+    # still fully validated by the Windows Node before execution.
+    return registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
 @mcp.tool()
