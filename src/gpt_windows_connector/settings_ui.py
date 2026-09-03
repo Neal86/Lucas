@@ -89,6 +89,14 @@ def _app_version() -> str:
 def _default_node_id() -> str:
     return f"lucas-{uuid.uuid4().hex}"
 
+def _load_config_file() -> dict[str, Any]:
+    try:
+        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def _save_config(config: dict[str, Any]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     temp = CONFIG_FILE.with_name(f"{CONFIG_FILE.name}.{os.getpid()}.tmp")
@@ -355,8 +363,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def regenerate_connection_code():
         new_code=f"{secrets.randbelow(100_000_000):08d}"
         connection_code.set(new_code)
-        latest=dict(existing); latest["connection_code"]=new_code
-        _save_config(latest); _restart_node_for_apply()
+        # Always merge into the latest on-disk config. A Settings window can stay
+        # open for a long time, so its startup snapshot must never overwrite newer
+        # Allowed Folders or security settings.
+        latest=_load_config_file() or dict(existing)
+        latest["connection_code"]=new_code
+        _save_config(latest)
+        existing.clear(); existing.update(latest)
+        _restart_node_for_apply()
     def build_connection_code(p):
         f=tk.Frame(p,bg=C["card"]); selectable_value(f,connection_code,10,bold=True,blue=True).pack(side="left"); button(f,"重新生成",regenerate_connection_code).pack(side="left",padx=(10,0)); return f
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
@@ -616,14 +630,20 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): raise ValueError("电脑名称和 Node ID 不能为空。")
         if not rv or any(not Path(v).is_dir() for v in rv): raise ValueError("Allowed Folders 中的每个目录都必须真实存在。")
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
-        updated=dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        # Merge UI edits into the latest persisted config instead of the snapshot
+        # captured when this Settings window opened. This makes node-config.json the
+        # single authoritative state and prevents stale UI actions from deleting
+        # newly saved Allowed Folders.
+        updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         return updated
 
     def persist_current_settings_for_update():
         # The update button can be clicked after editing Allowed Folders without
         # pressing Save Changes first. Persist the live UI state before launching
         # the updater so a Settings-window restart cannot discard those edits.
-        _save_config(build_current_config())
+        updated=build_current_config()
+        _save_config(updated)
+        existing.clear(); existing.update(updated)
 
     def reset_defaults():
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
@@ -636,7 +656,11 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             updated=build_current_config()
         except ValueError as exc:
             messagebox.showerror("Lucas",str(exc)); return
-        _save_config(updated); result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
+        _save_config(updated)
+        # Keep the in-memory snapshot synchronized with the successful disk write so
+        # every later action in this same Settings window sees the saved folders.
+        existing.clear(); existing.update(updated)
+        result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
         if save_button is not None: save_button.configure(text="已保存")
         def reset_feedback():
             save_feedback.set("安全设置仅在此电脑上生效")
