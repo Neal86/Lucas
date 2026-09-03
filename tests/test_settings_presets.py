@@ -2,6 +2,16 @@ from gpt_windows_connector.node import _grants_full_access
 from gpt_windows_connector.settings_ui import PRESETS, detect_security_preset, _version_key
 
 
+def test_settings_ui_uses_autosave_and_folder_checkboxes():
+    from pathlib import Path
+    text = Path("src/gpt_windows_connector/settings_ui.py").read_text(encoding="utf-8")
+    assert "tk.Checkbutton(user_roots" in text
+    assert "已自动保存" in text
+    assert 'button(fi,"保存更改"' not in text
+    assert 'button(user_actions,"保存权限"' not in text
+    assert "persist_user_access_if_authorized" in text
+
+
 def test_full_access_allows_high_risk_actions():
     preset = PRESETS["完全访问权限"]
     assert preset["network_external"] == "allow"

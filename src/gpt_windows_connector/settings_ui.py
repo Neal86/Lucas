@@ -491,8 +491,10 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         finally:
             user_loading["value"]=False
         if record.get("_pending"):
+            approve_button.pack(side="right")
             user_note.set("待批准申请：设置快捷权限和勾选文件夹后点击“批准访问”；点击“撤销访问”即拒绝。")
         else:
+            approve_button.pack_forget()
             user_note.set("勾选表示已启用；修改会自动保存并立即生效。")
     user_list.bind("<<ListboxSelect>>",load_user)
 
@@ -678,8 +680,10 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         autosave_job["id"]=None
         try:
             updated=build_current_config()
+            gateway_changed=str(existing.get("gateway_ws_url") or "").rstrip("/") != str(updated.get("gateway_ws_url") or "").rstrip("/")
             _save_config(updated)
             existing.clear(); existing.update(updated)
+            if gateway_changed: _restart_node_for_apply()
             save_feedback.set("已应用")
         except ValueError as exc:
             save_feedback.set(f"等待有效设置：{exc}")
