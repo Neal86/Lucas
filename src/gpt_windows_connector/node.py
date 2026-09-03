@@ -306,7 +306,13 @@ async def _serve_connection(
         # report status, but it is never allowed to overwrite local permissions.
         log.info("Connected as %s (%s)", settings.node_name, settings.node_id)
         _write_status("Online")
-        node_roots = [str(path) for path in settings.allowed_roots]
+        def current_node_roots() -> list[str]:
+            config=_load_config()
+            configured=config.get("allowed_roots")
+            if isinstance(configured,list) and configured:
+                return [str(Path(str(path)).expanduser().resolve()) for path in configured if str(path).strip()]
+            return [str(path) for path in settings.allowed_roots]
+
         session_grants: dict[str, dict[str, object]] = {}
         access_file_mtime = ACCESS_FILE.stat().st_mtime if ACCESS_FILE.exists() else 0.0
         access_attempts: dict[str, list[float]] = {}
@@ -320,7 +326,7 @@ async def _serve_connection(
                 if float(temporary.get("expires_at") or 0) > time.time():
                     return dict(temporary)
                 session_grants.pop(user_id, None)
-            saved = local_access.effective(user_id, node_roots)
+            saved = local_access.effective(user_id, current_node_roots())
             return dict(saved) if saved else None
 
         async def request_access(actor: dict[str, object], supplied_connection_code: str) -> dict[str, object]:

@@ -254,6 +254,8 @@ class InAppUpdater:
                     script_path.write_bytes(response.read())
                 self.root.after(0, lambda: self._set_progress(15, "runtime"))
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                update_log_path = Path(tempfile.gettempdir()) / f"Lucas-Node-update-{os.getpid()}.log"
+                log_handle = update_log_path.open("w", encoding="utf-8", errors="replace")
                 process = subprocess.Popen(
                     [
                         "powershell.exe",
@@ -265,27 +267,41 @@ class InAppUpdater:
                         "-UpdateFromApp",
                         "-KeepProcessId",
                         str(os.getpid()),
+                        "-ExpectedVersion",
+                        str(target),
                     ],
-                    stdout=subprocess.PIPE,
+                    stdout=log_handle,
                     stderr=subprocess.STDOUT,
                     text=True,
                     errors="replace",
-                    bufsize=1,
                     creationflags=flags,
                 )
-                if process.stdout is not None:
-                    for raw in process.stdout:
-                        line = raw.rstrip("\r\n")
-                        if line.startswith("LUCAS_PROGRESS|"):
-                            parts = line.split("|", 2)
-                            if len(parts) == 3:
-                                try:
-                                    percent = int(parts[1])
-                                except ValueError:
-                                    percent = 0
-                                self.root.after(0, lambda p=percent, s=parts[2]: self._set_progress(p, s))
-                                continue
-                        self.root.after(0, lambda value=line: self._append_log(value))
+                log_handle.close()
+                offset=0
+                while process.poll() is None:
+                    time.sleep(0.2)
+                    try:
+                        with update_log_path.open("r",encoding="utf-8",errors="replace") as reader:
+                            reader.seek(offset); chunk=reader.readlines(); offset=reader.tell()
+                        for raw in chunk:
+                            line=raw.rstrip("\r\n")
+                            if line.startswith("LUCAS_PROGRESS|"):
+                                parts=line.split("|",2)
+                                if len(parts)==3:
+                                    try: percent=int(parts[1])
+                                    except ValueError: percent=0
+                                    self.root.after(0,lambda p=percent,s=parts[2]: self._set_progress(p,s)); continue
+                            self.root.after(0,lambda value=line: self._append_log(value))
+                    except (OSError,self.tk.TclError):
+                        pass
+                try:
+                    with update_log_path.open("r",encoding="utf-8",errors="replace") as reader:
+                        reader.seek(offset)
+                        for raw in reader:
+                            line=raw.rstrip("\r\n")
+                            self.root.after(0,lambda value=line: self._append_log(value))
+                except (OSError,self.tk.TclError):
+                    pass
                 code = process.wait()
                 if code != 0:
                     raise RuntimeError(f"PowerShell updater exited with code {code}")

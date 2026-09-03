@@ -327,8 +327,19 @@ class LucasTray:
     def _exit(self, icon: Any = None, item: Any = None) -> None:
         self._stop.set()
         self._stop_node()
+        # Exit Lucas means exit the whole local app, not just the tray. Settings can
+        # also be opened by the desktop launcher, so close every configure process.
+        try:
+            for process in psutil.process_iter(["pid","cmdline"]):
+                if process.pid == os.getpid(): continue
+                command=" ".join(process.info.get("cmdline") or []).lower()
+                if "gpt_windows_connector.node" in command and "--configure" in command:
+                    try: process.terminate()
+                    except psutil.Error: pass
+        except Exception:
+            log.exception("Could not close Lucas Settings during exit")
         self._status = "Offline"
-        self._detail = "Lucas tray exited"
+        self._detail = "Lucas exited"
         self._write_local_status()
         if self._icon is not None:
             self._icon.stop()

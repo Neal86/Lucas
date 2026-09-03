@@ -370,7 +370,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         latest["connection_code"]=new_code
         _save_config(latest)
         existing.clear(); existing.update(latest)
-        _restart_node_for_apply()
     def build_connection_code(p):
         f=tk.Frame(p,bg=C["card"]); selectable_value(f,connection_code,10,bold=True,blue=True).pack(side="left"); button(f,"重新生成",regenerate_connection_code).pack(side="left",padx=(10,0)); return f
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
@@ -426,10 +425,45 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     tk.Label(user_editor,textvariable=user_identity,font=(FONT,11,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",pady=(2,12))
     perm_row=tk.Frame(user_editor,bg=C["card"]); perm_row.pack(fill="x",pady=(0,10)); tk.Label(perm_row,text="快捷权限",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(side="left"); combo(perm_row,user_preset,list(preset_to_id),24).pack(side="right")
     tk.Label(user_editor,text="允许访问的文件夹",font=(FONT,9,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w")
-    user_roots=tk.Listbox(user_editor,selectmode="multiple",height=7,font=(FONT,9),bg=C["control"],fg=C["text"],relief="flat",bd=0,highlightthickness=1,highlightbackground=C["line"],selectbackground="#DCEEFF",selectforeground=C["text"]); user_roots.pack(fill="x",pady=(5,10))
-    for item in roots: user_roots.insert("end",item)
-    user_note=tk.StringVar(value="快捷权限决定默认审批策略；文件夹始终受 Node Allowed Folders 硬边界限制。详细权限可单独修改。"); tk.Label(user_editor,textvariable=user_note,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=430,justify="left").pack(anchor="w")
+    user_roots=tk.Frame(user_editor,bg=C["control"],highlightthickness=1,highlightbackground=C["line"]); user_roots.pack(fill="x",pady=(5,10))
+    user_root_vars: dict[str, Any] = {}
+    user_loading={"value":False}
+    user_note=tk.StringVar(value="勾选表示该用户已启用此文件夹权限；已授权用户的修改会自动保存并立即生效。"); tk.Label(user_editor,textvariable=user_note,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=430,justify="left").pack(anchor="w")
     user_actions=tk.Frame(user_editor,bg=C["card"]); user_actions.pack(fill="x",pady=(14,0))
+
+    def selected_user_roots():
+        return [path for path,var in user_root_vars.items() if bool(var.get())]
+
+    def persist_user_access_if_authorized(*_):
+        if user_loading["value"]: return
+        uid=selected_user_id["value"]
+        if not uid: return
+        record=next((r for r in user_records if str(r.get("user_id"))==uid),None)
+        if not record or record.get("_pending"): return
+        selected=clamp_roots(selected_user_roots(),roots)
+        if not selected:
+            user_note.set("至少需要保留一个已启用文件夹；如需完全撤销请使用“撤销访问”。")
+            render_user_roots(record)
+            return
+        preset=preset_to_id.get(user_preset.get(),"request_approval")
+        existing_security=record.get("security") if isinstance(record.get("security"),dict) else None
+        security=existing_security if preset=="custom" and existing_security else preset_security(preset)
+        access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},preset,selected,security=security,enabled=True)
+        user_note.set("已自动保存 · 权限已生效")
+
+    def render_user_roots(record=None):
+        for child in user_roots.winfo_children(): child.destroy()
+        user_root_vars.clear()
+        granted=set()
+        pending=bool(record and record.get("_pending"))
+        if record:
+            granted={str(Path(v).expanduser().resolve()) for v in (record.get("allowed_roots") or [])}
+        for path in roots:
+            try: resolved=str(Path(path).expanduser().resolve())
+            except Exception: resolved=path
+            var=tk.BooleanVar(value=(pending or resolved in granted))
+            user_root_vars[path]=var
+            tk.Checkbutton(user_roots,text=path,variable=var,command=persist_user_access_if_authorized,font=(FONT,9),bg=C["control"],fg=C["text"],activebackground=C["control"],activeforeground=C["text"],selectcolor=C["white"],anchor="w",relief="flat",bd=0,padx=8,pady=5).pack(fill="x",anchor="w")
 
     def refresh_users(select_id=None):
         nonlocal user_records
@@ -444,21 +478,22 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if user_records:
             index=target if target is not None else 0; user_list.selection_clear(0,"end"); user_list.selection_set(index); user_list.activate(index); load_user()
         else:
-            selected_user_id["value"]=""; user_identity.set("暂无已授权用户"); user_preset.set("请求批准（Recommended）"); user_roots.selection_clear(0,"end")
+            selected_user_id["value"]=""; user_identity.set("暂无已授权用户"); user_preset.set("请求批准（Recommended）"); render_user_roots(None)
 
     def load_user(*_):
         sel=user_list.curselection()
         if not sel or sel[0]>=len(user_records): return
         record=user_records[sel[0]]; selected_user_id["value"]=str(record.get("user_id") or "")
         name=str(record.get("name") or record.get("email") or selected_user_id["value"]); email=str(record.get("email") or "")
-        user_identity.set(name + (f"  ·  {email}" if email and email!=name else "")); user_preset.set(id_to_preset.get(normalize_preset(str(record.get("preset") or ("full_access" if record.get("permission_level")=="admin" else "request_approval"))),"请求批准（Recommended）"))
-        user_roots.selection_clear(0,"end"); granted={str(Path(v).expanduser().resolve()) for v in (record.get("allowed_roots") or [])}
-        for idx,path in enumerate(roots):
-            try: resolved=str(Path(path).expanduser().resolve())
-            except Exception: resolved=path
-            if record.get("_pending") or resolved in granted: user_roots.selection_set(idx)
+        user_loading["value"]=True
+        try:
+            user_identity.set(name + (f"  ·  {email}" if email and email!=name else "")); user_preset.set(id_to_preset.get(normalize_preset(str(record.get("preset") or ("full_access" if record.get("permission_level")=="admin" else "request_approval"))),"请求批准（Recommended）")); render_user_roots(record)
+        finally:
+            user_loading["value"]=False
         if record.get("_pending"):
-            user_note.set("待批准申请：选择快捷权限和允许文件夹后点击“保存权限”即批准；点击“撤销访问”即拒绝。")
+            user_note.set("待批准申请：设置快捷权限和勾选文件夹后点击“批准访问”；点击“撤销访问”即拒绝。")
+        else:
+            user_note.set("勾选表示已启用；修改会自动保存并立即生效。")
     user_list.bind("<<ListboxSelect>>",load_user)
 
     def save_user_access():
@@ -466,7 +501,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not uid: return
         record=next((r for r in user_records if str(r.get("user_id"))==uid),None)
         if not record: return
-        selected=[roots[i] for i in user_roots.curselection()]; selected=clamp_roots(selected,roots)
+        selected=clamp_roots(selected_user_roots(),roots)
         if not selected: messagebox.showerror("Lucas","请至少为该用户选择一个允许访问的文件夹。"); return
         preset=preset_to_id.get(user_preset.get(),"request_approval")
         existing_security=record.get("security") if isinstance(record.get("security"),dict) else None
@@ -489,7 +524,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not uid: return
         record=next((r for r in user_records if str(r.get("user_id"))==uid),None)
         if not record: return
-        selected=[roots[i] for i in user_roots.curselection()] or list(record.get("allowed_roots") or [])
+        selected=selected_user_roots() or list(record.get("allowed_roots") or [])
         selected=clamp_roots(selected,roots)
         if not selected: messagebox.showerror("Lucas","请先为该用户选择至少一个允许访问的文件夹。"); return
         preset=preset_to_id.get(user_preset.get(),normalize_preset(str(record.get("preset") or "request_approval")))
@@ -513,7 +548,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             access_store.upsert({"user_id":uid,"name":record.get("name"),"email":record.get("email")},"custom",selected,security=custom,enabled=True); user_note.set("详细权限已保存，该用户下一次操作立即生效。"); win.destroy(); refresh_users(uid)
         button(footer,"保存详细权限",save_details,primary=True).pack(side="right"); button(footer,"取消",win.destroy).pack(side="right",padx=(0,8))
 
-    button(user_actions,"保存权限",save_user_access,primary=True).pack(side="right"); button(user_actions,"详细权限",edit_user_details).pack(side="right",padx=(0,8)); button(user_actions,"撤销访问",revoke_user_access,danger=True).pack(side="right",padx=(0,8)); button(user_actions,"刷新",lambda: refresh_users(selected_user_id["value"])).pack(side="right",padx=(0,8))
+    approve_button=button(user_actions,"批准访问",save_user_access,primary=True); approve_button.pack(side="right"); button(user_actions,"详细权限",edit_user_details).pack(side="right",padx=(0,8)); button(user_actions,"撤销访问",revoke_user_access,danger=True).pack(side="right",padx=(0,8)); button(user_actions,"刷新",lambda: refresh_users(selected_user_id["value"])).pack(side="right",padx=(0,8))
+    user_preset.trace_add("write",persist_user_access_if_authorized)
     refresh_users()
     c=card(body); row(c,"本地最终授权","VPS 只负责转发用户身份和请求。是否允许执行、实际权限和允许目录都由此 Windows Node 再次检查。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
@@ -526,15 +562,16 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if p and p not in roots_list.get(0,"end"):
             roots_list.insert("end",p)
             if p not in roots: roots.append(p)
-            if p not in user_roots.get(0,"end"): user_roots.insert("end",p)
+            current=next((r for r in user_records if str(r.get("user_id"))==selected_user_id["value"]),None)
+            render_user_roots(current)
+            schedule_auto_save()
     def remove_root():
         sel=roots_list.curselection()
         if sel:
             value=str(roots_list.get(sel[0])); roots_list.delete(sel[0])
             roots[:] = [r for r in roots if str(r) != value]
-            values=list(user_roots.get(0,"end"))
-            if value in values: user_roots.delete(values.index(value))
             refresh_users(selected_user_id["value"] or None)
+            schedule_auto_save()
     button(acts,"添加文件夹",add_root,primary=True).pack(fill="x",pady=(0,8)); button(acts,"移除",remove_root,danger=True).pack(fill="x"); c=card(body); row(c,"硬边界","不允许通过 shell、浏览器上传/下载、进程启动或路径参数绕过 Allowed Folders。",lambda p: tk.Label(p,text="已启用",font=(FONT,9,"bold"),fg=C["green"],bg=C["card"]))
 
     wrap,body=scroll_page(); pages["网络"]=wrap
@@ -620,9 +657,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
-    footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom"); fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12); save_feedback=tk.StringVar(value="安全设置仅在此电脑上生效"); tk.Label(fi,textvariable=save_feedback,font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(side="left")
+    footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom"); fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12); save_feedback=tk.StringVar(value="已自动保存"); tk.Label(fi,textvariable=save_feedback,font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(side="left")
 
-    result=None; save_button=None
+    result=None; autosave_job={"id":None}
 
     def build_current_config():
         gv=gateway.get().strip(); rv=[str(Path(v).expanduser().resolve()) for v in roots_list.get(0,"end") if str(v).strip()]
@@ -637,37 +674,41 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         return updated
 
+    def apply_auto_save():
+        autosave_job["id"]=None
+        try:
+            updated=build_current_config()
+            _save_config(updated)
+            existing.clear(); existing.update(updated)
+            save_feedback.set("已应用")
+        except ValueError as exc:
+            save_feedback.set(f"等待有效设置：{exc}")
+
+    def schedule_auto_save(*_, delay=350):
+        save_feedback.set("正在应用…")
+        if autosave_job["id"] is not None:
+            try: root.after_cancel(autosave_job["id"])
+            except tk.TclError: pass
+        autosave_job["id"]=root.after(delay,apply_auto_save)
+
     def persist_current_settings_for_update():
-        # The update button can be clicked after editing Allowed Folders without
-        # pressing Save Changes first. Persist the live UI state before launching
-        # the updater so a Settings-window restart cannot discard those edits.
         updated=build_current_config()
         _save_config(updated)
         existing.clear(); existing.update(updated)
+        save_feedback.set("已自动保存")
 
     def reset_defaults():
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
         preset_display.set("请求批准（Recommended）")
         for k,v in APPROVAL_DEFAULTS.items(): approval_vars[k].set(v)
-        remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。")
-    def save():
-        nonlocal result
-        try:
-            updated=build_current_config()
-        except ValueError as exc:
-            messagebox.showerror("Lucas",str(exc)); return
-        _save_config(updated)
-        # Keep the in-memory snapshot synchronized with the successful disk write so
-        # every later action in this same Settings window sees the saved folders.
-        existing.clear(); existing.update(updated)
-        result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
-        if save_button is not None: save_button.configure(text="已保存")
-        def reset_feedback():
-            save_feedback.set("安全设置仅在此电脑上生效")
-            if save_button is not None: save_button.configure(text="保存更改")
-        root.after(1800,reset_feedback)
+        remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。"); schedule_auto_save(delay=0)
 
-    save_button=button(fi,"保存更改",save,primary=True); save_button.pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10)); button(fi,"取消",root.destroy).pack(side="right",padx=(0,10))
+    for var in [remember_approvals,block_silent_network,show_rule_summary,network_external,network_lan,allowed_domains,*approval_vars.values()]:
+        var.trace_add("write",schedule_auto_save)
+    rules_text.bind("<KeyRelease>",schedule_auto_save,add="+")
+    gateway.trace_add("write",lambda *_: schedule_auto_save(delay=700))
+
+    button(fi,"关闭",root.destroy,primary=True).pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10))
     show_page(_load_last_page())
     localize_tk_tree(root, SETTINGS_EN, language)
     refresh_connection_status(); root.mainloop(); return result
