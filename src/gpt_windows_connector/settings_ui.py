@@ -368,6 +368,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         get_footer=lambda: footer,show_page=lambda name: show_page(name),title=title,subtitle=subtitle,translate=T,colors=C,font=FONT,
         current_version=current_version,version_status=version_status,fetch_latest_version=_fetch_latest_version,version_key=_version_key,
         installer_url=INSTALLER_URL,load_last_page=_load_last_page,save_last_page=_save_last_page,
+        before_update=lambda: persist_current_settings_for_update(),
     )
     row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",updater.build_control)
     updater.start_auto_check()
@@ -608,6 +609,22 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom"); fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12); save_feedback=tk.StringVar(value="安全设置仅在此电脑上生效"); tk.Label(fi,textvariable=save_feedback,font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(side="left")
 
     result=None; save_button=None
+
+    def build_current_config():
+        gv=gateway.get().strip(); rv=[str(Path(v).expanduser().resolve()) for v in roots_list.get(0,"end") if str(v).strip()]
+        if not gv.startswith(("ws://","wss://")): raise ValueError("Gateway 必须以 ws:// 或 wss:// 开头。")
+        if not node_name.get().strip() or not node_id.get().strip(): raise ValueError("电脑名称和 Node ID 不能为空。")
+        if not rv or any(not Path(v).is_dir() for v in rv): raise ValueError("Allowed Folders 中的每个目录都必须真实存在。")
+        domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
+        updated=dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        return updated
+
+    def persist_current_settings_for_update():
+        # The update button can be clicked after editing Allowed Folders without
+        # pressing Save Changes first. Persist the live UI state before launching
+        # the updater so a Settings-window restart cannot discard those edits.
+        _save_config(build_current_config())
+
     def reset_defaults():
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
         preset_display.set("请求批准（Recommended）")
@@ -615,12 +632,10 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。")
     def save():
         nonlocal result
-        gv=gateway.get().strip(); rv=[str(Path(v).expanduser().resolve()) for v in roots_list.get(0,"end") if str(v).strip()]
-        if not gv.startswith(("ws://","wss://")): messagebox.showerror("Lucas","Gateway 必须以 ws:// 或 wss:// 开头。"); return
-        if not node_name.get().strip() or not node_id.get().strip(): messagebox.showerror("Lucas","电脑名称和 Node ID 不能为空。"); return
-        if not rv or any(not Path(v).is_dir() for v in rv): messagebox.showerror("Lucas","Allowed Folders 中的每个目录都必须真实存在。"); return
-        domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
-        updated=dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        try:
+            updated=build_current_config()
+        except ValueError as exc:
+            messagebox.showerror("Lucas",str(exc)); return
         _save_config(updated); result=updated; _restart_node_for_apply(); save_feedback.set("已保存 · Lucas Node 正在应用新设置")
         if save_button is not None: save_button.configure(text="已保存")
         def reset_feedback():

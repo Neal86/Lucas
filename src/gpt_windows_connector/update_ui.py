@@ -38,6 +38,7 @@ class InAppUpdater:
         installer_url: str,
         load_last_page: Callable[[], str],
         save_last_page: Callable[[str], None],
+        before_update: Callable[[], None] | None = None,
     ) -> None:
         self.root = root
         self.tk = tk
@@ -60,6 +61,7 @@ class InAppUpdater:
         self.installer_url = installer_url
         self.load_last_page = load_last_page
         self.save_last_page = save_last_page
+        self.before_update = before_update
         self.update_button = None
         self.check_update_button = None
         self.state = {"frame": None, "active": False, "return_page": "常规", "success": False, "target": ""}
@@ -238,6 +240,9 @@ class InAppUpdater:
         def worker() -> None:
             target = self.fetch_latest_version() or str(self.state.get("target") or "") or self.T("最新版本", "latest")
             try:
+                if self.before_update is not None:
+                    self.before_update()
+                    self.root.after(0, lambda: self._append_log(self.T("已保存当前本地设置快照。", "Saved the current local settings snapshot.")))
                 self.root.after(0, lambda: self.widgets["version"].set(f"Lucas {self.current_version}  →  {target}"))
                 self.root.after(0, lambda: self._set_progress(8, "prepare"))
                 script_path = Path(tempfile.gettempdir()) / "Lucas-Node-update.ps1"
