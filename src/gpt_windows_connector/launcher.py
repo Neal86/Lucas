@@ -36,21 +36,23 @@ def main() -> None:
     pythonw = _pythonw()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-    if _tray_is_running():
+    # The Lucas shortcut always means "open the app". If the background tray is
+    # not running, start it first, but never stop there: Settings must also become
+    # visible so Start-menu/Desktop launches behave like a normal Windows app.
+    if not _tray_is_running():
+        try:
+            PID_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
         subprocess.Popen(
-            [str(pythonw), "-m", "gpt_windows_connector.node", "--configure"],
+            [str(pythonw), "-m", "gpt_windows_connector.tray"],
             cwd=str(CONFIG_DIR),
             creationflags=flags,
             close_fds=True,
         )
-        return
 
-    try:
-        PID_FILE.unlink(missing_ok=True)
-    except OSError:
-        pass
     subprocess.Popen(
-        [str(pythonw), "-m", "gpt_windows_connector.tray"],
+        [str(pythonw), "-m", "gpt_windows_connector.node", "--configure"],
         cwd=str(CONFIG_DIR),
         creationflags=flags,
         close_fds=True,

@@ -74,7 +74,7 @@ $VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
 $TrayPidFile = Join-Path $InstallDir "lucas-tray.pid"
 $StatusFile = Join-Path $InstallDir "node-status.json"
 $TaskName = "Lucas Node"
-$ShortcutIconFile = Join-Path $InstallDir "lucas-shortcut.ico"
+$ShortcutIconFile = ""
 
 $SavedState = $null
 $HasSavedToken = $false
@@ -272,6 +272,9 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedVersion) -and $InstalledVersion -
   throw "Lucas update verification failed: expected $ExpectedVersion but runtime reports $InstalledVersion."
 }
 Write-Host "[Lucas] Installed Lucas Node $InstalledVersion" -ForegroundColor Green
+# Use a versioned icon path. Windows Start/Recent aggressively caches shortcut icons
+# by path, so overwriting the same lucas-shortcut.ico can keep showing Python forever.
+$ShortcutIconFile = Join-Path $InstallDir ("lucas-shortcut-{0}.ico" -f $InstalledVersion)
 Write-LucasProgress 75 "verify"
 
 $MachineGuid = ""
@@ -427,6 +430,8 @@ try {
     $Shortcut.IconLocation = "$ShortcutIconFile,0"
     $Shortcut.Save()
   }
+  # Old versioned icon files are no longer referenced after both shortcuts are saved.
+  Get-ChildItem -Path $InstallDir -Filter "lucas-shortcut-*.ico" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -ne $ShortcutIconFile } | Remove-Item -Force -ErrorAction SilentlyContinue
 } catch {
   Write-Host "[Lucas] Could not create one or more shortcuts: $($_.Exception.Message)" -ForegroundColor Yellow
 }
@@ -451,7 +456,7 @@ if (-not $TrayStarted) {
 # window stays alive to show progress, then restarts itself when the user returns.
 if (-not $UpdateFromApp) {
   Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
-  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
+  Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
 } else {
   # The updater must survive even if the old Settings process closes unexpectedly.
   # If it is gone, reopen Settings explicitly from the newly verified runtime. If
@@ -462,7 +467,7 @@ if (-not $UpdateFromApp) {
   }
   if (-not $SettingsAlive) {
     Write-Host "[Lucas] Previous Settings closed during update; reopening the verified new version..." -ForegroundColor Yellow
-    Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure" -WindowStyle Hidden
+    Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
   } else {
     Write-Host "[Lucas] App update finished; current Settings remains open." -ForegroundColor Green
   }

@@ -28,3 +28,12 @@ def test_installer_has_fast_in_app_update_mode():
     assert "--force-reinstall --no-deps" not in text
     assert 'Write-LucasProgress 100 "complete"' in text
     assert '($_.ProcessId -ne $KeepProcessId)' in text
+    assert 'lucas-shortcut-{0}.ico' in text
+    assert 'gpt_windows_connector.node","--configure" -WindowStyle Hidden' not in text
+
+
+def test_launcher_always_opens_settings_even_when_starting_tray():
+    launcher = (PKG / "launcher.py").read_text(encoding="utf-8")
+    assert "if not _tray_is_running():" in launcher
+    assert launcher.count('gpt_windows_connector.node", "--configure') == 1
+    assert "never stop there: Settings must also become" in launcher
