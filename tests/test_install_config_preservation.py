@@ -19,3 +19,10 @@ def test_updater_preserves_user_permissions_and_folder_scopes():
     assert "ExistingAccessRaw" in script
     assert "Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile" in script
     assert "node-access.json changed during update" in script
+
+
+def test_installer_uses_lucas_icon_for_windows_shortcuts():
+    script = Path("scripts/install-node.ps1").read_text(encoding="utf-8")
+    assert '$ShortcutIconFile = Join-Path $InstallDir "lucas-shortcut.ico"' in script
+    assert "from gpt_windows_connector.app_icon import make_square_icon" in script
+    assert '$Shortcut.IconLocation = "$ShortcutIconFile,0"' in script
