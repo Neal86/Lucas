@@ -244,7 +244,7 @@ async def api_nodes(request: Request):
         if node_id in nodes_by_id:
             continue
         live = gateway.registry.nodes.get(node_id)
-        name = str(row["node_name"] or (live.name if live else node_id))
+        name = str((live.name if live else None) or row["node_name"] or node_id)
         pending_row = pending.get(node_id)
         access_state = "pending" if pending_row else str(row["access_state"] or "unknown")
         if live and not pending_row:
