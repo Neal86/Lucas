@@ -84,6 +84,8 @@ def _landing_html() -> str:
 <meta name="googlebot" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
 <meta name="description" content="Lucas MCP securely connects ChatGPT, Claude, Gemini and other MCP-compatible AI assistants to your computer for files, browser, terminal and desktop automation without extra execution tokens." />
 <link rel="canonical" href="https://lucasmcp.com/" />
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/lucas-logo-square.png?v=20260903" />
+<link rel="shortcut icon" type="image/png" href="/assets/lucas-logo-square.png?v=20260903" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Lucas MCP" />
 <meta property="og:title" content="Lucas MCP — Connect Any AI to Your Computer" />
