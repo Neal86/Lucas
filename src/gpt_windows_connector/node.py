@@ -35,8 +35,19 @@ DEVICE_ID_FILE = CONFIG_DIR / "node-device-id.txt"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
 local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
-FALLBACK_GATEWAY = "wss://lucas.autozon.xyz/ws/node"
 log = logging.getLogger("lucas.node")
+
+
+def _is_gateway_restart_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return (
+        "1012" in text
+        or "service restart" in text
+        or "http 502" in text
+        or "http 503" in text
+        or "bad gateway" in text
+        or "service unavailable" in text
+    )
 
 
 def _acquire_node_mutex() -> object | None:
@@ -453,61 +464,57 @@ async def run_node() -> None:
             config = _load_config()
             _apply_config(config)
             settings = NodeSettings.from_env()
-            primary = settings.gateway_ws_url.rstrip("/")
-            candidates = [primary]
-            aliases = {DEFAULT_GATEWAY.rstrip("/"), FALLBACK_GATEWAY.rstrip("/")}
-            if primary in aliases:
-                alternate = FALLBACK_GATEWAY.rstrip("/") if primary == DEFAULT_GATEWAY.rstrip("/") else DEFAULT_GATEWAY.rstrip("/")
-                if alternate not in candidates:
-                    candidates.append(alternate)
-            # Prefer a direct connection. websockets 15 automatically uses Windows /
-            # environment proxies when proxy=True; a stale system proxy can surface as
-            # WinError 1225 before the request ever reaches Lucas. Direct mode matches
-            # Lucas' intended always-online transport; proxy mode is a last fallback.
+            primary = settings.gateway_ws_url.rstrip("/") or DEFAULT_GATEWAY
+            # Keep the reconnect path deliberately small: primary direct first, then
+            # the Windows system proxy only for genuine client/network failures. The
+            # retired autozon.xyz fallback and the duplicate direct-ipv4 pass made a
+            # short Gateway restart look like minutes of reconnect churn.
             strategies = [
                 ("direct", False, None),
-                ("direct-ipv4", True, None),
                 ("system-proxy", False, True),
             ]
             last_error: Exception | None = None
-            connected = False
-            for candidate_index, candidate in enumerate(candidates):
-                if candidate_index:
-                    log.warning("Primary Gateway unavailable; trying fallback %s", candidate)
-                for strategy_name, force_ipv4, proxy_mode in strategies:
-                    try:
-                        detail = f"Connecting to {candidate} via {strategy_name}"
-                        _write_status("Connecting", detail)
-                        log.info("Gateway attempt %s via %s", candidate, strategy_name)
-                        await _serve_connection(
-                            settings,
-                            candidate,
-                            force_ipv4=force_ipv4,
-                            proxy_mode=proxy_mode,
-                        )
-                        delay = 1.0
-                        connected = True
-                        break
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as candidate_error:
-                        last_error = candidate_error
-                        log.warning(
-                            "Gateway connection failed %s via %s: %s",
-                            candidate,
-                            strategy_name,
-                            candidate_error,
-                        )
-                        _write_status(
-                            "Reconnecting",
-                            f"{candidate_error}; failed {candidate} via {strategy_name}",
-                        )
-                if connected:
+            retry_primary = False
+            for strategy_name, force_ipv4, proxy_mode in strategies:
+                try:
+                    detail = f"Connecting to {primary} via {strategy_name}"
+                    _write_status("Connecting", detail)
+                    log.info("Gateway attempt %s via %s", primary, strategy_name)
+                    await _serve_connection(
+                        settings,
+                        primary,
+                        force_ipv4=force_ipv4,
+                        proxy_mode=proxy_mode,
+                    )
+                    delay = 1.0
                     break
-            if not connected:
-                if last_error is not None:
-                    raise last_error
-                raise RuntimeError("No Gateway connection strategy succeeded")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as candidate_error:
+                    last_error = candidate_error
+                    log.warning(
+                        "Gateway connection failed %s via %s: %s",
+                        primary,
+                        strategy_name,
+                        candidate_error,
+                    )
+                    if _is_gateway_restart_error(candidate_error):
+                        retry_after = 3.0
+                        detail = f"Gateway restarting; retrying primary in {retry_after:.0f}s"
+                        log.info(detail)
+                        _write_status("Reconnecting", detail)
+                        await asyncio.sleep(retry_after)
+                        retry_primary = True
+                        break
+                    _write_status(
+                        "Reconnecting",
+                        f"{candidate_error}; failed {primary} via {strategy_name}",
+                    )
+            if retry_primary:
+                delay = 1.0
+                continue
+            if last_error is not None:
+                raise last_error
         except asyncio.CancelledError:
             raise
         except Exception as exc:

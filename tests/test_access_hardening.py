@@ -28,3 +28,9 @@ def test_connection_code_reload_reads_rotated_value(tmp_path, monkeypatch):
     assert node._ensure_connection_code(node._load_config()) == "11112222"
     config_file.write_text(json.dumps({"node_id": "test-node", "connection_code": "33334444"}), encoding="utf-8")
     assert node._ensure_connection_code(node._load_config()) == "33334444"
+
+
+def test_gateway_restart_errors_do_not_trigger_route_fanout():
+    assert node._is_gateway_restart_error(Exception("received 1012 (service restart)"))
+    assert node._is_gateway_restart_error(Exception("server rejected WebSocket connection: HTTP 502"))
+    assert not node._is_gateway_restart_error(Exception("getaddrinfo failed"))

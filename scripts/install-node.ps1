@@ -63,6 +63,7 @@ function Resolve-Python311 {
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 $Venv = Join-Path $InstallDir "runtime"
 $ConfigFile = Join-Path $InstallDir "node-config.json"
+$AccessFile = Join-Path $InstallDir "node-access.json"
 $StateFile = Join-Path $InstallDir "node-state.json"
 $DeviceCredentialFile = Join-Path $InstallDir "node-device-credential.json"
 $DeviceIdFile = Join-Path $InstallDir "node-device-id.txt"
@@ -109,6 +110,21 @@ if (Test-Path $ConfigFile) {
     Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
   } catch {
     throw "Existing Lucas configuration could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
+  }
+}
+
+# User approvals, per-user presets and allowed folders are local security data, not
+# application code. Preserve them byte-for-byte across every update just like the
+# Node ID and device credential.
+$ExistingAccessRaw = $null
+$AccessBackupFile = "$AccessFile.pre-update"
+if (Test-Path $AccessFile) {
+  try {
+    $ExistingAccessRaw = Get-Content -Raw -Path $AccessFile
+    $ExistingAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+    Copy-Item -Force -Path $AccessFile -Destination $AccessBackupFile
+  } catch {
+    throw "Existing Lucas user permissions could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
   }
 }
 
@@ -224,6 +240,19 @@ if ($UpdateFromApp) {
   & $VenvPython -m pip install --disable-pip-version-check --no-cache-dir $PackageUrl
 }
 if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
+
+# The package installer must never mutate local user authorization state. Restore the
+# exact pre-update file before any Lucas process is started again.
+if ($null -ne $ExistingAccessRaw) {
+  Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile
+  try {
+    $RestoredAccessRaw = Get-Content -Raw -Path $AccessFile
+    $RestoredAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+    if ($RestoredAccessRaw -ne $ExistingAccessRaw) { throw "node-access.json changed during update" }
+  } catch {
+    throw "Lucas user permissions could not be restored after update: $($_.Exception.Message)"
+  }
+}
 
 $InstalledVersion = (& $VenvPython -c "import importlib.metadata; print(importlib.metadata.version('gpt-windows-connector'))").Trim()
 if ([string]::IsNullOrWhiteSpace($InstalledVersion)) { throw "Lucas Node installation verification failed." }

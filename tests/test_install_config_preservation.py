@@ -9,3 +9,12 @@ def test_updater_preserves_complete_existing_config():
     assert "if ($ExistingConfig -and $ExistingConfigRaw)" in script
     assert "$ExistingConfigRaw | Set-Content -Path $ConfigFile" in script
     assert "unknown" in script.lower() or "future fields" in script.lower()
+
+
+def test_updater_preserves_user_permissions_and_folder_scopes():
+    script = Path("scripts/install-node.ps1").read_text(encoding="utf-8")
+    assert '$AccessFile = Join-Path $InstallDir "node-access.json"' in script
+    assert '$AccessBackupFile = "$AccessFile.pre-update"' in script
+    assert "ExistingAccessRaw" in script
+    assert "Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile" in script
+    assert "node-access.json changed during update" in script
