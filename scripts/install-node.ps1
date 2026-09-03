@@ -241,8 +241,18 @@ if ($UpdateFromApp) {
 }
 if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
 
-# The package installer must never mutate local user authorization state. Restore the
-# exact pre-update file before any Lucas process is started again.
+# The package installer must never mutate local configuration or user authorization
+# state. Restore exact pre-update bytes before any Lucas process is started again.
+if ($null -ne $ExistingConfigRaw) {
+  Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
+  try {
+    $RestoredConfigRaw = Get-Content -Raw -Path $ConfigFile
+    $RestoredConfigRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+    if ($RestoredConfigRaw -ne $ExistingConfigRaw) { throw "node-config.json changed during update" }
+  } catch {
+    throw "Lucas local configuration could not be restored after update: $($_.Exception.Message)"
+  }
+}
 if ($null -ne $ExistingAccessRaw) {
   Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile
   try {
@@ -320,8 +330,10 @@ if ($ExistingConfig -and $ExistingConfigRaw) {
     $ExistingConfig | ConvertTo-Json -Depth 20 | Set-Content -Path $ConfigFile -Encoding UTF8
     Write-Host "[Lucas] Repaired old local Gateway -> $($ExistingConfig.gateway_ws_url)" -ForegroundColor Yellow
   } else {
-    # Keep unknown future fields byte-for-byte when no migration is required.
-    $ExistingConfigRaw | Set-Content -Path $ConfigFile -Encoding UTF8
+    # Keep unknown future fields byte-for-byte when no migration is required. Do
+    # not pipe through Set-Content: Windows PowerShell 5.1 would add a UTF-8 BOM,
+    # and older tray builds treated that valid JSON as unreadable and rewrote it.
+    Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
   }
   $Config = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
 } else {

@@ -7,7 +7,8 @@ def test_updater_preserves_complete_existing_config():
     assert "ConfigBackupFile" in script
     assert "Update aborted without changing local settings" in script
     assert "if ($ExistingConfig -and $ExistingConfigRaw)" in script
-    assert "$ExistingConfigRaw | Set-Content -Path $ConfigFile" in script
+    assert "Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile" in script
+    assert "node-config.json changed during update" in script
     assert "unknown" in script.lower() or "future fields" in script.lower()
 
 

@@ -49,7 +49,10 @@ def _acquire_single_instance_mutex() -> object | None:
 
 def _load_json(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # Windows PowerShell 5.1 writes -Encoding UTF8 with a BOM. Accept both
+        # BOM and non-BOM local JSON so an updater rewrite can never make the tray
+        # misread a valid config as empty and overwrite the user's settings.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}

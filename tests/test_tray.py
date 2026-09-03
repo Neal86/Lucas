@@ -19,3 +19,9 @@ def test_json_round_trip(tmp_path: Path):
     payload = {"status": "Online", "detail": "", "time": 1.0}
     tray._save_json(target, payload)
     assert tray._load_json(target) == payload
+
+
+def test_tray_reads_powershell_utf8_bom_json(tmp_path: Path):
+    target = tmp_path / "node-config.json"
+    target.write_text('{"connection_code":"12345678"}', encoding="utf-8-sig")
+    assert tray._load_json(target)["connection_code"] == "12345678"
