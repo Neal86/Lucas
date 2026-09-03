@@ -73,6 +73,7 @@ $VenvPythonw = Join-Path $Venv "Scripts\pythonw.exe"
 $TrayPidFile = Join-Path $InstallDir "lucas-tray.pid"
 $StatusFile = Join-Path $InstallDir "node-status.json"
 $TaskName = "Lucas Node"
+$ShortcutIconFile = Join-Path $InstallDir "lucas-shortcut.ico"
 
 $SavedState = $null
 $HasSavedToken = $false
@@ -402,6 +403,12 @@ if (-not $LaunchAtStartup) {
 
 Write-Host "[Lucas] Creating Start menu and desktop shortcuts..." -ForegroundColor Green
 try {
+  # Windows shortcuts otherwise inherit pythonw.exe's Python icon. Build a stable
+  # Lucas .ico from the same square logo used by the tray, then point every .lnk
+  # at that file. Recreating the shortcuts on each install/update also refreshes
+  # existing Start-menu and desktop entries without touching user configuration.
+  & $VenvPython -c "from pathlib import Path; from gpt_windows_connector.app_icon import make_square_icon; make_square_icon(status=None, size=256).save(Path(r'$ShortcutIconFile'), format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $ShortcutIconFile)) { throw "Failed to create the Lucas shortcut icon." }
   $WshShell = New-Object -ComObject WScript.Shell
   $ShortcutTargets = @(
     (Join-Path ([Environment]::GetFolderPath("Desktop")) "Lucas.lnk"),
@@ -413,6 +420,7 @@ try {
     $Shortcut.Arguments = "-m gpt_windows_connector.launcher"
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.Description = "Open or start Lucas"
+    $Shortcut.IconLocation = "$ShortcutIconFile,0"
     $Shortcut.Save()
   }
 } catch {
