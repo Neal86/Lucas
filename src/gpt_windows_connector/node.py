@@ -38,6 +38,23 @@ DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
 
+class NodeSessionDisconnected(ConnectionError):
+    """A previously established Gateway session was lost. Retry direct immediately."""
+
+
+def _disconnect_reason(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "keepalive ping timeout" in text or "ping timeout" in text:
+        return "ping_timeout"
+    if "1012" in text or "service restart" in text:
+        return "gateway_restart"
+    if "1006" in text or "connection closed" in text or "closed" in text:
+        return "connection_closed"
+    if "timed out" in text or "timeout" in text:
+        return "network_timeout"
+    return type(exc).__name__
+
+
 def _is_gateway_restart_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return (
@@ -333,7 +350,7 @@ async def _serve_connection(
             user_id = str(actor.get("user_id") or "").strip()
             if not user_id:
                 return {"authorized": False, "error": "missing user identity"}
-            current = effective_access(actor)
+            current = await asyncio.to_thread(effective_access, actor)
             if current:
                 return {"authorized": True, **current}
             now = time.time()
@@ -370,19 +387,24 @@ async def _serve_connection(
             user_ids = [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")]
             await send_json({"type": "access.sync", "authorized_user_ids": user_ids})
 
+        def prepare_executor(access: dict[str, object]) -> tuple[str, Executor]:
+            # Path.resolve() can block on cloud/network drives. Keep all filesystem-
+            # touching access preparation off the WebSocket asyncio event loop.
+            user_id = str(access.get("user_id") or "")
+            roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
+            user_config = _load_config()
+            node_security = user_config.get("security") if isinstance(user_config.get("security"), dict) else {}
+            account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(str(access.get("preset") or "request_approval"))
+            user_config["security"] = intersect_security(dict(node_security), dict(account_security))
+            return user_id, Executor(roots, user_config)
+
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
             wall_started=time.time(); status="success"; error_type=None
             try:
-                access = effective_access(actor)
+                access = await asyncio.to_thread(effective_access, actor)
                 if not access:
                     raise PermissionError("This Lucas user has not been approved on the Windows Node")
-                user_id = str(access.get("user_id") or "")
-                roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
-                user_config = _load_config()
-                node_security = user_config.get("security") if isinstance(user_config.get("security"), dict) else {}
-                account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(str(access.get("preset") or "request_approval"))
-                user_config["security"] = intersect_security(dict(node_security), dict(account_security))
-                active_executor = Executor(roots, user_config)
+                user_id, active_executor = await asyncio.to_thread(prepare_executor, access)
                 result = await active_executor.call(method, params)
                 if user_id and user_id not in session_grants:
                     local_access.touch(user_id)
@@ -431,7 +453,7 @@ async def _serve_connection(
                         await send_json({"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
                     continue
                 if method == "access.check":
-                    access = effective_access(actor)
+                    access = await asyncio.to_thread(effective_access, actor)
                     await send_json({"type": "response", "id": request_id, "ok": True, "result": ({"authorized": True, **access} if access else {"authorized": False})})
                     continue
                 if method == "node.configure":
@@ -441,7 +463,7 @@ async def _serve_connection(
                     })
                     continue
                 if method == "node.logs":
-                    log_access = effective_access(actor)
+                    log_access = await asyncio.to_thread(effective_access, actor)
                     if not log_access or not _grants_full_access(log_access):
                         await send_json({"type": "response", "id": request_id, "ok": False, "error": "PermissionError: Full Access is required for Node logs"})
                         continue
@@ -456,6 +478,12 @@ async def _serve_connection(
                 task = asyncio.create_task(execute_request(request_id, method, params, actor), name=f"lucas:{method}:{request_id}")
                 request_tasks.add(task)
                 task.add_done_callback(request_tasks.discard)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            reason = _disconnect_reason(exc)
+            log.warning("Node session disconnected reason=%s error=%s", reason, exc)
+            raise NodeSessionDisconnected(f"{reason}: {exc}") from exc
         finally:
             if request_tasks:
                 for task in request_tasks:
@@ -504,9 +532,15 @@ async def run_node() -> None:
                         strategy_name,
                         candidate_error,
                     )
+                    if isinstance(candidate_error, NodeSessionDisconnected):
+                        detail = f"Session lost ({candidate_error}); reconnecting direct immediately"
+                        log.info(detail)
+                        _write_status("Reconnecting", detail)
+                        retry_primary = True
+                        break
                     if _is_gateway_restart_error(candidate_error):
-                        retry_after = 3.0
-                        detail = f"Gateway restarting; retrying primary in {retry_after:.0f}s"
+                        retry_after = 0.25
+                        detail = "Gateway restarting; reconnecting primary immediately"
                         log.info(detail)
                         _write_status("Reconnecting", detail)
                         await asyncio.sleep(retry_after)
@@ -524,10 +558,11 @@ async def run_node() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.warning("Disconnected: %s; retrying in %.1fs", exc, delay)
-            _write_status("Reconnecting", str(exc))
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 30.0)
+            reason = _disconnect_reason(exc)
+            log.warning("Disconnected reason=%s error=%s; reconnecting immediately", reason, exc)
+            _write_status("Reconnecting", f"{reason}: {exc}")
+            await asyncio.sleep(0.1)
+            delay = 1.0
 
 
 def main() -> None:

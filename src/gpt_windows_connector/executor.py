@@ -55,7 +55,9 @@ class Executor:
             "directories": directories[:1000],
         }
 
-    async def call(self, method: str, params: dict) -> object:
+    def _prepare_call(self, method: str, params: dict) -> tuple[dict, Path | None]:
+        # Security/path validation may touch cloud or network drives. This whole
+        # preflight runs in a worker thread so it can never starve WebSocket pings.
         self.security.authorize(method, dict(params or {}))
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
@@ -72,6 +74,10 @@ class Executor:
                 str(p.get("target") or ""),
                 str(p.get("arguments") or ""),
             )
+        return p, workspace
+
+    async def call(self, method: str, params: dict) -> object:
+        p, workspace = await asyncio.to_thread(self._prepare_call, method, params)
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
             "workspace.browse": lambda: self.browse_workspaces(**p),
@@ -128,11 +134,15 @@ class Executor:
             if workspace is None:
                 raise PermissionError("browser.upload requires a project workspace")
             paths = p.get("paths") or []
-            p["paths"] = [str(resolve_in_workspace(workspace, path)) for path in paths]
+            p["paths"] = await asyncio.to_thread(
+                lambda: [str(resolve_in_workspace(workspace, path)) for path in paths]
+            )
         elif method == "browser.download":
             if workspace is None:
                 raise PermissionError("browser.download requires a project workspace")
-            p["save_path"] = str(resolve_in_workspace(workspace, p["save_path"]))
+            p["save_path"] = await asyncio.to_thread(
+                lambda: str(resolve_in_workspace(workspace, p["save_path"]))
+            )
 
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,

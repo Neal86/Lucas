@@ -34,3 +34,8 @@ def test_gateway_restart_errors_do_not_trigger_route_fanout():
     assert node._is_gateway_restart_error(Exception("received 1012 (service restart)"))
     assert node._is_gateway_restart_error(Exception("server rejected WebSocket connection: HTTP 502"))
     assert not node._is_gateway_restart_error(Exception("getaddrinfo failed"))
+
+
+def test_disconnect_reason_identifies_ping_timeout():
+    assert node._disconnect_reason(Exception("1011 internal error keepalive ping timeout")) == "ping_timeout"
+    assert node._disconnect_reason(Exception("received 1012 service restart")) == "gateway_restart"

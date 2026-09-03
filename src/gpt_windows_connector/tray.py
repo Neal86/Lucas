@@ -115,6 +115,14 @@ def _status_label(status: str) -> str:
     return f"{icon}  {_display_status(status)}"
 
 
+def _status_requests_recovery(status: dict[str, Any], current_pid: int) -> bool:
+    try:
+        status_pid = int(status.get("pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    return status_pid == current_pid and str(status.get("status") or "") == "Reconnecting"
+
+
 class LucasTray:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -190,18 +198,24 @@ class LucasTray:
                 _message_box(str(exc), "Lucas Node")
         self._refresh_icon(force=True)
 
-    def _reconnect(self, icon: Any = None, item: Any = None) -> None:
+    def _recover_node(self, reason: str, *, show_error: bool = False) -> None:
         self._set_connection_enabled(True)
+        log.warning("Auto-recovery: restarting Node process reason=%s", reason)
         self._stop_node()
         self._status = "Reconnecting"
+        self._detail = reason
         try:
             self._spawn_node()
         except Exception as exc:
             log.exception("Could not reconnect Lucas Node")
             self._status = "Offline"
             self._detail = str(exc)
-            _message_box(str(exc), "Lucas Node")
+            if show_error:
+                _message_box(str(exc), "Lucas Node")
         self._refresh_icon(force=True)
+
+    def _reconnect(self, icon: Any = None, item: Any = None) -> None:
+        self._recover_node("manual reconnect", show_error=True)
 
     def _toggle_startup(self, icon: Any = None, item: Any = None) -> None:
         config = _load_config()
@@ -373,8 +387,10 @@ class LucasTray:
         age = time.time() - status_time if status_time else float("inf")
         if age > STATUS_STALE_SECONDS:
             if self._status == "Online":
-                self._status = "Reconnecting"
-                self._detail = "Waiting for node heartbeat"
+                self._recover_node("stale node heartbeat")
+            return
+        if _status_requests_recovery(status, process.pid):
+            self._recover_node(str(status.get("detail") or "node reported reconnect failure"))
             return
         if value in {"Online", "Connecting", "Offline", "Reconnecting"}:
             self._status = value

@@ -25,3 +25,9 @@ def test_tray_reads_powershell_utf8_bom_json(tmp_path: Path):
     target = tmp_path / "node-config.json"
     target.write_text('{"connection_code":"12345678"}', encoding="utf-8-sig")
     assert tray._load_json(target)["connection_code"] == "12345678"
+
+
+def test_reconnecting_status_for_current_process_requests_recovery():
+    assert tray._status_requests_recovery({"status": "Reconnecting", "pid": 42}, 42) is True
+    assert tray._status_requests_recovery({"status": "Online", "pid": 42}, 42) is False
+    assert tray._status_requests_recovery({"status": "Reconnecting", "pid": 41}, 42) is False
