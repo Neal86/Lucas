@@ -262,7 +262,11 @@ async def _serve_connection(
     query = urlencode({"node_id": settings.node_id})
     uri = base_gateway + ("&" if "?" in base_gateway else "?") + query
     token = _load_saved_token(settings)
-    connection_code = _ensure_connection_code(_load_config())
+    # Do not cache the Connection Code for the lifetime of the WebSocket. The
+    # settings UI can rotate it while the Node remains connected, and existing
+    # authorized users must stay connected. New access requests always validate
+    # against the current on-disk config instead.
+    _ensure_connection_code(_load_config())
     connect_kwargs: dict[str, object] = {
         "ping_interval": 20,
         "ping_timeout": 20,
@@ -321,7 +325,8 @@ async def _serve_connection(
             if len(attempts) >= 5:
                 log.warning("Local connection-code rate limit user=%s", user_id)
                 return {"authorized": False, "error": "too many connection attempts"}
-            if not supplied_connection_code or not secrets.compare_digest(connection_code, supplied_connection_code.strip()):
+            current_connection_code = _ensure_connection_code(_load_config())
+            if not supplied_connection_code or not secrets.compare_digest(current_connection_code, supplied_connection_code.strip()):
                 attempts.append(now)
                 access_attempts[user_id] = attempts
                 log.warning("Invalid connection code for access request user=%s", user_id)

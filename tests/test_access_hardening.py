@@ -1,4 +1,7 @@
+import json
+
 from gpt_windows_connector.access_control import intersect_security
+from gpt_windows_connector import node
 
 
 def test_user_full_access_cannot_override_node_ask():
@@ -11,6 +14,17 @@ def test_user_full_access_cannot_override_node_ask():
 
 
 def test_domain_constraints_only_get_narrower():
-    node = {"allowed_domains": ["example.com", "api.example.com"]}
+    node_security = {"allowed_domains": ["example.com", "api.example.com"]}
     user = {"allowed_domains": ["api.example.com", "other.com"]}
-    assert intersect_security(node, user)["allowed_domains"] == ["api.example.com"]
+    assert intersect_security(node_security, user)["allowed_domains"] == ["api.example.com"]
+
+
+def test_connection_code_reload_reads_rotated_value(tmp_path, monkeypatch):
+    config_file = tmp_path / "node-config.json"
+    device_id_file = tmp_path / "node-device-id.txt"
+    monkeypatch.setattr(node, "CONFIG_FILE", config_file)
+    monkeypatch.setattr(node, "DEVICE_ID_FILE", device_id_file)
+    config_file.write_text(json.dumps({"node_id": "test-node", "connection_code": "11112222"}), encoding="utf-8")
+    assert node._ensure_connection_code(node._load_config()) == "11112222"
+    config_file.write_text(json.dumps({"node_id": "test-node", "connection_code": "33334444"}), encoding="utf-8")
+    assert node._ensure_connection_code(node._load_config()) == "33334444"
