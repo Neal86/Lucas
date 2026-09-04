@@ -192,21 +192,31 @@ def _find_element(title_re: str, name: str | None = None, automation_id: str | N
 def ui_click(title_re: str, name: str | None = None, automation_id: str | None = None, control_type: str | None = None) -> dict:
     element = _find_element(title_re, name, automation_id, control_type)
     try:
+        # UIA Invoke is background-friendly and does not move the user's mouse.
         element.invoke()
         mode = "invoke"
     except Exception:
-        element.click_input()
-        mode = "click_input"
+        try:
+            # Prefer a programmatic wrapper click before resorting to real mouse
+            # input, which can activate the window and steal focus.
+            element.click()
+            mode = "click"
+        except Exception:
+            element.click_input()
+            mode = "click_input"
     return {"name": element.window_text(), "mode": mode}
 
 
 def ui_set_text(title_re: str, text: str, name: str | None = None, automation_id: str | None = None, control_type: str | None = None) -> dict:
     element = _find_element(title_re, name, automation_id, control_type)
-    element.set_focus()
     try:
+        # Do not call set_focus() up front. Many UIA edit controls support direct
+        # value updates without activating their parent window.
         element.set_edit_text(text)
         mode = "set_edit_text"
     except Exception:
+        # Keyboard input fundamentally targets the foreground window, so use it
+        # only as the final compatibility fallback.
         element.click_input()
         hotkey(["ctrl", "a"])
         type_text(text)

@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+BACKGROUND_CREATION_FLAGS = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+
+
 @dataclass
 class ManagedProcess:
     process: subprocess.Popen[str]
@@ -55,7 +60,11 @@ def start_process(workspace: Path, command: str, shell_type: str = "powershell")
         text=True,
         encoding="utf-8",
         errors="replace",
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        # Long-running npm/cargo/git tasks are background jobs. Creating a new
+        # process group is useful for lifecycle control, but by itself Windows can
+        # still attach/show a console. CREATE_NO_WINDOW keeps Lucas from opening
+        # Windows Terminal or stealing focus while preserving the process group.
+        creationflags=BACKGROUND_CREATION_FLAGS,
         shell=False,
     )
     process_id = uuid.uuid4().hex
