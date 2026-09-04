@@ -20,7 +20,7 @@ def set_windows_app_id(app_id: str = APP_USER_MODEL_ID) -> None:
 
 
 def make_square_icon(status: str | None = None, size: int = 64) -> Any:
-    """Return the same white square Lucas icon used by the notification tray."""
+    """Return the Lucas octopus icon used by Windows, the settings window, and tray."""
     from PIL import Image, ImageDraw, ImageFont
 
     image = Image.new("RGBA", (size, size), (255, 255, 255, 255))
@@ -37,7 +37,8 @@ def make_square_icon(status: str | None = None, size: int = 64) -> Any:
     try:
         asset = Path(__file__).with_name("assets") / "lucas-logo-square.png"
         source = Image.open(asset).convert("RGBA")
-        logo_size = max(16, round(size * 50 / 64))
+        # Fill most of the Windows icon tile so the mark remains legible at 32/48 px.
+        logo_size = max(16, round(size * 58 / 64))
         source.thumbnail((logo_size, logo_size), Image.Resampling.LANCZOS)
         image.alpha_composite(source, ((size - source.width) // 2, (size - source.height) // 2))
     except Exception:
