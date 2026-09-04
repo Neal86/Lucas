@@ -8,6 +8,7 @@ _WINDOWS_ABSOLUTE = re.compile(r"(?i)(?<![A-Za-z0-9_])([A-Za-z]:[\\/][^\r\n\t\"'
 _UNC = re.compile(r"(?<![\\])((?:\\\\|//)[^\r\n\t\"'`;|&<>]+)")
 _DRIVE_SWITCH = re.compile(r"(?i)(?:^|[;&|]\s*|\s)([A-Za-z]:)(?=\s*(?:$|[;&|]))")
 _PARENT = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)")
+_URL = re.compile(r"(?i)\b(?:https?|wss?|ftp)://[^\s\"'`;|&<>]+")
 
 def _windows_norm(value: str) -> str:
     return ntpath.normcase(ntpath.normpath(value.strip().strip("\"'")))
@@ -25,20 +26,29 @@ def _allowed_strings(allowed_roots: tuple[Path, ...]) -> tuple[str, ...]:
 
 def validate_command_paths(workspace: Path, allowed_roots: tuple[Path, ...], command: str) -> None:
     text = str(command or "")
+    # Network URLs are not Windows filesystem paths. Remove them before scanning
+    # so https://host/path is never interpreted as a //host/path UNC path.
+    path_text = _URL.sub("", text)
     roots = _allowed_strings(allowed_roots)
-    for match in _WINDOWS_ABSOLUTE.finditer(text):
+    for match in _WINDOWS_ABSOLUTE.finditer(path_text):
         candidate = match.group(1).strip()
         if candidate and not any(_is_under(candidate, root) for root in roots):
             raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {candidate}")
-    for match in _UNC.finditer(text):
+    for match in _UNC.finditer(path_text):
         candidate = match.group(1).strip()
+        # A real UNC path has at least a server and share component. Tokens such
+        # as \\LucasPet.exe are not complete UNC paths and must not be treated
+        # as filesystem escapes.
+        unc_body = candidate.lstrip("\\/")
+        if not re.search(r"[\\/]", unc_body):
+            continue
         if candidate and not any(_is_under(candidate, root) for root in roots):
             raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {candidate}")
-    for match in _DRIVE_SWITCH.finditer(text):
+    for match in _DRIVE_SWITCH.finditer(path_text):
         drive = match.group(1).casefold()
         if not any(ntpath.splitdrive(_windows_norm(root))[0].casefold() == drive for root in roots):
             raise PermissionError(f"PATH_OUTSIDE_ALLOWED_FOLDERS: {drive}")
-    if _PARENT.search(text):
+    if _PARENT.search(path_text):
         raise PermissionError("PATH_OUTSIDE_ALLOWED_FOLDERS: parent traversal is not allowed in shell/process commands")
 
 def validate_launch_target(workspace: Path, allowed_roots: tuple[Path, ...], target: str, arguments: str = "") -> None:
