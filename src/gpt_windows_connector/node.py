@@ -533,19 +533,15 @@ async def run_node() -> None:
                         candidate_error,
                     )
                     if isinstance(candidate_error, NodeSessionDisconnected):
-                        detail = f"Session lost ({candidate_error}); reconnecting direct immediately"
+                        detail = f"Session lost ({candidate_error}); requesting fresh Node process"
                         log.info(detail)
                         _write_status("Reconnecting", detail)
-                        retry_primary = True
-                        break
+                        raise SystemExit(75)
                     if _is_gateway_restart_error(candidate_error):
-                        retry_after = 0.25
-                        detail = "Gateway restarting; reconnecting primary immediately"
+                        detail = "Gateway restarting; requesting fresh Node process"
                         log.info(detail)
                         _write_status("Reconnecting", detail)
-                        await asyncio.sleep(retry_after)
-                        retry_primary = True
-                        break
+                        raise SystemExit(75)
                     _write_status(
                         "Reconnecting",
                         f"{candidate_error}; failed {primary} via {strategy_name}",
@@ -559,10 +555,9 @@ async def run_node() -> None:
             raise
         except Exception as exc:
             reason = _disconnect_reason(exc)
-            log.warning("Disconnected reason=%s error=%s; reconnecting immediately", reason, exc)
+            log.warning("Disconnected reason=%s error=%s; requesting fresh Node process", reason, exc)
             _write_status("Reconnecting", f"{reason}: {exc}")
-            await asyncio.sleep(0.1)
-            delay = 1.0
+            raise SystemExit(75)
 
 
 def main() -> None:
