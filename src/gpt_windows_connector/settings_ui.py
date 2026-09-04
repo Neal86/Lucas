@@ -104,7 +104,7 @@ def _save_config(config: dict[str, Any]) -> None:
     temp.replace(CONFIG_FILE)
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "规则", "任务记录", "日志", "系统访问"}
+    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "任务记录", "日志", "系统访问"}
     requested = str(os.environ.get("LUCAS_SETTINGS_PAGE") or "").strip()
     if requested in allowed:
         return requested
@@ -156,7 +156,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     language = system_language()
     T = lambda zh, en: tr(zh, en, language)
-    NAV_EN = {"常规":"General","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","规则":"Rules","任务记录":"Task History","日志":"Logs","系统访问":"System Access"}
+    NAV_EN = {"常规":"General","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","任务记录":"Task History","日志":"Logs","系统访问":"System Access"}
     C = {
         "window":"#FFFFFF","sidebar":"#F3F3F3","sidebar_hover":"#EAEAEA","card":"#FFFFFF",
         "line":"#E5E5E5","text":"#1F1F1F","muted":"#6B6B6B","subtle":"#8A8A8A",
@@ -253,6 +253,11 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     active_scroll_canvas=None
     def _mousewheel(event):
+        try:
+            if event.widget.winfo_toplevel() is not root:
+                return
+        except Exception:
+            return
         if active_scroll_canvas is None or not active_scroll_canvas.winfo_exists(): return
         delta=int(-1*(event.delta/120)) if event.delta else 0
         if delta: active_scroll_canvas.yview_scroll(delta,"units")
@@ -388,7 +393,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     updater.start_auto_check()
 
     wrap,body=scroll_page(); pages["安全"]=wrap
-    section(body,"权限"); c=card(body); preset_syncing={"value":False}
+    section(body,"默认权限"); c=card(body); preset_syncing={"value":False}
     preset_display=tk.StringVar(value=detect_security_preset({k:v.get() for k,v in approval_vars.items()},network_external.get(),network_lan.get(),block_silent_network.get(),[v.strip() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()])); preset_desc=tk.StringVar(value=PRESET_DESCRIPTIONS[preset_display.get()])
     def sync_preset_from_fields(*_):
         if preset_syncing["value"]: return
@@ -407,7 +412,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def preset_control(p):
         f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e"); tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
     row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
-    section(body,"审批策略"); c=card(body)
+    section(body,"默认审批策略"); c=card(body)
     prs=PERMISSION_ROWS
     for i,(k,h,d) in enumerate(prs):
         row(c,h,d,lambda p,k=k: decision_control(p,approval_vars[k]));
@@ -533,11 +538,16 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         preset=preset_to_id.get(user_preset.get(),normalize_preset(str(record.get("preset") or "request_approval")))
         security=dict(record.get("security") or preset_security(preset))
         policy=dict(security.get("approval_policy") or {})
-        win=tk.Toplevel(root); win.title("Lucas · 用户详细权限"); win.geometry("720x720"); win.transient(root); win.grab_set()
+        win=tk.Toplevel(root); win.title("Lucas · 用户详细权限"); win.geometry("720x720"); win.transient(root); win.grab_set(); win.update_idletasks(); win.geometry(f"720x720+{max((win.winfo_screenwidth()-720)//2,0)}+{max((win.winfo_screenheight()-720)//2,0)}")
         outer=tk.Frame(win,bg=C["window"]); outer.pack(fill="both",expand=True,padx=22,pady=18)
         tk.Label(outer,text="详细权限",font=(FONT,16,"bold"),fg=C["text"],bg=C["window"]).pack(anchor="w")
         tk.Label(outer,text=user_identity.get(),font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(anchor="w",pady=(3,12))
         canvas=tk.Canvas(outer,bg=C["window"],highlightthickness=0); sb=ttk.Scrollbar(outer,orient="vertical",command=canvas.yview); body=tk.Frame(canvas,bg=C["window"]); holder=canvas.create_window((0,0),window=body,anchor="nw"); canvas.configure(yscrollcommand=sb.set); canvas.pack(side="left",fill="both",expand=True); sb.pack(side="right",fill="y"); body.bind("<Configure>",lambda e: canvas.configure(scrollregion=canvas.bbox("all"))); canvas.bind("<Configure>",lambda e: canvas.itemconfigure(holder,width=e.width))
+        def _detail_mousewheel(event):
+            delta=int(-1*(event.delta/120)) if event.delta else 0
+            if delta: canvas.yview_scroll(delta,"units")
+            return "break"
+        win.bind("<MouseWheel>",_detail_mousewheel,add="+")
         labels={"system_info":"系统信息读取","shell":"普通 PowerShell / 命令行","file_write":"文件写入与修改","file_delete":"文件删除","process_control":"进程启动 / 停止","service_control":"Windows 服务","registry_system":"注册表与系统配置","software_install":"安装 / 卸载软件","desktop_control":"电脑操控","screenshots":"屏幕截图","clipboard":"剪贴板","browser_control":"浏览器操控","browser_transfer":"浏览器上传 / 下载","git_write":"Git 本地修改","git_push":"Git Push / 远程写入","high_risk":"其他高风险系统修改"}
         detail_vars={}
         for key in APPROVAL_DEFAULTS:
@@ -581,16 +591,18 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["网络"]=wrap
     section(body,"网络访问"); c=card(body); row(c,"外部网络访问","访问互联网、远程 API、Git 远端等。",lambda p: decision_control(p,network_external)); divider(c); row(c,"本地局域网访问","localhost、私有 IP 与 .local 地址。",lambda p: decision_control(p,network_lan)); divider(c); row(c,"允许的域名","可选，逗号分隔；为空表示不额外限制域名。支持 *.example.com。",lambda p: tk.Entry(p,textvariable=allowed_domains,font=(FONT,10),relief="flat",bg=C["control"],fg=C["text"],bd=0,width=40)); divider(c); row(c,"阻止后台静默联网","无法识别目标地址的网络命令必须在本机确认。",lambda p: switch(p,block_silent_network))
 
-    wrap,body=scroll_page(); pages["规则"]=wrap
-    section(body,"本地 Rules"); c=card(body); tk.Label(c,text="本地安全规则",font=(FONT,10,"bold"),fg=C["text"],bg=C["card"]).pack(anchor="w",padx=18,pady=(16,4)); tk.Label(c,text="需要确认的操作会把规则摘要一起显示在本机审批窗口。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,10)); rules_text=tk.Text(c,height=8,font=(FONT,10),bg=C["control"],fg=C["text"],relief="flat",bd=0,wrap="word",padx=10,pady=9); rules_text.insert("1.0",rules_initial); rules_text.pack(fill="x",padx=18,pady=(0,14)); divider(c); row(c,"执行前显示规则摘要","审批时显示本地规则。",lambda p: switch(p,show_rule_summary))
-
     tasks_wrapper,tasks_body=scroll_page(); pages["任务记录"]=tasks_wrapper
     section(tasks_body,"任务记录")
     task_card=card(tasks_body)
     tk.Label(task_card,text="记录本机通过 Lucas 执行的大任务与小任务耗时。5 分钟无新操作后自动结束一个大任务。",font=(FONT,9),fg=C["muted"],bg=C["card"],wraplength=650,justify="left").pack(anchor="w",padx=18,pady=(14,10))
     task_list=tk.Frame(task_card,bg=C["card"]); task_list.pack(fill="both",expand=True,padx=18,pady=(0,14))
     def _duration_text(ms):
-        sec=max(0,int((ms or 0)/1000)); h,rem=divmod(sec,3600); m,s=divmod(rem,60)
+        value=max(0.0,float(ms or 0))
+        if value < 1: return "<1ms"
+        if value < 1000: return f"{int(round(value))}ms"
+        sec=value/1000.0
+        if sec < 10: return f"{sec:.1f}s"
+        whole=int(round(sec)); h,rem=divmod(whole,3600); m,s=divmod(rem,60)
         return f"{h}h {m}m {s}s" if h else (f"{m}m {s}s" if m else f"{s}s")
     def refresh_local_tasks():
         for child in task_list.winfo_children(): child.destroy()
@@ -601,13 +613,24 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
             tk.Label(task_list,text="还没有任务记录。",font=(FONT,9),fg=C["muted"],bg=C["card"]).pack(anchor="w",pady=8); return
         for run in runs:
             box=tk.Frame(task_list,bg=C["control"],highlightthickness=1,highlightbackground=C["line"]); box.pack(fill="x",pady=(0,8))
-            head=tk.Frame(box,bg=C["control"]); head.pack(fill="x",padx=12,pady=(10,6))
-            tk.Label(head,text=str(run.get("title") or "Lucas task"),font=(FONT,9,"bold"),fg=C["text"],bg=C["control"]).pack(side="left")
-            tk.Label(head,text=f"{run.get('status','')} · {_duration_text(run.get('duration_ms'))}",font=(FONT,9),fg=C["muted"],bg=C["control"]).pack(side="right")
-            for step in run.get("steps",[])[:20]:
-                row=tk.Frame(box,bg=C["control"]); row.pack(fill="x",padx=18,pady=2)
-                tk.Label(row,text=str(step.get("action") or "operation"),font=(FONT,8),fg=C["text"],bg=C["control"]).pack(side="left")
-                tk.Label(row,text=_duration_text(step.get("duration_ms")),font=(FONT,8),fg=C["muted"],bg=C["control"]).pack(side="right")
+            expanded={"value": str(run.get("status") or "") == "running"}
+            head=tk.Frame(box,bg=C["control"],cursor="hand2"); head.pack(fill="x",padx=12,pady=(9,8))
+            arrow=tk.StringVar(value=("▼" if expanded["value"] else "▶"))
+            arrow_label=tk.Label(head,textvariable=arrow,font=(FONT,9,"bold"),fg=C["muted"],bg=C["control"],cursor="hand2"); arrow_label.pack(side="left",padx=(0,7))
+            title_label=tk.Label(head,text=str(run.get("title") or "Lucas task"),font=(FONT,9,"bold"),fg=C["text"],bg=C["control"],cursor="hand2"); title_label.pack(side="left")
+            status_label=tk.Label(head,text=f"{run.get('status','')} · {_duration_text(run.get('duration_ms'))}",font=(FONT,9),fg=C["muted"],bg=C["control"],cursor="hand2"); status_label.pack(side="right")
+            details=tk.Frame(box,bg=C["control"])
+            for step in run.get("steps",[])[:50]:
+                step_row=tk.Frame(details,bg=C["control"]); step_row.pack(fill="x",padx=18,pady=2)
+                tk.Label(step_row,text=str(step.get("action") or "operation"),font=(FONT,8),fg=C["text"],bg=C["control"]).pack(side="left")
+                tk.Label(step_row,text=_duration_text(step.get("duration_ms")),font=(FONT,8),fg=C["muted"],bg=C["control"]).pack(side="right")
+            def toggle_details(_event=None, details=details, arrow=arrow, expanded=expanded):
+                expanded["value"]=not expanded["value"]
+                arrow.set("▼" if expanded["value"] else "▶")
+                if expanded["value"]: details.pack(fill="x",padx=12,pady=(0,9))
+                else: details.pack_forget()
+            for widget in (head,arrow_label,title_label,status_label): widget.bind("<Button-1>",toggle_details)
+            if expanded["value"]: details.pack(fill="x",padx=12,pady=(0,9))
     button(task_card,"刷新",refresh_local_tasks).pack(anchor="e",padx=18,pady=(0,14))
     refresh_local_tasks()
 
@@ -649,7 +672,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
 
-    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","用户与权限":"管理哪些 Lucas 用户可以操作此电脑，以及每个用户的权限和允许目录。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","规则":"管理本机审批时展示的安全规则。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","日志":"查看本机 Node 实时日志，用于排查连接、认证和重连问题。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
+    desc={"常规":"连接身份与此电脑的 Lucas 基础配置。","安全":"控制 AI 在这台电脑上可以执行的操作。安全设置只能在本机修改。","用户与权限":"管理哪些 Lucas 用户可以操作此电脑，以及每个用户的权限和允许目录。","文件访问":"使用 Allowed Folders 建立文件与工作区的硬边界。","网络":"控制互联网、局域网、域名与后台网络请求。","任务记录":"查看本机 Lucas 大任务与小任务执行时间。","日志":"查看本机 Node 实时日志，用于排查连接、认证和重连问题。","系统访问":"查看 Lucas 与 Windows 管理员权限的实际状态。"}
     def show_page(name):
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
@@ -657,7 +680,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name if language=="zh" else NAV_EN[name]); subtitle.set(desc[name] if language=="zh" else SETTINGS_EN.get(desc[name], desc[name])); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
-    for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","日志","系统访问"):
+    for name in ("常规","安全","用户与权限","文件访问","网络","任务记录","日志","系统访问"):
         b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,textvariable=sidebar_version,font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
@@ -675,7 +698,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         # captured when this Settings window opened. This makes node-config.json the
         # single authoritative state and prevents stale UI actions from deleting
         # newly saved Allowed Folders.
-        updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_text.get("1.0","end").strip(),"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_initial,"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         return updated
 
     def apply_auto_save():
@@ -707,11 +730,10 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
         preset_display.set("请求批准（Recommended）")
         for k,v in APPROVAL_DEFAULTS.items(): approval_vars[k].set(v)
-        remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); rules_text.delete("1.0","end"); rules_text.insert("1.0","所有安全策略以本机设置为准；网页端只能查看，不能修改本机权限与允许目录。"); schedule_auto_save(delay=0)
+        remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); schedule_auto_save(delay=0)
 
     for var in [remember_approvals,block_silent_network,show_rule_summary,network_external,network_lan,allowed_domains,*approval_vars.values()]:
         var.trace_add("write",schedule_auto_save)
-    rules_text.bind("<KeyRelease>",schedule_auto_save,add="+")
     gateway.trace_add("write",lambda *_: schedule_auto_save(delay=700))
 
     button(fi,"关闭",root.destroy,primary=True).pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10))
