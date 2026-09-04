@@ -26,6 +26,7 @@ TRAY_LOG_FILE = CONFIG_DIR / "lucas-tray.log"
 PID_FILE = CONFIG_DIR / "lucas-tray.pid"
 STATUS_STALE_SECONDS = 45.0
 RESUME_GAP_SECONDS = 8.0
+NODE_STARTUP_GRACE_SECONDS = 20.0
 
 log = logging.getLogger("lucas.tray")
 
@@ -128,6 +129,11 @@ def _supervisor_gap_requires_recovery(gap_seconds: float) -> bool:
     return gap_seconds > RESUME_GAP_SECONDS
 
 
+def _stale_status_requires_recovery(status_age: float, process_age: float) -> bool:
+    """Recover a live Node that stopped publishing status after resume/network loss."""
+    return status_age > STATUS_STALE_SECONDS and process_age > NODE_STARTUP_GRACE_SECONDS
+
+
 class LucasTray:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -142,6 +148,7 @@ class LucasTray:
         self._restart_attempts = 0
         self._settings_process: subprocess.Popen[Any] | None = None
         self._last_supervisor_tick = time.monotonic()
+        self._process_started_monotonic = 0.0
 
     def _runtime_pythonw(self) -> Path:
         executable = Path(sys.executable).resolve()
@@ -159,6 +166,7 @@ class LucasTray:
             pythonw = self._runtime_pythonw()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             self._process = subprocess.Popen([str(pythonw), "-m", "gpt_windows_connector.node"], cwd=str(CONFIG_DIR), creationflags=flags, close_fds=True)
+            self._process_started_monotonic = time.monotonic()
             self._status = "Reconnecting" if self._ever_online else "Connecting"
             self._detail = ""
             self._restart_attempts += 1
@@ -168,6 +176,7 @@ class LucasTray:
         with self._lock:
             process = self._process
             self._process = None
+            self._process_started_monotonic = 0.0
         if not process or process.poll() is not None:
             return
         try:
@@ -379,6 +388,7 @@ class LucasTray:
             with self._lock:
                 if self._process is process:
                     self._process = None
+                    self._process_started_monotonic = 0.0
             self._status = "Reconnecting" if _connection_enabled(_load_config()) else "Disconnected"
             self._detail = f"Node exited with code {exit_code}"
             log.warning("Lucas Node exited unexpectedly with code %s", exit_code)
@@ -391,9 +401,9 @@ class LucasTray:
         except (TypeError, ValueError):
             status_time = 0.0
         age = time.time() - status_time if status_time else float("inf")
-        if age > STATUS_STALE_SECONDS:
-            if self._status == "Online":
-                self._recover_node("stale node heartbeat")
+        process_age = time.monotonic() - self._process_started_monotonic if self._process_started_monotonic else float("inf")
+        if _stale_status_requires_recovery(age, process_age):
+            self._recover_node(f"stale node heartbeat/status ({age:.1f}s)")
             return
         if _status_requests_recovery(status, process.pid):
             self._recover_node(str(status.get("detail") or "node reported reconnect failure"))

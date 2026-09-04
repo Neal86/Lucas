@@ -37,3 +37,9 @@ def test_supervisor_gap_detects_system_resume():
     assert tray._supervisor_gap_requires_recovery(2.0) is False
     assert tray._supervisor_gap_requires_recovery(tray.RESUME_GAP_SECONDS) is False
     assert tray._supervisor_gap_requires_recovery(tray.RESUME_GAP_SECONDS + 0.1) is True
+
+
+def test_stale_status_watchdog_recovers_reconnecting_node_after_startup_grace():
+    assert tray._stale_status_requires_recovery(tray.STATUS_STALE_SECONDS + 1, tray.NODE_STARTUP_GRACE_SECONDS + 1) is True
+    assert tray._stale_status_requires_recovery(tray.STATUS_STALE_SECONDS + 1, tray.NODE_STARTUP_GRACE_SECONDS - 1) is False
+    assert tray._stale_status_requires_recovery(tray.STATUS_STALE_SECONDS - 1, tray.NODE_STARTUP_GRACE_SECONDS + 1) is False
