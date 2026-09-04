@@ -239,7 +239,14 @@ app = DashboardAuthMiddleware(starlette_app)
 
 
 def main() -> None:
-    uvicorn.run(app, host=gateway.settings.host, port=gateway.settings.port, log_level="info")
+    uvicorn.run(
+        app,
+        host=gateway.settings.host,
+        port=gateway.settings.port,
+        log_level="info",
+        ws_ping_interval=30.0,
+        ws_ping_timeout=60.0,
+    )
 
 
 if __name__ == "__main__":

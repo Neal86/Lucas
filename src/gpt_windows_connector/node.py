@@ -297,13 +297,18 @@ async def _serve_connection(
     _ensure_connection_code(_load_config())
     connect_kwargs: dict[str, object] = {
         "ping_interval": 20,
-        "ping_timeout": 20,
-        "open_timeout": 12,
+        "ping_timeout": 45,
+        "open_timeout": 8,
+        "close_timeout": 5,
         "max_size": 32 * 1024 * 1024,
         "proxy": proxy_mode,
     }
     if force_ipv4:
         connect_kwargs["family"] = socket.AF_INET
+    else:
+        # Prefer the fastest reachable address family instead of waiting on a
+        # broken IPv6 route before trying IPv4 after sleep or network changes.
+        connect_kwargs["happy_eyeballs_delay"] = 0.25
     async with websockets.connect(uri, **connect_kwargs) as ws:
         await ws.send(json.dumps({
             "type": "hello",
@@ -499,12 +504,12 @@ async def run_node() -> None:
             _apply_config(config)
             settings = NodeSettings.from_env()
             primary = settings.gateway_ws_url.rstrip("/") or DEFAULT_GATEWAY
-            # Keep the reconnect path deliberately small: primary direct first, then
-            # the Windows system proxy only for genuine client/network failures. The
-            # retired autozon.xyz fallback and the duplicate direct-ipv4 pass made a
-            # short Gateway restart look like minutes of reconnect churn.
+            # Try distinct transport paths, but never retired domains. Direct uses
+            # Happy Eyeballs; explicit IPv4 is a fast fallback for broken IPv6 after
+            # sleep/network changes; system proxy is last for managed networks.
             strategies = [
                 ("direct", False, None),
+                ("direct-ipv4", True, None),
                 ("system-proxy", False, True),
             ]
             last_error: Exception | None = None

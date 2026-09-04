@@ -31,3 +31,9 @@ def test_reconnecting_status_for_current_process_requests_recovery():
     assert tray._status_requests_recovery({"status": "Reconnecting", "pid": 42}, 42) is True
     assert tray._status_requests_recovery({"status": "Online", "pid": 42}, 42) is False
     assert tray._status_requests_recovery({"status": "Reconnecting", "pid": 41}, 42) is False
+
+
+def test_supervisor_gap_detects_system_resume():
+    assert tray._supervisor_gap_requires_recovery(2.0) is False
+    assert tray._supervisor_gap_requires_recovery(tray.RESUME_GAP_SECONDS) is False
+    assert tray._supervisor_gap_requires_recovery(tray.RESUME_GAP_SECONDS + 0.1) is True

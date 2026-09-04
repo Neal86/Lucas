@@ -25,6 +25,7 @@ LOG_FILE = CONFIG_DIR / "lucas-node.log"
 TRAY_LOG_FILE = CONFIG_DIR / "lucas-tray.log"
 PID_FILE = CONFIG_DIR / "lucas-tray.pid"
 STATUS_STALE_SECONDS = 45.0
+RESUME_GAP_SECONDS = 8.0
 
 log = logging.getLogger("lucas.tray")
 
@@ -123,6 +124,10 @@ def _status_requests_recovery(status: dict[str, Any], current_pid: int) -> bool:
     return status_pid == current_pid and str(status.get("status") or "") == "Reconnecting"
 
 
+def _supervisor_gap_requires_recovery(gap_seconds: float) -> bool:
+    return gap_seconds > RESUME_GAP_SECONDS
+
+
 class LucasTray:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -136,6 +141,7 @@ class LucasTray:
         self._ever_online = False
         self._restart_attempts = 0
         self._settings_process: subprocess.Popen[Any] | None = None
+        self._last_supervisor_tick = time.monotonic()
 
     def _runtime_pythonw(self) -> Path:
         executable = Path(sys.executable).resolve()
@@ -422,8 +428,23 @@ class LucasTray:
     def _supervise(self) -> None:
         while not self._stop.wait(1.0):
             try:
+                now = time.monotonic()
+                supervisor_gap = now - self._last_supervisor_tick
+                self._last_supervisor_tick = now
                 config = _load_config()
                 enabled = _connection_enabled(config)
+                if enabled and _supervisor_gap_requires_recovery(supervisor_gap):
+                    # Windows suspends Python and the network stack during sleep. A
+                    # large supervisor gap means resume; give the NIC a moment to
+                    # reacquire connectivity, then perform the same fresh-process
+                    # recovery used by the manual Reconnect Now action.
+                    self._status = "Reconnecting"
+                    self._detail = "System resume detected; waiting for network"
+                    self._write_local_status()
+                    log.warning("System resume detected after %.1fs; rebuilding Node", supervisor_gap)
+                    time.sleep(2.0)
+                    self._recover_node("system resume/network recovery")
+                    continue
                 if enabled:
                     process = self._process
                     if process is None or process.poll() is not None:
