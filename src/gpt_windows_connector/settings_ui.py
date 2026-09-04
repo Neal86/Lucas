@@ -375,13 +375,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     row(c,"连接码","新 Lucas 账号首次连接时需要 Node ID + 这组 8 位连接码；连接码正确后仍必须由本机批准账号。",build_connection_code)
 
     section(body,"Lucas Node"); c=card(body)
-    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…")
+    current_version=_app_version(); version_status=tk.StringVar(value=f"当前版本 {current_version} · 正在检查更新…"); sidebar_version=tk.StringVar(value=f"Lucas v{current_version}")
     updater=InAppUpdater(
         root=root,tk=tk,ttk=ttk,page_host=page_host,pages=pages,nav_buttons=nav_buttons,button_factory=button,
         get_footer=lambda: footer,show_page=lambda name: show_page(name),title=title,subtitle=subtitle,translate=T,colors=C,font=FONT,
         current_version=current_version,version_status=version_status,fetch_latest_version=_fetch_latest_version,version_key=_version_key,
         installer_url=INSTALLER_URL,load_last_page=_load_last_page,save_last_page=_save_last_page,
         before_update=lambda: persist_current_settings_for_update(),
+        on_update_complete=lambda value: sidebar_version.set(f"Lucas v{value}"),
     )
     row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",updater.build_control)
     updater.start_auto_check()
@@ -658,7 +659,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
     for name in ("常规","安全","用户与权限","文件访问","网络","规则","任务记录","日志","系统访问"):
         b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
-    sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,text=f"Lucas v{_app_version()}",font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
+    sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,textvariable=sidebar_version,font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
 
     footer=tk.Frame(main,bg=C["window"],highlightthickness=1,highlightbackground=C["line"]); footer.pack(fill="x",side="bottom"); fi=tk.Frame(footer,bg=C["window"]); fi.pack(fill="x",padx=54,pady=12); save_feedback=tk.StringVar(value="已自动保存"); tk.Label(fi,textvariable=save_feedback,font=(FONT,9),fg=C["muted"],bg=C["window"]).pack(side="left")
 

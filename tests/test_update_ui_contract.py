@@ -16,6 +16,12 @@ def test_settings_uses_extracted_in_app_updater():
     assert "root.after(300,root.destroy)" not in settings
     assert "Updating Lucas" in updater
     assert "return_button" in updater
+    assert "SETTINGS_RUNTIME_FILES" in updater
+    assert "_settings_hashes" in updater
+    assert "_settings_changed" in updater
+    assert "on_update_complete" in updater
+    assert "lambda: self._leave_update_page()" in updater
+    assert "sidebar_version" in settings
 
 def test_installer_has_fast_in_app_update_mode():
     text = (ROOT / "scripts/install-node.ps1").read_text(encoding="utf-8")
@@ -28,6 +34,7 @@ def test_installer_has_fast_in_app_update_mode():
     assert "--force-reinstall --no-deps" not in text
     assert 'Write-LucasProgress 100 "complete"' in text
     assert '($_.ProcessId -ne $KeepProcessId)' in text
+    assert "$CommandLine -notmatch '--configure'" in text
     assert 'lucas-shortcut-{0}.ico' in text
     assert 'gpt_windows_connector.node","--configure" -WindowStyle Hidden' not in text
 

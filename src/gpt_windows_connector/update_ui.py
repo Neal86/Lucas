@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -39,6 +40,7 @@ class InAppUpdater:
         load_last_page: Callable[[], str],
         save_last_page: Callable[[str], None],
         before_update: Callable[[], None] | None = None,
+        on_update_complete: Callable[[str], None] | None = None,
     ) -> None:
         self.root = root
         self.tk = tk
@@ -62,9 +64,10 @@ class InAppUpdater:
         self.load_last_page = load_last_page
         self.save_last_page = save_last_page
         self.before_update = before_update
+        self.on_update_complete = on_update_complete
         self.update_button = None
         self.check_update_button = None
-        self.state = {"frame": None, "active": False, "return_page": "常规", "success": False, "target": ""}
+        self.state = {"frame": None, "active": False, "return_page": "常规", "success": False, "target": "", "requires_restart": False}
         self.widgets: dict[str, Any] = {}
         self.stage_labels = {
             "prepare": self.T("准备更新…", "Preparing update…"),
@@ -74,6 +77,35 @@ class InAppUpdater:
             "startup": self.T("重新启动后台服务…", "Restarting background services…"),
             "complete": self.T("更新完成", "Update complete"),
         }
+
+    SETTINGS_RUNTIME_FILES = ("settings_ui.py", "update_ui.py", "settings_constants.py", "app_icon.py", "node.py")
+
+    def _settings_hashes(self) -> dict[str, str]:
+        base = Path(__file__).resolve().parent
+        hashes: dict[str, str] = {}
+        for name in self.SETTINGS_RUNTIME_FILES:
+            path = base / name
+            try:
+                hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                hashes[name] = ""
+        return hashes
+
+    def _settings_changed(self, before: dict[str, str]) -> bool:
+        return self._settings_hashes() != before
+
+    def _restart_settings(self) -> None:
+        return_page = str(self.state.get("return_page") or "常规")
+        self.save_last_page(return_page)
+        env = os.environ.copy()
+        env["LUCAS_SETTINGS_PAGE"] = return_page
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            [sys.executable, "-m", "gpt_windows_connector.node", "--configure"],
+            env=env,
+            creationflags=flags,
+        )
+        self.root.after(300, self.root.destroy)
 
     def build_control(self, parent: Any) -> Any:
         control = self.tk.Frame(parent, bg=self.C["card"])
@@ -179,7 +211,7 @@ class InAppUpdater:
             self.widgets["return_button"] = self.button_factory(
                 actions,
                 self.T("返回", "Return"),
-                lambda: self._leave_update_page(bool(self.state.get("success"))),
+                lambda: self._leave_update_page(),
                 primary=True,
             )
             self.widgets["retry_button"] = self.button_factory(actions, self.T("重试更新", "Retry update"), self.run_update)
@@ -195,27 +227,13 @@ class InAppUpdater:
             self.widgets[key].pack_forget()
         self._set_progress(3, "prepare")
 
-    def _leave_update_page(self, restart_after_update: bool = False) -> None:
+    def _leave_update_page(self) -> None:
         self.state["active"] = False
         frame = self.state.get("frame")
         if frame is not None and frame.winfo_exists():
             frame.pack_forget()
         self._set_nav_enabled(True)
         return_page = str(self.state.get("return_page") or "常规")
-        if restart_after_update:
-            self.save_last_page(return_page)
-            env = os.environ.copy()
-            env["LUCAS_SETTINGS_PAGE"] = return_page
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            try:
-                subprocess.Popen(
-                    [sys.executable, "-m", "gpt_windows_connector.node", "--configure"],
-                    env=env,
-                    creationflags=flags,
-                )
-            finally:
-                self.root.destroy()
-            return
         self.get_footer().pack(fill="x", side="bottom")
         self.show_page(return_page)
 
@@ -224,10 +242,23 @@ class InAppUpdater:
         self.state["target"] = target_version or self.state.get("target") or ""
         if success:
             self._set_progress(100, "complete")
+            self.current_version = target_version or self.current_version
+            self.version_status.set(f"当前版本 {self.current_version} · 已是最新版本")
+            if self.check_update_button is not None:
+                self.check_update_button.configure(state="normal")
+            if self.update_button is not None:
+                self.update_button.configure(state="disabled")
+            if self.on_update_complete is not None:
+                self.on_update_complete(self.current_version)
             self.widgets["version"].set(
-                self.T(f"Lucas 已更新至 {target_version}", f"Lucas has been updated to {target_version}")
+                self.T(f"Lucas 已更新至 {self.current_version}", f"Lucas has been updated to {self.current_version}")
             )
-            self.widgets["return_button"].pack(side="right")
+            if self.state.get("requires_restart"):
+                self.widgets["phase"].set(self.T("更新完成 · 正在刷新界面…", "Update complete · refreshing Settings…"))
+                self._append_log(self.T("Settings 组件已更新，正在无感刷新界面。", "Settings components changed; refreshing the interface."))
+                self.root.after(500, self._restart_settings)
+            else:
+                self.widgets["return_button"].pack(side="right")
             return
         self.widgets["phase"].set(self.T("更新失败", "Update failed"))
         self.widgets["retry_button"].pack(side="right")
@@ -239,6 +270,7 @@ class InAppUpdater:
 
         def worker() -> None:
             target = self.fetch_latest_version() or str(self.state.get("target") or "") or self.T("最新版本", "latest")
+            settings_snapshot = self._settings_hashes()
             try:
                 if self.before_update is not None:
                     self.before_update()
@@ -305,6 +337,7 @@ class InAppUpdater:
                 code = process.wait()
                 if code != 0:
                     raise RuntimeError(f"PowerShell updater exited with code {code}")
+                self.state["requires_restart"] = self._settings_changed(settings_snapshot)
                 self.root.after(0, lambda: self._finish_update(True, target))
             except Exception as exc:
                 self.root.after(0, lambda err=str(exc): self._finish_update(False, target, err))

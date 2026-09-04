@@ -209,7 +209,7 @@ if (-not (Test-Path $VenvPython)) {
 # directly so upgrades cannot leave a ghost Node behind.
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
   $CommandLine = [string]$_.CommandLine
-  ($_.ProcessId -ne $KeepProcessId) -and $CommandLine -and (
+  ($_.ProcessId -ne $KeepProcessId) -and $CommandLine -and ($CommandLine -notmatch '--configure') -and (
     $CommandLine -match 'gpt_windows_connector\.tray' -or
     $CommandLine -match 'gpt_windows_connector\.node' -or
     $CommandLine -match 'lucas-node\.exe' -or
