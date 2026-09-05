@@ -9,7 +9,6 @@ import secrets
 import socket
 import sys
 import time
-import uuid
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from urllib.parse import urlencode
@@ -86,7 +85,7 @@ def _acquire_node_mutex() -> object | None:
 
 
 def _default_node_id() -> str:
-    return f"lucas-{uuid.uuid4().hex}"
+    return f"node-{secrets.token_hex(6)}"
 
 
 def _lock_device_id(config: dict[str, object]) -> dict[str, object]:

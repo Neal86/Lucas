@@ -277,13 +277,9 @@ Write-Host "[Lucas] Installed Lucas Node $InstalledVersion" -ForegroundColor Gre
 $ShortcutIconFile = Join-Path $InstallDir ("lucas-shortcut-{0}.ico" -f $InstalledVersion)
 Write-LucasProgress 75 "verify"
 
-$MachineGuid = ""
-try {
-  $MachineGuid = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Cryptography" -Name MachineGuid -ErrorAction Stop).MachineGuid
-} catch {
-  $MachineGuid = [guid]::NewGuid().ToString()
-}
-$GeneratedNodeId = (("{0}-{1}" -f $env:COMPUTERNAME, $MachineGuid.Substring(0, [Math]::Min(12, $MachineGuid.Length))).ToLower() -replace '[^a-z0-9._-]', '-')
+# New devices get an opaque random identity. The human-readable computer name is
+# stored separately and may change without ever rotating the permanent Node ID.
+$GeneratedNodeId = "node-" + [guid]::NewGuid().ToString("N").Substring(0, 12)
 $NodeId = $GeneratedNodeId
 $LockedNodeId = ""
 if (Test-Path $DeviceIdFile) {

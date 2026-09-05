@@ -98,7 +98,7 @@ class NodeSettings:
 
     @classmethod
     def from_env(cls) -> "NodeSettings":
-        node_id = os.environ.get("GWC_NODE_ID", os.environ.get("COMPUTERNAME", "windows-node")).strip()
+        node_id = os.environ.get("GWC_NODE_ID", "").strip() or f"node-{secrets.token_hex(6)}"
         node_name = os.environ.get("GWC_NODE_NAME", node_id).strip()
         roots = _split_paths(os.environ.get("GWC_ALLOWED_ROOTS", ""))
         if not roots:
