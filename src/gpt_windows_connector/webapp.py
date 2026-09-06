@@ -15,6 +15,8 @@ from starlette.routing import Mount, Route
 
 from . import gateway
 from .admin import admin_routes
+from .billing_ui import billing_html, pricing_html
+from .entitlements import active_node_ids, ensure_node_capacity
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -172,6 +174,7 @@ Disallow: /nodes
 Disallow: /ai-connections
 Disallow: /logs
 Disallow: /account
+Disallow: /billing
 Disallow: /admin
 Disallow: /api/
 Disallow: /oauth/
@@ -188,6 +191,11 @@ async def sitemap_xml(_: Request):
     <loc>https://lucasmcp.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/pricing</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
   </url>
 </urlset>
 """
@@ -269,7 +277,10 @@ async def api_nodes(request: Request):
                     _ensure_dashboard_metadata_schema(db)
                     db.execute("UPDATE dashboard_user_nodes SET node_name=?,access_state='unauthorized',updated_at=? WHERE user_id=? AND node_id=?", (live.name,now,user.id,node_id))
         authorized_nodes.append({"node_id":node_id,"name":name,"display_name":aliases.get(node_id) or name,"pending":access_state=="pending","authorized":access_state=="authorized","access_state":access_state,"online":bool(live),"preset":"request_approval","allowed_roots":[],"last_seen":live.last_seen if live else row["updated_at"],"requested_at":pending_row["requested_at"] if pending_row else None})
-    return JSONResponse({"nodes": authorized_nodes})
+    active=set(active_node_ids(gateway.db_path,user.id))
+    for node in authorized_nodes:
+        node["plan_limited"] = bool(node.get("authorized") and str(node.get("node_id") or "") not in active)
+    return JSONResponse({"nodes": authorized_nodes, "billing": gateway.billing.summary(user.id)})
 
 
 async def api_node_name(request: Request):
@@ -302,6 +313,7 @@ async def api_request_node_access(request: Request):
         return JSONResponse({"error": "An 8-digit Connection Code is required"}, status_code=400)
     try:
         gateway.registry.require_online(node_id)
+        ensure_node_capacity(gateway.db_path, user.id, node_id)
         if not gateway.registration_security.allow(f"node-access:{user.id}:{node_id}", 5, 60):
             return JSONResponse({"error": "Too many connection attempts. Try again in a minute."}, status_code=429)
         result = await gateway.registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=gateway._actor(user), timeout=180.0)
@@ -415,6 +427,70 @@ async def api_logs(request: Request):
     return JSONResponse({"logs": logs})
 
 
+async def pricing_page(_: Request):
+    return HTMLResponse(pricing_html())
+
+
+async def billing_page(request: Request):
+    try:
+        _auth_user(request)
+    except Exception:
+        return RedirectResponse("/dashboard", status_code=302)
+    return HTMLResponse(billing_html("billing"), headers={"X-Robots-Tag": "noindex, nofollow"})
+
+
+async def billing_success(request: Request):
+    try:
+        _auth_user(request)
+    except Exception:
+        return RedirectResponse("/dashboard", status_code=302)
+    return HTMLResponse(billing_html("success"), headers={"X-Robots-Tag": "noindex, nofollow"})
+
+
+async def billing_cancel(request: Request):
+    try:
+        _auth_user(request)
+    except Exception:
+        return RedirectResponse("/dashboard", status_code=302)
+    return HTMLResponse(billing_html("cancel"), headers={"X-Robots-Tag": "noindex, nofollow"})
+
+
+async def api_billing_summary(request: Request):
+    user=_auth_user(request)
+    return JSONResponse(gateway.billing.summary(user.id))
+
+
+async def api_billing_checkout(request: Request):
+    try:
+        user=_auth_user(request); body=await request.json(); url=gateway.billing.checkout(user,str(body.get("plan") or ""))
+        return JSONResponse({"url":url})
+    except Exception as exc:
+        return JSONResponse({"error":str(exc)},status_code=403 if isinstance(exc,PermissionError) else 400)
+
+
+async def api_billing_expansion(request: Request):
+    try:
+        user=_auth_user(request); body=await request.json(); url=gateway.billing.add_expansion(user.id,int(body.get("quantity") or 1))
+        return JSONResponse({"url":url})
+    except Exception as exc:
+        return JSONResponse({"error":str(exc)},status_code=403 if isinstance(exc,PermissionError) else 400)
+
+
+async def api_billing_portal(request: Request):
+    try:
+        user=_auth_user(request); return JSONResponse({"url":gateway.billing.portal(user.id)})
+    except Exception as exc:
+        return JSONResponse({"error":str(exc)},status_code=400)
+
+
+async def stripe_webhook(request: Request):
+    try:
+        result=gateway.billing.handle_webhook(await request.body(),request.headers.get("stripe-signature",""))
+        return JSONResponse({"ok":True,"result":result})
+    except Exception as exc:
+        return JSONResponse({"error":str(exc)},status_code=400)
+
+
 async def brand_asset(request: Request):
     name = str(request.path_params.get("name") or "")
     if name not in {"lucas-logo-horizontal.png", "lucas-logo-horizontal-white.png", "lucas-logo-square.png"}:
@@ -431,6 +507,10 @@ routes = [
     Route("/sitemap.xml", sitemap_xml, methods=["GET"]),
     Route("/assets/{name:str}", brand_asset, methods=["GET"]),
     Route("/", home, methods=["GET"]),
+    Route("/pricing", pricing_page, methods=["GET"]),
+    Route("/billing", billing_page, methods=["GET"]),
+    Route("/billing/success", billing_success, methods=["GET"]),
+    Route("/billing/cancel", billing_cancel, methods=["GET"]),
     Route("/dashboard", dashboard, methods=["GET"]),
     Route("/nodes", dashboard, methods=["GET"]),
     Route("/ai-connections", dashboard, methods=["GET"]),
@@ -446,6 +526,11 @@ routes = [
     Route("/download/Lucas-Node.ps1", download_lucas_node, methods=["GET"]),
     Route("/download/Lucas-Node.bat", download_lucas_launcher, methods=["GET"]),
     Route("/api/logout", api_logout, methods=["POST"]),
+    Route("/api/billing/summary", api_billing_summary, methods=["GET"]),
+    Route("/api/billing/checkout", api_billing_checkout, methods=["POST"]),
+    Route("/api/billing/expansion", api_billing_expansion, methods=["POST"]),
+    Route("/api/billing/portal", api_billing_portal, methods=["POST"]),
+    Route("/api/billing/webhook", stripe_webhook, methods=["POST"]),
     Route("/api/nodes", api_nodes, methods=["GET"]),
     Route("/api/nodes/request-access", api_request_node_access, methods=["POST"]),
     Route("/api/nodes/{node_id}/logs", api_node_logs, methods=["GET"]),

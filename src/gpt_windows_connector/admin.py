@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import gateway
+from .entitlements import snapshot
 
 
 def _db() -> sqlite3.Connection:
@@ -69,7 +70,7 @@ async def users(request: Request):
         with _db() as db:
             sql = """SELECT u.id,u.email,u.name,u.provider,u.role,u.status,u.created_at,u.last_login_at,
                 COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') subscription_status,
-                0 node_count,
+                (SELECT COUNT(*) FROM user_node_bindings b WHERE b.user_id=u.id) node_count,
                 (SELECT COUNT(*) FROM audit_logs a WHERE a.user_id=u.id AND a.created_at>=?) operations_30d
                 FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id"""
             params: list[object] = [time.time()-30*86400]
@@ -87,11 +88,12 @@ async def user_detail(request: Request):
         with _db() as db:
             user = db.execute("SELECT id,email,name,provider,role,status,created_at,last_login_at FROM users WHERE id=?", (user_id,)).fetchone()
             if not user: return JSONResponse({"error": "User not found"}, status_code=404)
-            sub = db.execute("SELECT plan,status,billing_provider,started_at,ends_at FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
-            nodes = []
+            sub = db.execute("SELECT * FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+            nodes = db.execute("SELECT n.node_id,n.name,n.updated_at FROM user_node_bindings b JOIN nodes n ON n.node_id=b.node_id WHERE b.user_id=? ORDER BY b.approved_at ASC",(user_id,)).fetchall()
             ops = db.execute("SELECT id,action,target,details,created_at FROM audit_logs WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
             counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) last30 FROM audit_logs WHERE user_id=?", (time.time()-30*86400,user_id)).fetchone()
-        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
+        ent=snapshot(gateway.db_path,user_id).as_dict()
+        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "entitlements":ent, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
     except Exception as exc: return _error(exc)
 
 
@@ -109,8 +111,12 @@ async def update_user(request: Request):
                 if role not in {"user","admin","super_admin"}: raise ValueError("Invalid role")
                 db.execute("UPDATE users SET role=?,updated_at=? WHERE id=?", (role,now,user_id))
             if "plan" in body:
-                plan=str(body["plan"]); sub_status=str(body.get("subscription_status", "active" if plan != "free" else "inactive"))
-                db.execute("INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status=excluded.status,updated_at=excluded.updated_at", (user_id,plan,sub_status,now))
+                plan=str(body["plan"]);
+                if plan not in {"free","pro","pro_plus"}: raise ValueError("Invalid plan")
+                sub_status=str(body.get("subscription_status", "active" if plan != "free" else "inactive"))
+                db.execute("INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status=excluded.status,expansion_quantity=CASE WHEN excluded.plan='pro_plus' THEN expansion_quantity ELSE 0 END,updated_at=excluded.updated_at", (user_id,plan,sub_status,now))
+            if "bonus_requests" in body:
+                bonus=max(0,int(body["bonus_requests"])); db.execute("UPDATE subscriptions SET bonus_requests=?,updated_at=? WHERE user_id=?",(bonus,now,user_id))
         gateway.auth.audit(actor.id, "admin.user_update", user_id, {"fields": sorted(body.keys())})
         return JSONResponse({"ok": True})
     except Exception as exc: return _error(exc)
@@ -164,7 +170,7 @@ async def subscriptions(request: Request):
     try:
         _admin(request)
         with _db() as db:
-            rows=db.execute("SELECT u.id user_id,u.email,COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') status,s.billing_provider,s.started_at,s.ends_at FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id ORDER BY u.created_at DESC").fetchall()
+            rows=db.execute("SELECT u.id user_id,u.email,COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') status,s.billing_provider,s.billing_customer_id,s.stripe_subscription_id,COALESCE(s.expansion_quantity,0) expansion_quantity,COALESCE(s.bonus_requests,0) bonus_requests,s.current_period_end,s.started_at,s.ends_at FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id ORDER BY u.created_at DESC").fetchall()
         return JSONResponse({"subscriptions":[dict(r) for r in rows]})
     except Exception as exc: return _error(exc)
 
