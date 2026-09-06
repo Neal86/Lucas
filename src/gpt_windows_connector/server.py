@@ -207,7 +207,10 @@ class DashboardAuthMiddleware:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
-        if scope["type"] == "http" and path.startswith("/api/") and path != "/api/logout":
+        # Stripe must be able to reach the signed webhook without a Lucas login.
+        # The webhook authenticates itself with Stripe-Signature instead.
+        public_api_paths = {"/api/logout", "/api/billing/webhook"}
+        if scope["type"] == "http" and path.startswith("/api/") and path not in public_api_paths:
             headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
             token = ""
             authorization = headers.get("authorization", "")

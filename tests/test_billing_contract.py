@@ -19,6 +19,11 @@ def test_billing_endpoints_and_webhook_exist():
     text=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8")
     for route in ["/pricing","/billing","/api/billing/summary","/api/billing/checkout","/api/billing/expansion","/api/billing/portal","/api/billing/webhook"]:
         assert route in text
+    server=Path("src/gpt_windows_connector/server.py").read_text(encoding="utf-8")
+    assert '"/api/billing/webhook"' in server
+    compose=Path("docker-compose.yml").read_text(encoding="utf-8")
+    for key in ["STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_PRO","STRIPE_PRICE_PRO_PLUS","STRIPE_PRICE_EXPANSION"]:
+        assert key in compose
 
 
 def test_dashboard_has_billing_entry_points():

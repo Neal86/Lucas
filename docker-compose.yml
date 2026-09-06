@@ -35,6 +35,11 @@ services:
       GWC_SMTP_PASSWORD: ${GWC_SMTP_PASSWORD:-}
       GWC_SMTP_FROM: ${GWC_SMTP_FROM:-}
       GWC_SMTP_STARTTLS: ${GWC_SMTP_STARTTLS:-true}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO:-}
+      STRIPE_PRICE_PRO_PLUS: ${STRIPE_PRICE_PRO_PLUS:-}
+      STRIPE_PRICE_EXPANSION: ${STRIPE_PRICE_EXPANSION:-}
       GWC_ALLOWED_HOSTS: ${GWC_ALLOWED_HOSTS:-lucasmcp.com,lucasmcp.com:*,lucas.autozon.xyz,lucas.autozon.xyz:*,localhost:*,127.0.0.1:*}
       GWC_ALLOWED_ORIGINS: ${GWC_ALLOWED_ORIGINS:-https://lucasmcp.com,https://lucasmcp.com:*,https://lucas.autozon.xyz,https://lucas.autozon.xyz:*,http://localhost:*,http://127.0.0.1:*}
     volumes:
