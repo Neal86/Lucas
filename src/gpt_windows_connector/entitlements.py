@@ -69,3 +69,17 @@ def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlement
     with _connect(db_path) as db: exists=db.execute("SELECT 1 FROM oauth_client_users WHERE user_id=? AND client_id=?",(user_id,client_id)).fetchone()
     if not exists and e.ai_accounts_used>=e.ai_account_limit: raise PermissionError(f"AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade to Pro+'} at /billing.")
     return e
+
+def active_node_ids(db_path: Path,user_id: str) -> list[str]:
+    e=snapshot(db_path,user_id)
+    with _connect(db_path) as db:
+        rows=db.execute("SELECT node_id FROM user_node_bindings WHERE user_id=? ORDER BY approved_at ASC,node_id ASC",(user_id,)).fetchall()
+    return [str(r[0]) for r in rows[:e.node_limit]]
+
+def ensure_node_active(db_path: Path,user_id: str,node_id: str) -> Entitlements:
+    e=snapshot(db_path,user_id)
+    with _connect(db_path) as db:
+        rows=[str(r[0]) for r in db.execute("SELECT node_id FROM user_node_bindings WHERE user_id=? ORDER BY approved_at ASC,node_id ASC",(user_id,)).fetchall()]
+    if node_id in rows and node_id not in rows[:e.node_limit]:
+        raise PermissionError(f"This computer is over your plan limit ({e.node_limit} active Node(s)). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
+    return e

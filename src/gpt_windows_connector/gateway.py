@@ -36,6 +36,8 @@ from .auth import (
     set_current_user,
 )
 from .config import GatewaySettings
+from .billing import BillingService
+from .entitlements import ensure_node_active, ensure_node_capacity, ensure_request_capacity
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
 from .task_runs import TaskRunStore
@@ -43,6 +45,7 @@ from .task_runs import TaskRunStore
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
+billing = BillingService(db_path, settings.public_base_url)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 registration_security = RegistrationSecurity(db_path)
 task_runs = TaskRunStore(db_path)
@@ -243,6 +246,11 @@ def _actor(user) -> dict:
 
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
+    # Billing is based on real Node tool operations only. Reject before RPC so
+    # heartbeats/auth/dashboard traffic never consume Requests and quota-blocked
+    # calls are not recorded as billable task_steps.
+    ensure_request_capacity(db_path, user.id)
+    ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
@@ -443,6 +451,7 @@ async def node_request_access(node_id: str, connection_code: str) -> dict:
     if not connection_code:
         raise ValueError("connection_code is required for a new account")
     registry.require_online(node_id)
+    ensure_node_capacity(db_path, user.id, node_id)
     if not registration_security.allow(f"node-access:{user.id}:{node_id}", 5, 60):
         raise PermissionError("Too many connection attempts. Try again in a minute.")
     result = await registry.rpc(node_id, user.id, "access.request", {"connection_code": connection_code}, actor=_actor(user), timeout=180.0)

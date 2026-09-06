@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from .auth import AuthStore, User
+from .entitlements import ensure_ai_capacity
 
 
 class OAuthProvider:
@@ -114,6 +115,10 @@ class OAuthProvider:
         if f.get("decision")!="allow":
             with self.db() as db: db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
             return self.err(uri,"access_denied",state)
+        try:
+            ensure_ai_capacity(self.db_path,u.id,str(r["client_id"]))
+        except PermissionError as exc:
+            return HTMLResponse(f"<h2>Lucas AI account limit reached</h2><p>{html.escape(str(exc))}</p><p><a href='/billing'>Open Plan & Billing</a></p>",403)
         code=secrets.token_urlsafe(32)
         with self.db() as db:
             db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
@@ -125,6 +130,7 @@ class OAuthProvider:
         actual=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("="); return bool(verifier) and secrets.compare_digest(actual,challenge)
 
     def refresh(self,cid: str,uid: str,scope: str) -> str:
+        ensure_ai_capacity(self.db_path,uid,cid)
         t=secrets.token_urlsafe(48); now=time.time()
         with self.db() as db:
             # A refresh token proves a client is authorized for this user. Keep
