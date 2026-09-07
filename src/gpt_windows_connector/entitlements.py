@@ -35,6 +35,14 @@ def _free_period(now: float) -> tuple[float,float]:
     end=calendar.timegm((tm.tm_year+1,1,1,0,0,0,0,0,0)) if tm.tm_mon==12 else calendar.timegm((tm.tm_year,tm.tm_mon+1,1,0,0,0,0,0,0))
     return float(start),float(end)
 
+def _count(db: sqlite3.Connection,sql: str,params: tuple[Any,...]) -> int:
+    try:
+        row=db.execute(sql,params).fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc).lower(): raise
+        return 0
+
 def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
     now=float(now or time.time())
     with _connect(db_path) as db:
@@ -46,9 +54,9 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
         bonus=int((row["bonus_requests"] if row and "bonus_requests" in row.keys() else 0) or 0)
         pstart=float((row["current_period_start"] if row and "current_period_start" in row.keys() else 0) or 0); pend=float((row["current_period_end"] if row and "current_period_end" in row.keys() else 0) or 0)
         if plan=="free" or pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
-        req=int(db.execute("SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend)).fetchone()[0])
-        nodes=int(db.execute("SELECT COUNT(*) FROM user_node_bindings WHERE user_id=?",(user_id,)).fetchone()[0])
-        ai=int(db.execute("SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,)).fetchone()[0])
+        req=_count(db,"SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
+        nodes=_count(db,"SELECT COUNT(*) FROM user_node_bindings WHERE user_id=?",(user_id,))
+        ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,))
         cancel=bool((row["cancel_at_period_end"] if row and "cancel_at_period_end" in row.keys() else 0) or 0)
     base=PLANS[plan]
     return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus,int(base["nodes"])+expansion*int(EXPANSION["nodes"]),int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"]),req,nodes,ai,pstart,pend,pend if plan!="free" else None,cancel,bonus)
