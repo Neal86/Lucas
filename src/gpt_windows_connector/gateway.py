@@ -246,9 +246,6 @@ def _actor(user) -> dict:
 
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
-    # Billing is based on real Node tool operations only. Reject before RPC so
-    # heartbeats/auth/dashboard traffic never consume Requests and quota-blocked
-    # calls are not recorded as billable task_steps.
     ensure_request_capacity(db_path, user.id)
     ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
