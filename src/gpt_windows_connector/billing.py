@@ -10,6 +10,7 @@ from typing import Any
 import stripe
 
 from .entitlements import ACTIVE_STATUSES, EXPANSION, PLANS, snapshot
+from .referrals import ReferralService
 
 
 class BillingService:
@@ -18,6 +19,7 @@ class BillingService:
         self.secret=os.getenv('STRIPE_SECRET_KEY','').strip(); self.webhook_secret=os.getenv('STRIPE_WEBHOOK_SECRET','').strip()
         self.price_pro=os.getenv('STRIPE_PRICE_PRO','').strip(); self.price_pro_plus=os.getenv('STRIPE_PRICE_PRO_PLUS','').strip(); self.price_expansion=os.getenv('STRIPE_PRICE_EXPANSION','').strip()
         self._init_db()
+        self.referrals=ReferralService(self.db_path,self.base_url)
         if self.secret: stripe.api_key=self.secret
 
     def _connect(self):
@@ -145,5 +147,8 @@ class BillingService:
                 self.sync_subscription(stripe.Subscription.retrieve(sid))
                 if etype=='invoice.payment_failed':
                     with self._connect() as db: db.execute("UPDATE subscriptions SET status='past_due',updated_at=? WHERE stripe_subscription_id=?",(time.time(),sid))
+                elif etype=='invoice.paid':
+                    uid=self.referrals.resolve_user_from_invoice(obj)
+                    if uid: self.referrals.qualify_paid_user(uid,eid)
         with self._connect() as db: db.execute('INSERT INTO billing_events(stripe_event_id,event_type,payload_hash,processed_at,result) VALUES(?,?,?,?,?)',(eid,etype,digest,time.time(),'processed'))
         return 'processed'
