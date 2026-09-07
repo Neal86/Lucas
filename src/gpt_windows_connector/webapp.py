@@ -16,6 +16,7 @@ from starlette.routing import Mount, Route
 from . import gateway
 from .admin import admin_routes
 from .billing_ui import billing_html, pricing_html
+from .referral_ui import referral_html
 from .entitlements import active_node_ids, ensure_node_capacity
 
 
@@ -457,7 +458,37 @@ async def billing_cancel(request: Request):
 
 async def api_billing_summary(request: Request):
     user=_auth_user(request)
+    referral_code=str(request.cookies.get("lucas_ref") or "").strip()
+    if referral_code:
+        gateway.billing.referrals.claim(user.id,referral_code)
     return JSONResponse(gateway.billing.summary(user.id))
+
+
+async def referral_redirect(request: Request):
+    code=str(request.path_params.get("code") or "").strip().upper()
+    response=RedirectResponse("/dashboard",status_code=302)
+    if code:
+        response.set_cookie("lucas_ref",code,max_age=60*60*24*30,httponly=True,samesite="lax",secure=True)
+    return response
+
+
+async def referral_page(request: Request):
+    try:
+        user=_auth_user(request)
+    except Exception:
+        return RedirectResponse("/dashboard",status_code=302)
+    referral_code=str(request.cookies.get("lucas_ref") or "").strip()
+    if referral_code:
+        gateway.billing.referrals.claim(user.id,referral_code)
+    return HTMLResponse(referral_html(gateway.billing.referrals.summary(user.id)),headers={"X-Robots-Tag":"noindex,nofollow"})
+
+
+async def api_referral_summary(request: Request):
+    user=_auth_user(request)
+    referral_code=str(request.cookies.get("lucas_ref") or "").strip()
+    if referral_code:
+        gateway.billing.referrals.claim(user.id,referral_code)
+    return JSONResponse(gateway.billing.referrals.summary(user.id))
 
 
 async def api_billing_checkout(request: Request):
@@ -511,6 +542,8 @@ routes = [
     Route("/billing", billing_page, methods=["GET"]),
     Route("/billing/success", billing_success, methods=["GET"]),
     Route("/billing/cancel", billing_cancel, methods=["GET"]),
+    Route("/refer", referral_page, methods=["GET"]),
+    Route("/r/{code:str}", referral_redirect, methods=["GET"]),
     Route("/dashboard", dashboard, methods=["GET"]),
     Route("/nodes", dashboard, methods=["GET"]),
     Route("/ai-connections", dashboard, methods=["GET"]),
@@ -527,6 +560,7 @@ routes = [
     Route("/download/Lucas-Node.bat", download_lucas_launcher, methods=["GET"]),
     Route("/api/logout", api_logout, methods=["POST"]),
     Route("/api/billing/summary", api_billing_summary, methods=["GET"]),
+    Route("/api/referrals/summary", api_referral_summary, methods=["GET"]),
     Route("/api/billing/checkout", api_billing_checkout, methods=["POST"]),
     Route("/api/billing/expansion", api_billing_expansion, methods=["POST"]),
     Route("/api/billing/portal", api_billing_portal, methods=["POST"]),
