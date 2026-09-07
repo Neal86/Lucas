@@ -53,6 +53,35 @@ def test_login_verification_rejects_network_change(tmp_path):
         assert "network changed" in str(exc).lower()
 
 
+def test_login_verification_resend_replaces_code_and_keeps_challenge(tmp_path):
+    db_path = tmp_path / "gateway.db"
+    auth = AuthStore(db_path, "test-secret")
+    security = RegistrationSecurity(db_path)
+    user = auth.register("resend@example.com", "very-secure-password")
+
+    challenge_id, old_code = security.start_login_verification(
+        user.id, user.email, "203.0.113.10", False
+    )
+    user_id, email, new_code = security.resend_login_verification(
+        challenge_id, "203.0.113.10"
+    )
+
+    assert user_id == user.id
+    assert email == user.email
+    assert new_code != old_code
+    try:
+        security.verify_login(challenge_id, old_code, "203.0.113.10")
+        assert False, "old code must be invalid after resend"
+    except ValueError as exc:
+        assert "invalid verification code" in str(exc).lower()
+    verified_user_id, remember, token = security.verify_login(
+        challenge_id, new_code, "203.0.113.10"
+    )
+    assert verified_user_id == user.id
+    assert remember is False
+    assert token is None
+
+
 def test_login_verification_without_remember_does_not_create_device_token(tmp_path):
     db_path = tmp_path / "gateway.db"
     auth = AuthStore(db_path, "test-secret")

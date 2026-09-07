@@ -53,7 +53,7 @@ html = html.replace(
 )
 html = html.replace(
     '<div id="registerForm" class="hidden">',
-    '<div id="loginVerifyForm" class="hidden"><p class="muted">We sent a 6-digit login verification code to <b id="loginVerifyEmailLabel"></b>.</p><div class="field"><label>Verification code</label><input id="loginVerifyCode" class="input" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><button class="btn primary" style="width:100%" onclick="verifyLogin()">Verify and sign in</button><button class="btn secondary" style="width:100%;margin-top:10px" onclick="cancelLoginVerification()">Back to sign in</button></div><div id="registerForm" class="hidden">',
+    '<div id="loginVerifyForm" class="hidden"><p class="muted">We sent a 6-digit login verification code to <b id="loginVerifyEmailLabel"></b>.</p><div class="field"><label>Verification code</label><div class="login-code-wrap"><input id="loginVerifyCode" class="input" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button id="loginResendBtn" class="login-code-resend" type="button" onclick="resendLoginVerification()">Resend</button></div></div><button class="btn primary" style="width:100%" onclick="verifyLogin()">Verify and sign in</button><button class="btn secondary" style="width:100%;margin-top:10px" onclick="cancelLoginVerification()">Back to sign in</button></div><div id="registerForm" class="hidden">',
     1,
 )
 
@@ -68,7 +68,7 @@ html = html.replace(
     '.side .logo{height:96px!important;min-height:96px!important;padding:10px 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:hidden!important}'
     '.side .logo img{display:block!important;width:205px!important;height:76px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
     '.landing-logo img{display:block!important;width:220px!important;height:52px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
-    '.password-wrap{position:relative}.password-wrap .input{padding-right:46px}.password-eye{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;background:transparent;cursor:pointer;border-radius:7px;font-size:17px;line-height:1}.password-eye:hover{background:#f2f4f7}.remember-row{display:flex;align-items:center;gap:8px;margin:2px 0 14px;color:#475467;cursor:pointer}.remember-row input{width:16px;height:16px}'
+    '.password-wrap{position:relative}.password-wrap .input{padding-right:46px}.password-eye{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;background:transparent;cursor:pointer;border-radius:7px;font-size:17px;line-height:1}.password-eye:hover{background:#f2f4f7}.remember-row{display:flex;align-items:center;gap:8px;margin:2px 0 14px;color:#475467;cursor:pointer}.remember-row input{width:16px;height:16px}.login-code-wrap{position:relative}.login-code-wrap .input{padding-right:132px}.login-code-resend{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--accent);font-weight:700;padding:7px 8px;cursor:pointer;white-space:nowrap}.login-code-resend:hover:not(:disabled){text-decoration:underline}.login-code-resend:disabled{color:#98a2b3;cursor:not-allowed;text-decoration:none}'
     '</style></head>',
 )
 
@@ -77,7 +77,7 @@ html = html.replace(
     "if(r.status===401){showAuth();throw new Error('Please sign in')}if(!r.ok)throw new Error(d.error||('Request failed: '+r.status));return d",
     "if(r.status===401&&url!='/auth/login'){showAuth()}if(!r.ok)throw new Error(d.error||('Request failed: '+r.status));return d",
 )
-html = html.replace("let pendingVerificationEmail='';", "let pendingVerificationEmail='',pendingLoginChallenge='';")
+html = html.replace("let pendingVerificationEmail='',resendCooldownTimer=null,resendCooldownUntil=0,resendVerificationBusy=false;", "let pendingVerificationEmail='',resendCooldownTimer=null,resendCooldownUntil=0,resendVerificationBusy=false,pendingLoginChallenge='',loginResendCooldownTimer=null,loginResendCooldownUntil=0,loginResendBusy=false;")
 html = html.replace(
     "function showRegister(v){authError('');document.getElementById('verifyForm').classList.add('hidden');document.getElementById('loginForm').classList.toggle('hidden',v);document.getElementById('registerForm').classList.toggle('hidden',!v)}",
     "function showRegister(v){authError('');document.getElementById('verifyForm').classList.add('hidden');document.getElementById('loginVerifyForm').classList.add('hidden');document.getElementById('loginForm').classList.toggle('hidden',v);document.getElementById('registerForm').classList.toggle('hidden',!v)}",
@@ -85,9 +85,12 @@ html = html.replace(
 html = html.replace(
     "async function login(){try{await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});await boot()}catch(e){authError(e.message)}}",
     """async function rememberCredential(){try{if(loginRemember.checked){localStorage.setItem('lucas_login_email',loginEmail.value.trim());if(window.PasswordCredential&&navigator.credentials){await navigator.credentials.store(new PasswordCredential({id:loginEmail.value.trim(),password:loginPassword.value,name:loginEmail.value.trim()}))}}else{localStorage.removeItem('lucas_login_email')}}catch{}}
-async function login(){authError('');try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value,remember:!!loginRemember.checked})});if(d.verification_required){pendingLoginChallenge=d.challenge_id;loginVerifyEmailLabel.textContent=d.email||loginEmail.value;loginForm.classList.add('hidden');registerForm.classList.add('hidden');loginVerifyForm.classList.remove('hidden');setTimeout(()=>loginVerifyCode.focus(),50);return}await rememberCredential();await boot()}catch(e){authError(e.message)}}
-async function verifyLogin(){authError('');try{await api('/auth/login/verify',{method:'POST',body:JSON.stringify({challenge_id:pendingLoginChallenge,code:loginVerifyCode.value})});await rememberCredential();pendingLoginChallenge='';loginVerifyCode.value='';await boot()}catch(e){authError(e.message)}}
-function cancelLoginVerification(){pendingLoginChallenge='';loginVerifyCode.value='';authError('');loginVerifyForm.classList.add('hidden');loginForm.classList.remove('hidden')}
+function renderLoginResendButton(){const b=document.getElementById('loginResendBtn');if(!b)return;const left=Math.max(0,Math.ceil((loginResendCooldownUntil-Date.now())/1000));b.disabled=loginResendBusy||left>0;if(loginResendBusy)b.textContent=WEB_LANG==='zh'?'发送中…':'Sending…';else if(left>0)b.textContent=WEB_LANG==='zh'?`重新发送 (${left}秒)`:`Resend (${left}s)`;else b.textContent=WEB_LANG==='zh'?'重新发送':'Resend'}
+function startLoginResendCooldown(seconds=60){loginResendCooldownUntil=Date.now()+seconds*1000;clearInterval(loginResendCooldownTimer);renderLoginResendButton();loginResendCooldownTimer=setInterval(()=>{renderLoginResendButton();if(Date.now()>=loginResendCooldownUntil){clearInterval(loginResendCooldownTimer);loginResendCooldownTimer=null}},250)}
+async function login(){authError('');try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value,remember:!!loginRemember.checked})});if(d.verification_required){pendingLoginChallenge=d.challenge_id;loginVerifyEmailLabel.textContent=d.email||loginEmail.value;loginForm.classList.add('hidden');registerForm.classList.add('hidden');loginVerifyForm.classList.remove('hidden');startLoginResendCooldown(60);setTimeout(()=>loginVerifyCode.focus(),50);return}await rememberCredential();await boot()}catch(e){authError(e.message)}}
+async function resendLoginVerification(){if(loginResendBusy||Date.now()<loginResendCooldownUntil||!pendingLoginChallenge)return;authError('');loginResendBusy=true;renderLoginResendButton();try{await api('/auth/login/resend',{method:'POST',body:JSON.stringify({challenge_id:pendingLoginChallenge})});toast(WEB_LANG==='zh'?'登录验证码已重新发送':'Login verification code resent');startLoginResendCooldown(60)}catch(e){authError(e.message)}finally{loginResendBusy=false;renderLoginResendButton()}}
+async function verifyLogin(){authError('');try{await api('/auth/login/verify',{method:'POST',body:JSON.stringify({challenge_id:pendingLoginChallenge,code:loginVerifyCode.value})});await rememberCredential();pendingLoginChallenge='';loginVerifyCode.value='';clearInterval(loginResendCooldownTimer);await boot()}catch(e){authError(e.message)}}
+function cancelLoginVerification(){pendingLoginChallenge='';loginVerifyCode.value='';clearInterval(loginResendCooldownTimer);loginResendCooldownTimer=null;loginResendCooldownUntil=0;loginResendBusy=false;authError('');loginVerifyForm.classList.add('hidden');loginForm.classList.remove('hidden')}
 function togglePassword(id,button){const input=document.getElementById(id),show=input.type==='password';input.type=show?'text':'password';button.textContent=show?'🙈':'👁';button.setAttribute('aria-label',show?'Hide password':'Show password');button.title=show?'Hide password':'Show password'}""",
 )
 html = html.replace(
@@ -165,6 +168,23 @@ async def secure_auth_login(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
+async def secure_auth_login_resend(request: Request):
+    try:
+        body = await request.json()
+        challenge_id = str(body.get("challenge_id") or "").strip()
+        ip_address = _login_ip(request)
+        if not gateway.registration_security.allow(f"login-resend:{ip_address}:{challenge_id}", 6, 3600):
+            return JSONResponse({"error": "Too many resend attempts. Try again later."}, status_code=429)
+        user_id, email, code = gateway.registration_security.resend_login_verification(challenge_id, ip_address)
+        send_verification_email(email, code)
+        gateway.auth.audit(user_id, "auth.login_verification_resent")
+        return JSONResponse({"ok": True, "email": email})
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=503)
+
+
 async def secure_auth_login_verify(request: Request):
     try:
         body = await request.json()
@@ -193,6 +213,7 @@ async def secure_auth_login_verify(request: Request):
 
 for path, handler, methods in (
     ("/auth/login", secure_auth_login, ["POST"]),
+    ("/auth/login/resend", secure_auth_login_resend, ["POST"]),
     ("/auth/login/verify", secure_auth_login_verify, ["POST"]),
     ("/assets/lucas-logo-horizontal-white.png", white_logo_asset, ["GET"]),
     ("/assets/lucas-logo-horizontal-blue.png", blue_logo_asset, ["GET"]),

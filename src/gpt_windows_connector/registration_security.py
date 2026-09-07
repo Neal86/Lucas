@@ -174,6 +174,30 @@ class RegistrationSecurity:
             )
         return challenge_id, code
 
+    def resend_login_verification(self, challenge_id: str, ip_address: str) -> tuple[str, str, str]:
+        challenge_id = str(challenge_id or "").strip()
+        if not challenge_id:
+            raise ValueError("Login verification session is missing")
+        now = time.time()
+        with self._connect() as db:
+            row = db.execute("SELECT * FROM login_verifications WHERE challenge_id=?", (challenge_id,)).fetchone()
+            if not row:
+                raise ValueError("Login verification session expired")
+            if float(row["expires_at"]) < now:
+                db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
+                db.commit()
+                raise ValueError("Verification code expired")
+            if str(row["ip_address"]) != str(ip_address):
+                db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
+                db.commit()
+                raise ValueError("Login network changed. Please sign in again.")
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            code_hash = hashlib.sha256(code.encode()).hexdigest()
+            db.execute("UPDATE login_verifications SET code_hash=?,expires_at=?,attempts=0,updated_at=? WHERE challenge_id=?", (code_hash, now + 600, now, challenge_id))
+            user_id = str(row["user_id"])
+            email = str(row["email"])
+        return user_id, email, code
+
     def verify_login(self, challenge_id: str, code: str, ip_address: str) -> tuple[str, bool, str | None]:
         challenge_id = str(challenge_id or "").strip()
         code = str(code or "").strip()
