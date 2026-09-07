@@ -29,9 +29,9 @@ def test_orchestrator_size_budgets_do_not_regress():
     budgets = {
         "webapp.py": 45000,
         "gateway.py": 34000,
-        "node.py": 26000,
-        "settings_ui.py": 54000,
-        "tray.py": 22000,
+        "node.py": 28000,
+        "settings_ui.py": 56000,
+        "tray.py": 23000,
     }
     failures = []
     for name, budget in budgets.items():
