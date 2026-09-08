@@ -30,3 +30,11 @@ jobs:
         run: python -m compileall -q src
       - name: Test
         run: pytest -q
+      - name: Install Chromium for browser E2E
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: python -m playwright install --with-deps chromium
+      - name: Browser E2E
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        env:
+          RUN_BROWSER_E2E: "1"
+        run: pytest -q tests/test_browser_smoke.py
