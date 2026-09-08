@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
       - name: Apply active-computer changes
         run: python scripts/fix_active_computers.py
-      - name: Fix generated runtime escaping
+      - name: Fix generated migration details
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -30,6 +30,14 @@ jobs:
           good="async function activateNode(nodeId){try{await api(\\'/api/nodes/\\'+nodeId+\\'/activate\\',{method:\\'POST\\'});toast(\\'Computer activated\\');await refresh()}catch(e){toast(e.message)}}"
           if bad not in s:
               raise SystemExit('activateNode escaping marker missing')
+          p.write_text(s.replace(bad,good,1))
+
+          p=Path('src/gpt_windows_connector/entitlements.py')
+          s=p.read_text()
+          bad='''    for node_id in candidates:\n        if node_id not in desired:\n            desired.append(node_id)\n        if len(desired)>=limit: break\n'''
+          good='''    for node_id in candidates:\n        if len(desired)>=limit: break\n        if node_id not in desired:\n            desired.append(node_id)\n'''
+          if bad not in s:
+              raise SystemExit('active limit loop marker missing')
           p.write_text(s.replace(bad,good,1))
           PY
       - name: Install
