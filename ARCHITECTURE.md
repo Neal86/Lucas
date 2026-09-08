@@ -4,10 +4,10 @@ This repository intentionally keeps high-risk responsibilities isolated so a cha
 
 ## Stable boundaries
 
-- `webapp.py`: HTTP composition and route wiring only. Large HTML/CSS/JS payloads live in `web_assets.py`.
+- `webapp.py`: HTTP composition and route wiring only. `web_assets.py` is assembly only; landing, auth/dashboard markup, styles, i18n, billing runtime, core runtime and admin runtime each live in dedicated modules.
 - `gateway.py`: gateway orchestration only. Persistence lives in `gateway_stores.py`; browser event fan-out lives in `gateway_events.py`.
 - `node.py`: node lifecycle, protocol and dispatch. Local access-request UI lives in `node_approval.py`.
-- `settings_ui.py`: settings window composition. Shared constants and presets live in `settings_constants.py`. New settings pages should be added as separate modules instead of growing this file.
+- `settings_ui.py`: settings window composition. Shared constants/presets live in `settings_constants.py`; reusable file/version/restart helpers live in `settings_helpers.py`. New settings pages should be added as separate modules instead of growing this file.
 - `tray.py`: tray orchestration. New Windows integration helpers should be added in dedicated modules rather than embedded into the tray class.
 
 ## Change rule

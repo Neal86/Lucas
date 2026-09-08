@@ -5,7 +5,7 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 def test_pricing_contract():
     html=pricing_html()
-    for text in ["$9.99","$19.99","$14.99","1,000 Requests","25,000 Requests","100,000 Requests","6 Nodes","Pro+ only"]:
+    for text in ["$9.99","$19.99","$14.99","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
         assert text in html
 
 
@@ -27,7 +27,8 @@ def test_billing_endpoints_and_webhook_exist():
 
 
 def test_dashboard_has_billing_entry_points():
-    text=Path("src/gpt_windows_connector/web_assets.py").read_text(encoding="utf-8")
+    from gpt_windows_connector.web_assets import DASHBOARD_HTML
+    text=DASHBOARD_HTML
     assert 'data-view=\"billing\"' in text
     assert "Requests this period" in text
     assert "Manage Plan & Billing" in text
