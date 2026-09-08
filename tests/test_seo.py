@@ -21,3 +21,15 @@ def test_robots_and_sitemap_routes_are_registered():
     paths = {getattr(route, "path", None) for route in webapp.routes}
     assert "/robots.txt" in paths
     assert "/sitemap.xml" in paths
+    for path in {"/features", "/how-it-works", "/security", "/download", "/pricing"}:
+        assert path in paths
+
+
+def test_public_seo_pages_have_unique_canonicals():
+    from gpt_windows_connector.seo_pages import public_info_page
+
+    for slug in {"features", "how-it-works", "security", "download"}:
+        html = public_info_page(slug)
+        assert f'rel="canonical" href="https://lucasmcp.com/{slug}"' in html
+        assert 'name="robots" content="index,follow' in html
+        assert '"alternateName":"lucasmcp"' in html

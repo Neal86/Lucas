@@ -17,6 +17,7 @@ from . import gateway
 from .admin import admin_routes
 from .billing_ui import dashboard_billing_html, pricing_html
 from .referral_ui import dashboard_referral_html, referral_html
+from .seo_pages import public_info_page
 from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 
 
@@ -92,7 +93,7 @@ def _landing_html() -> str:
     section_end = DASHBOARD_HTML.index('\n<div id="auth"', section_start)
     landing = DASHBOARD_HTML[section_start:section_end]
     landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\'/dashboard\'"')
-    seo_copy = """<section aria-label="About Lucas MCP" style="max-width:980px;margin:0 auto;padding:40px 28px 90px;color:#9aa4bd;font:15px/1.8 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif"><h2 style="color:#f5f7ff;font-size:28px;margin:0 0 12px">Lucas MCP computer connector</h2><p>Lucas MCP is a secure bridge between MCP-compatible AI assistants and your computer. Connect ChatGPT, Claude, Gemini and other AI tools to work with files, projects, browsers, terminals and desktop applications while local permissions remain under your control.</p><p>Lucas is designed for model-agnostic computer automation and remote access, with activity visibility and local permission boundaries instead of unrestricted cloud-side control.</p></section>"""
+    seo_copy = """<section aria-label="About Lucas MCP" style="max-width:980px;margin:0 auto;padding:40px 28px 90px;color:#9aa4bd;font:15px/1.8 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif"><h2 style="color:#f5f7ff;font-size:28px;margin:0 0 12px">Lucas MCP computer connector</h2><p>Lucas MCP is a secure bridge between MCP-compatible AI assistants and your computer. Connect ChatGPT, Claude, Gemini and other AI tools to work with files, projects, browsers, terminals and desktop applications while local permissions remain under your control.</p><p>Lucas is designed for model-agnostic computer automation and remote access, with activity visibility and local permission boundaries instead of unrestricted cloud-side control.</p><p><a href="/features">Explore Lucas MCP features</a> · <a href="/how-it-works">How Lucas MCP works</a> · <a href="/security">Security</a> · <a href="/download">Download Lucas Node</a> · <a href="/pricing">Pricing</a></p></section>"""
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -197,6 +198,26 @@ async def sitemap_xml(_: Request):
     <loc>https://lucasmcp.com/</loc>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/features</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/how-it-works</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/security</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/download</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
   </url>
   <url>
     <loc>https://lucasmcp.com/pricing</loc>
@@ -450,6 +471,22 @@ async def api_logs(request: Request):
     return JSONResponse({"logs": logs})
 
 
+async def features_page(_: Request):
+    return HTMLResponse(public_info_page("features"))
+
+
+async def how_it_works_page(_: Request):
+    return HTMLResponse(public_info_page("how-it-works"))
+
+
+async def security_page(_: Request):
+    return HTMLResponse(public_info_page("security"))
+
+
+async def download_page(_: Request):
+    return HTMLResponse(public_info_page("download"))
+
+
 async def pricing_page(_: Request):
     return HTMLResponse(pricing_html())
 
@@ -552,6 +589,10 @@ routes = [
     Route("/sitemap.xml", sitemap_xml, methods=["GET"]),
     Route("/assets/{name:str}", brand_asset, methods=["GET"]),
     Route("/", home, methods=["GET"]),
+    Route("/features", features_page, methods=["GET"]),
+    Route("/how-it-works", how_it_works_page, methods=["GET"]),
+    Route("/security", security_page, methods=["GET"]),
+    Route("/download", download_page, methods=["GET"]),
     Route("/pricing", pricing_page, methods=["GET"]),
     Route("/billing", billing_page, methods=["GET"]),
     Route("/billing/success", billing_success, methods=["GET"]),
