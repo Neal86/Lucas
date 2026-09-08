@@ -1,5 +1,5 @@
 name: Prelaunch hardening
-# retry after gateway helper split
+# retry after optional Turnstile fix
 
 on:
   push:
