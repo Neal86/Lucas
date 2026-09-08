@@ -280,8 +280,6 @@ async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) ->
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required")
-    # The lock itself has no file-system capability. The actual browser/computer
-    # operation performs the authoritative Node-side workspace validation once.
     registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
@@ -464,9 +462,6 @@ async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) 
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required")
-    # Acquiring a coordination lock does not touch files or execute anything, so
-    # a remote workspace preflight is unnecessary. The first real operation is
-    # still fully validated by the Windows Node before execution.
     return registry.acquire_control(node_id, user.id, workspace, ttl_seconds)
 
 
@@ -596,7 +591,6 @@ async def node_websocket(websocket: WebSocket):
         else:
             stored_token = str(record.get("token") or "")
             if not stored_token:
-                # One-time migration from the temporary credential-free build.
                 await auth_store.update_token(node_id, _token_digest(supplied_token))
             elif stored_token.startswith("sha256:"):
                 if not secrets.compare_digest(stored_token, _token_digest(supplied_token)):
@@ -618,9 +612,6 @@ async def node_websocket(websocket: WebSocket):
             except json.JSONDecodeError:
                 stored_roots = []
         allowed_roots = hello_roots or stored_roots
-        # The website owns the user-facing display alias. The Windows node only
-        # reports its real machine name and local security state; reconnecting must
-        # never overwrite a display name the user chose on the website.
         display_name = str(record.get("name") or name) if record else name
         await auth_store.update_config(node_id, display_name, allowed_roots)
         connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket)
@@ -664,8 +655,6 @@ async def node_websocket(websocket: WebSocket):
             for future in connection.pending.values():
                 if not future.done():
                     future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
-            # Nodes are not owned by a web account. Authorized users discover current
-            # online state by Node ID and local access checks.
 
 
 mcp_app = mcp.streamable_http_app()
