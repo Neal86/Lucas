@@ -16,7 +16,7 @@ from starlette.routing import Mount, Route
 from . import gateway
 from .admin import admin_routes
 from .billing_ui import dashboard_billing_html, pricing_html
-from .referral_ui import referral_html
+from .referral_ui import dashboard_referral_html, referral_html
 from .entitlements import active_node_ids, ensure_node_capacity
 
 
@@ -143,6 +143,8 @@ def _dashboard_html() -> str:
     account_marker = '<div id="account" class="view hidden">'
     if account_marker in html and 'id="billing" class="view hidden"' not in html:
         html = html.replace(account_marker, dashboard_billing_html() + account_marker, 1)
+    if account_marker in html and 'id="referral" class="view hidden"' not in html:
+        html = html.replace(account_marker, dashboard_referral_html() + account_marker, 1)
     return html
 
 
@@ -232,6 +234,9 @@ async def api_logout(_: Request):
 
 async def api_nodes(request: Request):
     user = _auth_user(request)
+    referral_code=str(request.cookies.get("lucas_ref") or "").strip()
+    if referral_code:
+        gateway.billing.referrals.claim(user.id,referral_code)
     authorized_nodes = await gateway.registry.list(user)
     now = time.time()
     with _db() as db:
@@ -475,7 +480,7 @@ async def referral_page(request: Request):
     referral_code=str(request.cookies.get("lucas_ref") or "").strip()
     if referral_code:
         gateway.billing.referrals.claim(user.id,referral_code)
-    return HTMLResponse(referral_html(gateway.billing.referrals.summary(user.id)),headers={"X-Robots-Tag":"noindex,nofollow"})
+    return HTMLResponse(_dashboard_html(),headers={"X-Robots-Tag":"noindex,nofollow,noarchive"})
 
 
 async def api_referral_summary(request: Request):

@@ -7,6 +7,7 @@ from .web_core_runtime import CORE_SCRIPT
 from .web_dashboard_markup import DASHBOARD_MARKUP
 from .web_document import WEB_BODY_PREFIX, WEB_HEAD
 from .web_i18n_runtime import I18N_SCRIPT
+from .web_referral_runtime import REFERRAL_SCRIPT
 from .web_landing import LANDING_HTML
 from .web_styles import WEB_STYLE
 
@@ -19,6 +20,7 @@ DASHBOARD_HTML = (
     + DASHBOARD_MARKUP
     + I18N_SCRIPT
     + BILLING_SCRIPT
+    + REFERRAL_SCRIPT
     + CORE_SCRIPT
     + ADMIN_SCRIPT
 )

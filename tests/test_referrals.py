@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from gpt_windows_connector.referrals import REFERRAL_REWARD_REQUESTS, ReferralService
+from gpt_windows_connector.referrals import REFERRAL_PAID_REWARD_REQUESTS, REFERRAL_SIGNUP_REWARD_REQUESTS, ReferralService
 
 
 def _db(tmp_path: Path) -> Path:
@@ -27,6 +27,10 @@ def test_referral_awards_3000_once(tmp_path):
     service = ReferralService(path, "https://lucasmcp.com")
     code = service.code_for("referrer")
     assert service.claim("friend", code)
+    with sqlite3.connect(path) as db:
+        referrer_signup = db.execute("SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'").fetchone()[0]
+        friend_signup = db.execute("SELECT bonus_requests FROM subscriptions WHERE user_id='friend'").fetchone()[0]
+    assert referrer_signup == friend_signup == REFERRAL_SIGNUP_REWARD_REQUESTS == 1000
     assert not service.claim("friend", code)
     assert service.qualify_paid_user("friend", "evt_first_paid")
     assert not service.qualify_paid_user("friend", "evt_second_paid")
@@ -34,7 +38,7 @@ def test_referral_awards_3000_once(tmp_path):
         bonus = db.execute(
             "SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'"
         ).fetchone()[0]
-    assert bonus == REFERRAL_REWARD_REQUESTS == 3000
+    assert bonus == REFERRAL_SIGNUP_REWARD_REQUESTS + REFERRAL_PAID_REWARD_REQUESTS == 11000
 
 
 def test_self_referral_is_rejected(tmp_path):
@@ -49,4 +53,5 @@ def test_referral_summary_has_share_link(tmp_path):
     service = ReferralService(path, "https://lucasmcp.com")
     summary = service.summary("referrer")
     assert summary["url"].startswith("https://lucasmcp.com/r/")
-    assert summary["reward_requests"] == 3000
+    assert summary["signup_reward_requests"] == 1000
+    assert summary["paid_reward_requests"] == 10000

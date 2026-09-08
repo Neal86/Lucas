@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 
-REFERRAL_REWARD_REQUESTS = 3_000
+REFERRAL_SIGNUP_REWARD_REQUESTS = 1_000
+REFERRAL_PAID_REWARD_REQUESTS = 10_000
+# Backward-compatible alias used by older callers/tests.
+REFERRAL_REWARD_REQUESTS = REFERRAL_PAID_REWARD_REQUESTS
 
 
 class ReferralService:
@@ -43,6 +46,9 @@ class ReferralService:
             CREATE INDEX IF NOT EXISTS idx_referrals_referrer ON referrals(referrer_user_id);
             CREATE INDEX IF NOT EXISTS idx_referrals_status ON referrals(status);
             """)
+            cols = {r[1] for r in db.execute("PRAGMA table_info(referrals)").fetchall()}
+            if "signup_reward_requests" not in cols:
+                db.execute("ALTER TABLE referrals ADD COLUMN signup_reward_requests INTEGER NOT NULL DEFAULT 0")
 
     def _new_code(self) -> str:
         alphabet = string.ascii_uppercase + string.digits
@@ -82,11 +88,24 @@ class ReferralService:
             ).fetchone()
             if existing:
                 return False
+            now = time.time()
+            # A referral is claimed only after the referred account exists. Ensure both
+            # users have subscription rows so registration rewards are durable.
+            db.execute("INSERT OR IGNORE INTO subscriptions(user_id,updated_at) VALUES(?,?)", (referrer_user_id, now))
+            db.execute("INSERT OR IGNORE INTO subscriptions(user_id,updated_at) VALUES(?,?)", (referred_user_id, now))
             db.execute(
                 """INSERT INTO referrals(
-                    referred_user_id,referrer_user_id,referral_code,attributed_at,status
-                ) VALUES(?,?,?,?, 'pending')""",
-                (referred_user_id, referrer_user_id, code, time.time()),
+                    referred_user_id,referrer_user_id,referral_code,attributed_at,status,signup_reward_requests
+                ) VALUES(?,?,?,?, 'pending', ?)""",
+                (referred_user_id, referrer_user_id, code, now, REFERRAL_SIGNUP_REWARD_REQUESTS),
+            )
+            db.execute(
+                "UPDATE subscriptions SET bonus_requests=COALESCE(bonus_requests,0)+?,updated_at=? WHERE user_id=?",
+                (REFERRAL_SIGNUP_REWARD_REQUESTS, now, referrer_user_id),
+            )
+            db.execute(
+                "UPDATE subscriptions SET bonus_requests=COALESCE(bonus_requests,0)+?,updated_at=? WHERE user_id=?",
+                (REFERRAL_SIGNUP_REWARD_REQUESTS, now, referred_user_id),
             )
             return True
 
@@ -123,13 +142,13 @@ class ReferralService:
                     """UPDATE subscriptions
                        SET bonus_requests=COALESCE(bonus_requests,0)+?, updated_at=?
                        WHERE user_id=?""",
-                    (REFERRAL_REWARD_REQUESTS, time.time(), referrer_user_id),
+                    (REFERRAL_PAID_REWARD_REQUESTS, time.time(), referrer_user_id),
                 )
                 db.execute(
                     """UPDATE referrals
                        SET qualified_at=?,reward_requests=?,reward_event_id=?,status='rewarded'
                        WHERE referred_user_id=?""",
-                    (time.time(), REFERRAL_REWARD_REQUESTS, event_id, referred_user_id),
+                    (time.time(), REFERRAL_PAID_REWARD_REQUESTS, event_id, referred_user_id),
                 )
                 db.commit()
                 return True
@@ -167,20 +186,26 @@ class ReferralService:
         code = self.code_for(user_id)
         with self._connect() as db:
             rows = db.execute(
-                """SELECT status,reward_requests,attributed_at,qualified_at
+                """SELECT status,reward_requests,signup_reward_requests,attributed_at,qualified_at
                    FROM referrals WHERE referrer_user_id=?
                    ORDER BY attributed_at DESC""",
                 (user_id,),
             ).fetchall()
         paid = sum(1 for r in rows if str(r["status"]) == "rewarded")
         pending = sum(1 for r in rows if str(r["status"]) == "pending")
-        earned = sum(int(r["reward_requests"] or 0) for r in rows)
+        signup_earned = sum(int(r["signup_reward_requests"] or 0) for r in rows)
+        paid_earned = sum(int(r["reward_requests"] or 0) for r in rows)
+        earned = signup_earned + paid_earned
         return {
             "code": code,
             "url": f"{self.base_url}/r/{code}",
-            "reward_requests": REFERRAL_REWARD_REQUESTS,
+            "signup_reward_requests": REFERRAL_SIGNUP_REWARD_REQUESTS,
+            "paid_reward_requests": REFERRAL_PAID_REWARD_REQUESTS,
+            "reward_requests": REFERRAL_PAID_REWARD_REQUESTS,
             "paid_referrals": paid,
             "pending_referrals": pending,
             "total_referrals": len(rows),
+            "signup_earned_requests": signup_earned,
+            "paid_earned_requests": paid_earned,
             "earned_requests": earned,
         }
