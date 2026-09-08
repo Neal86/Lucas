@@ -21,11 +21,11 @@ class Entitlements:
     request_limit: int; node_limit: int; ai_account_limit: int
     requests_used: int; nodes_used: int; ai_accounts_used: int
     period_start: float; period_end: float; renewal_at: float | None
-    cancel_at_period_end: bool; bonus_requests: int; nodes_connected: int = 0
+    cancel_at_period_end: bool; bonus_requests: int; nodes_connected: int = 0; bonus_nodes: int = 0; bonus_ai_accounts: int = 0; admin_grant: bool = False
     @property
     def can_buy_expansion(self) -> bool: return self.plan == "pro_plus" and self.status in ACTIVE_STATUSES
     def as_dict(self) -> dict[str, Any]:
-        return {"plan":self.plan,"plan_name":self.plan_name,"status":self.status,"expansion_quantity":self.expansion_quantity,"request_limit":self.request_limit,"node_limit":self.node_limit,"ai_account_limit":self.ai_account_limit,"requests_used":self.requests_used,"nodes_used":self.nodes_used,"nodes_connected":self.nodes_connected,"ai_accounts_used":self.ai_accounts_used,"period_start":self.period_start,"period_end":self.period_end,"renewal_at":self.renewal_at,"cancel_at_period_end":self.cancel_at_period_end,"bonus_requests":self.bonus_requests,"can_buy_expansion":self.can_buy_expansion,"request_remaining":max(0,self.request_limit-self.requests_used),"node_remaining":max(0,self.node_limit-self.nodes_used),"ai_account_remaining":max(0,self.ai_account_limit-self.ai_accounts_used)}
+        return {"plan":self.plan,"plan_name":self.plan_name,"status":self.status,"expansion_quantity":self.expansion_quantity,"request_limit":self.request_limit,"node_limit":self.node_limit,"ai_account_limit":self.ai_account_limit,"requests_used":self.requests_used,"nodes_used":self.nodes_used,"nodes_connected":self.nodes_connected,"ai_accounts_used":self.ai_accounts_used,"period_start":self.period_start,"period_end":self.period_end,"renewal_at":self.renewal_at,"cancel_at_period_end":self.cancel_at_period_end,"bonus_requests":self.bonus_requests,"bonus_nodes":self.bonus_nodes,"bonus_ai_accounts":self.bonus_ai_accounts,"admin_grant":self.admin_grant,"can_buy_expansion":self.can_buy_expansion,"request_remaining":max(0,self.request_limit-self.requests_used),"node_remaining":max(0,self.node_limit-self.nodes_used),"ai_account_remaining":max(0,self.ai_account_limit-self.ai_accounts_used)}
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row; return db
@@ -41,6 +41,26 @@ def _count(db: sqlite3.Connection,sql: str,params: tuple[Any,...]) -> int:
     except sqlite3.OperationalError as exc:
         if "no such table" not in str(exc).lower(): raise
         return 0
+
+def _ensure_entitlement_override_schema(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE TABLE IF NOT EXISTS entitlement_overrides(
+        user_id TEXT PRIMARY KEY, bonus_requests INTEGER NOT NULL DEFAULT 0,
+        bonus_nodes INTEGER NOT NULL DEFAULT 0, bonus_ai_accounts INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL DEFAULT 0
+    )""")
+
+def _entitlement_override(db: sqlite3.Connection,user_id: str) -> tuple[int,int,int]:
+    _ensure_entitlement_override_schema(db)
+    row=db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
+    if not row: return 0,0,0
+    return max(0,int(row[0] or 0)),max(0,int(row[1] or 0)),max(0,int(row[2] or 0))
+
+def _is_admin(db: sqlite3.Connection,user_id: str) -> bool:
+    try:
+        row=db.execute("SELECT role FROM users WHERE id=?",(user_id,)).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return bool(row and str(row[0]) in {"admin","super_admin"})
 
 def _ensure_active_schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS user_active_nodes(
@@ -100,12 +120,17 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
     now=float(now or time.time())
     with _connect(db_path) as db:
         plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
+        admin_grant=_is_admin(db,user_id)
+        if admin_grant:
+            plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
+            if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
+        extra_requests,extra_nodes,extra_ai=_entitlement_override(db,user_id)
         req=_count(db,"SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
         ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,))
-        node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])
+        node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
         connected=len(_bound_ids(db,user_id))
         active=len(_sync_active(db,user_id,node_limit))
-    return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"]),req,active,ai,pstart,pend,pend if plan!="free" else None,cancel,bonus,connected)
+    return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus+extra_requests,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"])+extra_ai,req,active,ai,pstart,pend,pend if plan!="free" and not admin_grant else None,cancel,bonus,connected,extra_nodes,extra_ai,admin_grant)
 
 def ensure_request_capacity(db_path: Path,user_id: str) -> Entitlements:
     e=snapshot(db_path,user_id)

@@ -30,6 +30,14 @@ def _admin(request: Request):
     return user
 
 
+
+def _ensure_entitlement_override_schema(db: sqlite3.Connection) -> None:
+    db.execute("""CREATE TABLE IF NOT EXISTS entitlement_overrides(
+        user_id TEXT PRIMARY KEY, bonus_requests INTEGER NOT NULL DEFAULT 0,
+        bonus_nodes INTEGER NOT NULL DEFAULT 0, bonus_ai_accounts INTEGER NOT NULL DEFAULT 0,
+        updated_at REAL NOT NULL DEFAULT 0
+    )""")
+
 def _safe_details(raw: str | None) -> dict:
     try:
         data = json.loads(raw or "{}")
@@ -89,11 +97,13 @@ async def user_detail(request: Request):
             user = db.execute("SELECT id,email,name,provider,role,status,created_at,last_login_at FROM users WHERE id=?", (user_id,)).fetchone()
             if not user: return JSONResponse({"error": "User not found"}, status_code=404)
             sub = db.execute("SELECT * FROM subscriptions WHERE user_id=?", (user_id,)).fetchone()
+            _ensure_entitlement_override_schema(db)
+            override = db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
             nodes = db.execute("SELECT n.node_id,n.name,n.updated_at FROM user_node_bindings b JOIN nodes n ON n.node_id=b.node_id WHERE b.user_id=? ORDER BY b.approved_at ASC",(user_id,)).fetchall()
             ops = db.execute("SELECT id,action,target,details,created_at FROM audit_logs WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
             counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) last30 FROM audit_logs WHERE user_id=?", (time.time()-30*86400,user_id)).fetchone()
         ent=snapshot(gateway.db_path,user_id).as_dict()
-        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "entitlements":ent, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
+        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "entitlements":ent, "admin_overrides":dict(override) if override else {"bonus_requests":0,"bonus_nodes":0,"bonus_ai_accounts":0}, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
     except Exception as exc: return _error(exc)
 
 
@@ -115,8 +125,13 @@ async def update_user(request: Request):
                 if plan not in {"free","pro","pro_plus"}: raise ValueError("Invalid plan")
                 sub_status=str(body.get("subscription_status", "active" if plan != "free" else "inactive"))
                 db.execute("INSERT INTO subscriptions(user_id,plan,status,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan,status=excluded.status,expansion_quantity=CASE WHEN excluded.plan='pro_plus' THEN expansion_quantity ELSE 0 END,updated_at=excluded.updated_at", (user_id,plan,sub_status,now))
-            if "bonus_requests" in body:
-                bonus=max(0,int(body["bonus_requests"])); db.execute("UPDATE subscriptions SET bonus_requests=?,updated_at=? WHERE user_id=?",(bonus,now,user_id))
+            override_fields={k:max(0,int(body[k])) for k in ("bonus_requests","bonus_nodes","bonus_ai_accounts") if k in body}
+            if override_fields:
+                _ensure_entitlement_override_schema(db)
+                current=db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
+                values={"bonus_requests":int(current[0] or 0) if current else 0,"bonus_nodes":int(current[1] or 0) if current else 0,"bonus_ai_accounts":int(current[2] or 0) if current else 0}
+                values.update(override_fields)
+                db.execute("INSERT INTO entitlement_overrides(user_id,bonus_requests,bonus_nodes,bonus_ai_accounts,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET bonus_requests=excluded.bonus_requests,bonus_nodes=excluded.bonus_nodes,bonus_ai_accounts=excluded.bonus_ai_accounts,updated_at=excluded.updated_at",(user_id,values["bonus_requests"],values["bonus_nodes"],values["bonus_ai_accounts"],now))
         gateway.auth.audit(actor.id, "admin.user_update", user_id, {"fields": sorted(body.keys())})
         return JSONResponse({"ok": True})
     except Exception as exc: return _error(exc)

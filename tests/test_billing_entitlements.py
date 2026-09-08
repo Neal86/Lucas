@@ -90,3 +90,18 @@ def test_free_prefers_online_computer_and_allows_manual_switch(tmp_path):
     assert active_node_ids(p,"u",["online"]) == ["other"]
     with pytest.raises(PermissionError): ensure_node_active(p,"u","online")
     ensure_node_active(p,"u","other")
+
+
+def test_admin_is_effective_pro_plus_and_supports_extra_entitlements(tmp_path):
+    p=tmp_path/"db.sqlite"; schema(p)
+    with sqlite3.connect(p) as db:
+        db.execute("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT)")
+        db.execute("INSERT INTO users VALUES(?,?)",("u","admin"))
+        db.execute("CREATE TABLE entitlement_overrides(user_id TEXT PRIMARY KEY,bonus_requests INTEGER,bonus_nodes INTEGER,bonus_ai_accounts INTEGER,updated_at REAL)")
+        db.execute("INSERT INTO entitlement_overrides VALUES(?,?,?,?,?)",("u",5000,2,4,time.time()))
+    e=snapshot(p,"u")
+    assert e.plan=="pro_plus" and e.admin_grant is True
+    assert e.request_limit==105000
+    assert e.node_limit==8
+    assert e.ai_account_limit==7
+
