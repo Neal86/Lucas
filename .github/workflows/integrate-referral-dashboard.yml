@@ -20,6 +20,18 @@ jobs:
           python-version: '3.12'
       - name: Apply referral dashboard changes
         run: python scripts/integrate_referral_dashboard.py
+      - name: Fix generated referral nav escaping
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('src/gpt_windows_connector/web_dashboard_markup.py')
+          s=p.read_text()
+          bad="onclick=\"view('referral',this)\""
+          good="onclick=\"view(\\'referral\\',this)\""
+          if bad not in s:
+              raise SystemExit('generated referral nav marker not found')
+          p.write_text(s.replace(bad,good,1))
+          PY
       - name: Install
         run: |
           python -m pip install --upgrade pip
