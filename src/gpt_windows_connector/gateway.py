@@ -41,6 +41,8 @@ from .entitlements import ensure_node_active, ensure_node_capacity, ensure_reque
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
 from .task_runs import TaskRunStore
+from .gateway_readiness import readiness_checks, critical_ready
+from .gateway_referral import claim_referral_cookie
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
@@ -251,11 +253,6 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
-    # Do not preflight every operation with a separate workspace.info RPC. The
-    # Windows Node is the final security authority and Executor._prepare_call()
-    # validates local approval, Allowed Folders and the workspace immediately
-    # before the requested operation. A Gateway preflight only duplicated that
-    # check, added a full network round trip, and could block for up to 180s.
     task_title = " ".join(str(task_title or "").split())[:180] or None
     run_context = workspace
     payload = dict(params or {})
@@ -331,6 +328,7 @@ async def auth_register(request: Request):
         user = auth.register(email, body.get("password", ""), body.get("name"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.register")
+        claim_referral_cookie(request, billing.referrals, user.id)
         response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__}, status_code=201)
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
         return response
@@ -349,6 +347,7 @@ async def auth_verify_email(request: Request):
         user = auth.get_user(user_id)
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.email_verified")
+        claim_referral_cookie(request, billing.referrals, user.id)
         response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
         return response
@@ -410,6 +409,7 @@ async def auth_google_callback(request: Request):
         user = auth.google_login(sub=str(info.get("sub", "")), email=str(info.get("email", "")), name=info.get("name"), picture=info.get("picture"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.google_login")
+        claim_referral_cookie(request, billing.referrals, user.id)
         response = RedirectResponse("/dashboard", status_code=302)
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
         return response
@@ -537,11 +537,10 @@ async def computer_tool(node_id: str, workspace: str, action: str, params: dict 
 
 
 async def health(_: Request):
-    try:
-        version = importlib.metadata.version("gpt-windows-connector")
-    except importlib.metadata.PackageNotFoundError:
-        version = "unknown"
-    return JSONResponse({"ok": True, "version": version, "online_nodes": len(registry.nodes), "auth": "multi-user"})
+    try: version=importlib.metadata.version("gpt-windows-connector")
+    except importlib.metadata.PackageNotFoundError: version="unknown"
+    checks=readiness_checks(db_path,settings,billing,email_verification_enabled); ready=critical_ready(checks)
+    return JSONResponse({"ok":ready,"version":version,"online_nodes":len(registry.nodes),"auth":"multi-user","checks":checks},status_code=200 if ready else 503)
 
 
 async def browser_events_websocket(websocket: WebSocket):
@@ -592,9 +591,6 @@ async def node_websocket(websocket: WebSocket):
         record = await auth_store.record_for(node_id)
         log.info("Node hello received node_id=%s name=%s", node_id, name)
         if not record:
-            # Every legitimate Node may self-register. Account ownership is not part
-            # of Node transport authentication; user access is authorized later by
-            # Connection Code plus local approval.
             await auth_store.save(node_id, name, _token_digest(supplied_token), hello_roots)
             record = await auth_store.record_for(node_id)
         else:
@@ -621,9 +617,6 @@ async def node_websocket(websocket: WebSocket):
                 stored_roots = json.loads(record.get("allowed_roots") or "[]")
             except json.JSONDecodeError:
                 stored_roots = []
-        # The Windows Node is the source of truth for security settings. The server
-        # mirrors the locally reported values for status/audit only and never sends
-        # an older web policy back as an authority.
         allowed_roots = hello_roots or stored_roots
         # The website owns the user-facing display alias. The Windows node only
         # reports its real machine name and local security state; reconnecting must

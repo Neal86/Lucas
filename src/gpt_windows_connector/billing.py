@@ -12,6 +12,8 @@ import stripe
 from .entitlements import ACTIVE_STATUSES, EXPANSION, PLANS, snapshot
 from .referrals import ReferralService
 
+ANNUAL_TOTALS = {"pro": 99.99, "pro_plus": 199.99, "expansion": 149.99}
+
 
 class BillingService:
     def __init__(self, db_path: Path, base_url: str) -> None:
@@ -65,17 +67,22 @@ class BillingService:
     def summary(self,user_id: str) -> dict[str,Any]:
         ent=snapshot(self.db_path,user_id); out=ent.as_dict(); out['billing_configured']=self.checkout_configured; out['webhook_configured']=self.webhook_configured
         with self._connect() as db:
-            row=db.execute('SELECT billing_customer_id,stripe_subscription_id,scheduled_plan FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
+            row=db.execute('SELECT billing_customer_id,stripe_subscription_id,stripe_price_id,scheduled_plan FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
         out['has_customer']=bool(row and row['billing_customer_id']); out['has_subscription']=bool(row and row['stripe_subscription_id']); out['scheduled_plan']=row['scheduled_plan'] if row else None
-        stripe_price_id=str(ent.stripe_price_id or '')
+        stripe_price_id=str((row['stripe_price_id'] if row else '') or '')
         annual_ids={self.price_pro_annual,self.price_pro_plus_annual}
         interval='year' if stripe_price_id and stripe_price_id in annual_ids else 'month'
         out['billing_interval']=interval
         out['annual_billing_configured']=self.annual_checkout_configured
         monthly=float(PLANS[ent.plan]['price'])+ent.expansion_quantity*float(EXPANSION['price'])
-        out['monthly_price']=monthly
-        out['billing_total']=round(monthly*12*0.8,2) if interval=='year' else round(monthly,2)
-        out['monthly_equivalent']=round(monthly*0.8,2) if interval=='year' else round(monthly,2)
+        out['monthly_price']=round(monthly,2)
+        if interval=='year':
+            annual_total=float(ANNUAL_TOTALS.get(ent.plan,0.0))+ent.expansion_quantity*float(ANNUAL_TOTALS['expansion'])
+            out['billing_total']=round(annual_total,2)
+            out['monthly_equivalent']=round(annual_total/12,2)
+        else:
+            out['billing_total']=round(monthly,2)
+            out['monthly_equivalent']=round(monthly,2)
         return out
 
     def _require_checkout_configured(self) -> None:

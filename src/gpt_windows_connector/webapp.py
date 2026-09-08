@@ -19,6 +19,7 @@ from .billing_ui import dashboard_billing_html, pricing_html
 from .referral_ui import dashboard_referral_html, referral_html
 from .seo_pages import public_info_page
 from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
+from .legal_ui import privacy_html, terms_html, refund_html, contact_html
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -125,7 +126,7 @@ def _landing_html() -> str:
 </head>
 <body>{landing}<script>
 if((navigator.language||'en').toLowerCase().startsWith('zh')){{document.documentElement.lang='zh-CN';const Z={{'Capabilities':'功能','Security':'安全','How it works':'工作原理','Sign in':'登录','Dashboard':'控制台','Connect your computer':'连接电脑','See how it works ↓':'查看工作原理 ↓','Model agnostic':'不限模型','Cross-platform':'跨平台','Token-free execution':'无额外执行 Token','WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正执行工作。','Terminal & Code':'终端与代码','Files & Projects':'文件与项目','Browser':'浏览器','Computer Use':'电脑操作','Remote Access':'远程访问','A DIFFERENT ARCHITECTURE':'不同的架构','Token-free':'无额外 Token','execution.':'执行。','CONTROL WITHOUT COMPROMISE':'安全控制，不做妥协','Your computer.':'你的电脑。','Your boundaries.':'你的边界。','Project-scoped access':'项目范围访问','Local permission control':'本地权限控制','OAuth-secured MCP':'OAuth 安全 MCP','Activity visibility':'操作记录可见','THREE STEPS':'三个步骤','From AI to action.':'从 AI 到实际执行。','Connect a computer':'连接电脑','Add Lucas MCP':'添加 Lucas MCP','Start working':'开始工作','THE BRIDGE IS READY':'连接已经准备好','Any AI.':'任何 AI。','Any computer.':'任何电脑。','Get started with Lucas':'开始使用 Lucas'}};const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const a=[];while(w.nextNode())a.push(w.currentNode);for(const n of a){{const t=n.nodeValue.trim();if(Z[t])n.nodeValue=n.nodeValue.replace(t,Z[t])}}}}
-</script>{seo_copy}</body>
+</script>{seo_copy}<footer style="max-width:980px;margin:0 auto;padding:0 28px 42px;color:#7f8aa1;font:13px Inter,system-ui,sans-serif"><a style="color:inherit;margin-right:18px" href="/privacy">Privacy</a><a style="color:inherit;margin-right:18px" href="/terms">Terms</a><a style="color:inherit;margin-right:18px" href="/refunds">Refunds</a><a style="color:inherit" href="/contact">Contact</a></footer></body>
 </html>"""
 
 
@@ -133,6 +134,8 @@ def _dashboard_html() -> str:
     html = DASHBOARD_HTML
     turnstile_site_key = os.getenv("GWC_TURNSTILE_SITE_KEY", "").strip()
     html = html.replace("__TURNSTILE_SITE_KEY__", turnstile_site_key).replace("__TURNSTILE_CLASS__", "" if turnstile_site_key else "hidden")
+    if not turnstile_site_key:
+        html = html.replace('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>', '')
     css_marker = '/* Lucas public landing */'
     css_start = html.index(css_marker)
     css_end = html.index('</style>', css_start)
@@ -224,6 +227,10 @@ async def sitemap_xml(_: Request):
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
+  <url><loc>https://lucasmcp.com/privacy</loc><priority>0.3</priority></url>
+  <url><loc>https://lucasmcp.com/terms</loc><priority>0.3</priority></url>
+  <url><loc>https://lucasmcp.com/refunds</loc><priority>0.3</priority></url>
+  <url><loc>https://lucasmcp.com/contact</loc><priority>0.4</priority></url>
 </urlset>
 """
     return Response(body, media_type="application/xml")
@@ -487,6 +494,12 @@ async def download_page(_: Request):
     return HTMLResponse(public_info_page("download"))
 
 
+async def privacy_page(_: Request): return HTMLResponse(privacy_html())
+async def terms_page(_: Request): return HTMLResponse(terms_html())
+async def refund_page(_: Request): return HTMLResponse(refund_html())
+async def contact_page(_: Request): return HTMLResponse(contact_html())
+
+
 async def pricing_page(_: Request):
     return HTMLResponse(pricing_html())
 
@@ -594,6 +607,10 @@ routes = [
     Route("/security", security_page, methods=["GET"]),
     Route("/download", download_page, methods=["GET"]),
     Route("/pricing", pricing_page, methods=["GET"]),
+    Route("/privacy", privacy_page, methods=["GET"]),
+    Route("/terms", terms_page, methods=["GET"]),
+    Route("/refunds", refund_page, methods=["GET"]),
+    Route("/contact", contact_page, methods=["GET"]),
     Route("/billing", billing_page, methods=["GET"]),
     Route("/billing/success", billing_success, methods=["GET"]),
     Route("/billing/cancel", billing_cancel, methods=["GET"]),

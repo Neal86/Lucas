@@ -121,10 +121,6 @@ class AuthStore:
             configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip().lower()
             if configured_admin:
                 db.execute("UPDATE users SET role='super_admin' WHERE email=? COLLATE NOCASE", (configured_admin,))
-            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
-                first = db.execute("SELECT id FROM users ORDER BY created_at ASC LIMIT 1").fetchone()
-                if first:
-                    db.execute("UPDATE users SET role='super_admin' WHERE id=?", (first["id"],))
 
     @staticmethod
     def _user(row: sqlite3.Row) -> User:
@@ -153,7 +149,8 @@ class AuthStore:
         except sqlite3.IntegrityError as exc:
             raise ValueError("Email is already registered") from exc
         with self._connect() as db:
-            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
+            configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip().lower()
+            if configured_admin and email == configured_admin:
                 db.execute("UPDATE users SET role='super_admin' WHERE id=?", (user_id,))
         return self.get_user(user_id)
 
@@ -200,7 +197,8 @@ class AuthStore:
                         (user_id, email, name, picture, "google", sub, now, now),
                     )
         with self._connect() as db:
-            if not db.execute("SELECT 1 FROM users WHERE role IN ('admin','super_admin') LIMIT 1").fetchone():
+            configured_admin = os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip().lower()
+            if configured_admin and email == configured_admin:
                 db.execute("UPDATE users SET role='super_admin' WHERE id=?", (user_id,))
         return self.get_user(user_id)
 
