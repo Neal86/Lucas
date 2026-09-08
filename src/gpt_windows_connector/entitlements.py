@@ -46,14 +46,20 @@ def _ensure_entitlement_override_schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS entitlement_overrides(
         user_id TEXT PRIMARY KEY, bonus_requests INTEGER NOT NULL DEFAULT 0,
         bonus_nodes INTEGER NOT NULL DEFAULT 0, bonus_ai_accounts INTEGER NOT NULL DEFAULT 0,
-        updated_at REAL NOT NULL DEFAULT 0
+        expires_at REAL, updated_at REAL NOT NULL DEFAULT 0
     )""")
+    cols={str(r[1]) for r in db.execute("PRAGMA table_info(entitlement_overrides)").fetchall()}
+    if "expires_at" not in cols:
+        db.execute("ALTER TABLE entitlement_overrides ADD COLUMN expires_at REAL")
 
-def _entitlement_override(db: sqlite3.Connection,user_id: str) -> tuple[int,int,int]:
+def _entitlement_override(db: sqlite3.Connection,user_id: str,now: float|None=None) -> tuple[int,int,int,float|None,bool]:
     _ensure_entitlement_override_schema(db)
-    row=db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
-    if not row: return 0,0,0
-    return max(0,int(row[0] or 0)),max(0,int(row[1] or 0)),max(0,int(row[2] or 0))
+    row=db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts,expires_at FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
+    if not row: return 0,0,0,None,False
+    expires=float(row[3]) if row[3] not in (None,0,0.0) else None
+    expired=bool(expires is not None and expires <= float(now or time.time()))
+    if expired: return 0,0,0,expires,True
+    return max(0,int(row[0] or 0)),max(0,int(row[1] or 0)),max(0,int(row[2] or 0)),expires,False
 
 def _is_admin(db: sqlite3.Connection,user_id: str) -> bool:
     try:
@@ -124,7 +130,7 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
         if admin_grant:
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
             if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
-        extra_requests,extra_nodes,extra_ai=_entitlement_override(db,user_id)
+        extra_requests,extra_nodes,extra_ai,override_expires_at,override_expired=_entitlement_override(db,user_id,now)
         req=_count(db,"SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
         ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,))
         node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
@@ -148,11 +154,17 @@ def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlement
     if not exists and e.ai_accounts_used>=e.ai_account_limit: raise PermissionError(f"AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade to Pro+'} at /billing.")
     return e
 
+def _effective_node_limit(db: sqlite3.Connection,user_id: str,now: float) -> int:
+    plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
+    if _is_admin(db,user_id):
+        plan="pro_plus"; expansion=0; base=PLANS["pro_plus"]
+    _,extra_nodes,_,_,_=_entitlement_override(db,user_id,now)
+    return int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
+
 def active_node_ids(db_path: Path,user_id: str,preferred_node_ids: Iterable[str] | None=None) -> list[str]:
     now=time.time()
     with _connect(db_path) as db:
-        plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
-        limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])
+        limit=_effective_node_limit(db,user_id,now)
         return _sync_active(db,user_id,limit,preferred_node_ids)
 
 def set_active_node(db_path: Path,user_id: str,node_id: str) -> list[str]:
@@ -160,8 +172,7 @@ def set_active_node(db_path: Path,user_id: str,node_id: str) -> list[str]:
     if not node_id: raise ValueError("Computer ID is required")
     now=time.time()
     with _connect(db_path) as db:
-        plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
-        limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])
+        limit=_effective_node_limit(db,user_id,now)
         bound=set(_bound_ids(db,user_id))
         if node_id not in bound: raise ValueError("Computer is not connected to this account")
         current=_sync_active(db,user_id,limit)
