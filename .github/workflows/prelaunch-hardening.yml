@@ -1,5 +1,5 @@
 name: Prelaunch hardening
-# retry after regression fixes
+# retry after gateway helper split
 
 on:
   push:
@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply hardening
-        run: python scripts/prelaunch_apply.py
+        run: |
+          python scripts/prelaunch_apply.py
+          python scripts/prelaunch_trim.py
       - name: Install
         run: pip install -e ".[dev]"
       - name: Compile
@@ -36,7 +38,7 @@ jobs:
         run: pytest -q tests/test_browser_smoke.py
       - name: Cleanup one-shot migration files
         run: |
-          git rm -f scripts/prelaunch_apply.py scripts/prelaunch_hardening.py .github/workflows/prelaunch-hardening.yml
+          git rm -f scripts/prelaunch_apply.py scripts/prelaunch_trim.py scripts/prelaunch_hardening.py .github/workflows/prelaunch-hardening.yml
           git rm -f scripts/adjust_annual_prices.py .github/workflows/adjust-annual-prices.yml || true
       - name: Commit final hardening
         run: |
