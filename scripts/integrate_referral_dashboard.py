@@ -55,11 +55,11 @@ p.write_text(text, encoding="utf-8")
 # 5) Add the left-side navigation item in the requested order.
 p = SRC / "web_dashboard_markup.py"
 text = p.read_text(encoding="utf-8")
-old = '<button class=\\"nav\\" data-view=\\"account\\" onclick=\\"view(\\\'account\\\',this)\\">Account & Security</button><button class=\\"nav\\" data-view=\\"billing\\" onclick=\\"view(\\\'billing\\\',this)\\">Plan & Billing</button>'
-new = '<button class=\\"nav\\" data-view=\\"account\\" onclick=\\"view(\\\'account\\\',this)\\">Account & Security</button><button class=\\"nav\\" data-view=\\"referral\\" onclick=\\"view(\\\'referral\\\',this)\\">Refer & Earn</button><button class=\\"nav\\" data-view=\\"billing\\" onclick=\\"view(\\\'billing\\\',this)\\">Plan & Billing</button>'
-if old not in text:
+needle = '>Account & Security</button><button class="nav" data-view="billing"'
+replacement = '>Account & Security</button><button class="nav" data-view="referral" onclick="view(\'referral\',this)">Refer & Earn</button><button class="nav" data-view="billing"'
+if needle not in text:
     raise SystemExit("dashboard nav marker not found")
-text = text.replace(old, new, 1)
+text = text.replace(needle, replacement, 1)
 p.write_text(text, encoding="utf-8")
 
 # 6) Teach dashboard router to treat /refer as a native view.
