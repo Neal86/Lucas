@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from gpt_windows_connector.billing_ui import pricing_html
+from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_html
 
 
 def test_pricing_contract():
@@ -28,9 +28,15 @@ def test_billing_endpoints_and_webhook_exist():
 
 def test_dashboard_has_billing_entry_points():
     text=Path("src/gpt_windows_connector/web_assets.py").read_text(encoding="utf-8")
-    assert "Plan & Billing" in text
+    assert 'data-view=\"billing\"' in text
     assert "Requests this period" in text
     assert "Manage Plan & Billing" in text
+    fragment=dashboard_billing_html()
+    assert 'id=\"billing\" class=\"view hidden\"' in fragment
+    assert "Current plan" in fragment and "Expansion Pack" in fragment
+    webapp=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8")
+    assert "dashboard_billing_html() + account_marker" in webapp
+    assert "return HTMLResponse(_dashboard_html()" in webapp
 
 
 def test_billable_request_guard_is_before_node_rpc():

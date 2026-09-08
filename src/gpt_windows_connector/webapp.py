@@ -15,7 +15,7 @@ from starlette.routing import Mount, Route
 
 from . import gateway
 from .admin import admin_routes
-from .billing_ui import billing_html, pricing_html
+from .billing_ui import dashboard_billing_html, pricing_html
 from .referral_ui import referral_html
 from .entitlements import active_node_ids, ensure_node_capacity
 
@@ -140,6 +140,9 @@ def _dashboard_html() -> str:
     section_end = html.index('\n<div id="auth"', section_start)
     html = html[:section_start] + html[section_end + 1:]
     html = html.replace('<head>', '<head>\n<meta name="robots" content="noindex,nofollow,noarchive" />', 1)
+    account_marker = '<div id="account" class="view hidden">'
+    if account_marker in html and 'id="billing" class="view hidden"' not in html:
+        html = html.replace(account_marker, dashboard_billing_html() + account_marker, 1)
     return html
 
 
@@ -437,23 +440,15 @@ async def billing_page(request: Request):
         _auth_user(request)
     except Exception:
         return RedirectResponse("/dashboard", status_code=302)
-    return HTMLResponse(billing_html("billing"), headers={"X-Robots-Tag": "noindex, nofollow"})
+    return HTMLResponse(_dashboard_html(), headers={"X-Robots-Tag": "noindex, nofollow, noarchive"})
 
 
 async def billing_success(request: Request):
-    try:
-        _auth_user(request)
-    except Exception:
-        return RedirectResponse("/dashboard", status_code=302)
-    return HTMLResponse(billing_html("success"), headers={"X-Robots-Tag": "noindex, nofollow"})
+    return await billing_page(request)
 
 
 async def billing_cancel(request: Request):
-    try:
-        _auth_user(request)
-    except Exception:
-        return RedirectResponse("/dashboard", status_code=302)
-    return HTMLResponse(billing_html("cancel"), headers={"X-Robots-Tag": "noindex, nofollow"})
+    return await billing_page(request)
 
 
 async def api_billing_summary(request: Request):
