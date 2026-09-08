@@ -1,0 +1,43 @@
+name: Adjust annual prices
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/adjust_annual_prices.py'
+      - '.github/workflows/adjust-annual-prices.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply price changes
+        run: python scripts/adjust_annual_prices.py
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Compile
+        run: python -m compileall -q src
+      - name: Test
+        run: pytest -q
+      - name: Cleanup one-shot files
+        run: |
+          rm scripts/adjust_annual_prices.py
+          rm .github/workflows/adjust-annual-prices.yml
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'Set annual prices to 99.99 199.99 and 149.99'
+          git push origin HEAD:main
