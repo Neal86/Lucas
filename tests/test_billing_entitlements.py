@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from gpt_windows_connector.entitlements import ensure_ai_capacity, ensure_node_active, ensure_node_capacity, ensure_request_capacity, snapshot
+from gpt_windows_connector.entitlements import active_node_ids, ensure_ai_capacity, ensure_node_active, ensure_node_capacity, ensure_request_capacity, set_active_node, snapshot
 
 
 def schema(path):
@@ -50,9 +50,10 @@ def test_node_and_ai_limits_are_hard(tmp_path):
     with sqlite3.connect(p) as db:
         db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u",f"n{i}",now+i) for i in range(3)])
         db.execute("INSERT INTO oauth_client_users VALUES(?,?,?)",("c1","u",now))
-    with pytest.raises(PermissionError): ensure_node_capacity(p,"u","n4")
+    ensure_node_capacity(p,"u","n4")
     with pytest.raises(PermissionError): ensure_ai_capacity(p,"u","c2")
-    ensure_node_active(p,"u","n1")
+    assert len(active_node_ids(p,"u")) == 3
+    ensure_node_active(p,"u",active_node_ids(p,"u")[0])
 
 
 def test_over_limit_existing_node_is_preserved_but_blocked(tmp_path):
@@ -60,7 +61,12 @@ def test_over_limit_existing_node_is_preserved_but_blocked(tmp_path):
     now=time.time()
     with sqlite3.connect(p) as db:
         db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u",f"n{i}",now+i) for i in range(4)])
-    with pytest.raises(PermissionError): ensure_node_active(p,"u","n3")
+    active=active_node_ids(p,"u")
+    inactive=next(n for n in ["n0","n1","n2","n3"] if n not in active)
+    with pytest.raises(PermissionError): ensure_node_active(p,"u",inactive)
+    set_active_node(p,"u",inactive)
+    ensure_node_active(p,"u",inactive)
+    assert inactive in active_node_ids(p,"u")
     with sqlite3.connect(p) as db: assert db.execute("SELECT COUNT(*) FROM user_node_bindings").fetchone()[0]==4
 
 
@@ -70,3 +76,17 @@ def test_request_limit_blocks_before_next_operation(tmp_path):
     with sqlite3.connect(p) as db:
         db.executemany("INSERT INTO task_steps(owner_id,started_at) VALUES(?,?)",[("u",now)]*25000)
     with pytest.raises(PermissionError): ensure_request_capacity(p,"u")
+
+
+def test_free_prefers_online_computer_and_allows_manual_switch(tmp_path):
+    p=tmp_path/"db.sqlite"; schema(p)
+    now=time.time()
+    with sqlite3.connect(p) as db:
+        db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u","old-offline",now-100),("u","online",now-50),("u","other",now-10)])
+    assert active_node_ids(p,"u",["online"]) == ["online"]
+    assert snapshot(p,"u").nodes_used == 1
+    assert snapshot(p,"u").nodes_connected == 3
+    set_active_node(p,"u","other")
+    assert active_node_ids(p,"u",["online"]) == ["other"]
+    with pytest.raises(PermissionError): ensure_node_active(p,"u","online")
+    ensure_node_active(p,"u","other")

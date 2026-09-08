@@ -17,7 +17,7 @@ from . import gateway
 from .admin import admin_routes
 from .billing_ui import dashboard_billing_html, pricing_html
 from .referral_ui import dashboard_referral_html, referral_html
-from .entitlements import active_node_ids, ensure_node_capacity
+from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -286,10 +286,24 @@ async def api_nodes(request: Request):
                     _ensure_dashboard_metadata_schema(db)
                     db.execute("UPDATE dashboard_user_nodes SET node_name=?,access_state='unauthorized',updated_at=? WHERE user_id=? AND node_id=?", (live.name,now,user.id,node_id))
         authorized_nodes.append({"node_id":node_id,"name":name,"display_name":aliases.get(node_id) or name,"pending":access_state=="pending","authorized":access_state=="authorized","access_state":access_state,"online":bool(live),"preset":"request_approval","allowed_roots":[],"last_seen":live.last_seen if live else row["updated_at"],"requested_at":pending_row["requested_at"] if pending_row else None})
-    active=set(active_node_ids(gateway.db_path,user.id))
+    preferred=[str(n.get("node_id") or "") for n in sorted(authorized_nodes,key=lambda n: float(n.get("last_seen") or 0),reverse=True) if n.get("authorized") and n.get("online")]
+    active=set(active_node_ids(gateway.db_path,user.id,preferred))
     for node in authorized_nodes:
-        node["plan_limited"] = bool(node.get("authorized") and str(node.get("node_id") or "") not in active)
+        node_id=str(node.get("node_id") or "")
+        node["active"] = bool(node.get("authorized") and node_id in active)
+        node["plan_limited"] = bool(node.get("authorized") and node_id not in active)
     return JSONResponse({"nodes": authorized_nodes, "billing": gateway.billing.summary(user.id)})
+
+
+async def api_activate_node(request: Request):
+    user=_auth_user(request)
+    node_id=unquote(request.path_params["node_id"])
+    try:
+        active=set_active_node(gateway.db_path,user.id,node_id)
+        gateway.auth.audit(user.id,"node.activate",node_id,{"active_node_ids":active})
+        return JSONResponse({"ok":True,"active_node_ids":active,"billing":gateway.billing.summary(user.id)})
+    except (ValueError,PermissionError) as exc:
+        return JSONResponse({"error":str(exc)},status_code=400)
 
 
 async def api_node_name(request: Request):
@@ -570,6 +584,7 @@ routes = [
     Route("/api/nodes/{node_id}/logs", api_node_logs, methods=["GET"]),
     Route("/api/nodes/{node_id}/folders", api_folders, methods=["GET"]),
     Route("/api/nodes/{node_id}/name", api_node_name, methods=["PUT"]),
+    Route("/api/nodes/{node_id}/activate", api_activate_node, methods=["POST"]),
     Route("/api/ai-connections", api_ai_connections, methods=["GET"]),
     Route("/api/ai-connections/{client_id}", api_ai_connection, methods=["PUT","DELETE"]),
     Route("/api/task-runs", api_task_runs, methods=["GET"]),
