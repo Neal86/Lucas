@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/refactor-ui-isolation.yml'
       - 'scripts/refactor_ui_isolation.py'
+      - 'scripts/fix_ui_refactor.py'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply safe UI isolation refactor
-        run: python scripts/refactor_ui_isolation.py
+        run: |
+          python scripts/refactor_ui_isolation.py
+          python scripts/fix_ui_refactor.py
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
@@ -35,6 +38,7 @@ jobs:
       - name: Remove one-shot machinery
         run: |
           rm scripts/refactor_ui_isolation.py
+          rm scripts/fix_ui_refactor.py
           rm .github/workflows/refactor-ui-isolation.yml
       - name: Commit refactor
         run: |
