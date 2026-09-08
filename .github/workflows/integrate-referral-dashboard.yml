@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
       - name: Apply referral dashboard changes
         run: python scripts/integrate_referral_dashboard.py
-      - name: Fix generated referral nav escaping
+      - name: Fix generated referral compatibility
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -31,6 +31,14 @@ jobs:
           if bad not in s:
               raise SystemExit('generated referral nav marker not found')
           p.write_text(s.replace(bad,good,1))
+
+          p=Path('src/gpt_windows_connector/referrals.py')
+          s=p.read_text()
+          old="INSERT OR IGNORE INTO subscriptions(user_id,plan,status,updated_at) VALUES(?, 'free','inactive',?)"
+          new="INSERT OR IGNORE INTO subscriptions(user_id,updated_at) VALUES(?,?)"
+          if s.count(old) != 2:
+              raise SystemExit('generated subscription compatibility markers not found')
+          p.write_text(s.replace(old,new))
           PY
       - name: Install
         run: |
