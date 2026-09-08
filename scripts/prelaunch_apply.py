@@ -52,13 +52,7 @@ write(p, s)
 # Pricing UI must match Stripe annual products and truthful discount language.
 for p in ["src/gpt_windows_connector/web_billing_runtime.py", "src/gpt_windows_connector/billing_ui.py"]:
     s = read(p)
-    for old, new in [
-        ("$95.90", "$99.99"),
-        ("$191.90", "$199.99"),
-        ("$143.90", "$149.99"),
-        ("Save 20%", "Save ~17%"),
-        ("save 20%", "save ~17%"),
-    ]:
+    for old, new in [("$95.90", "$99.99"), ("$191.90", "$199.99"), ("$143.90", "$149.99"), ("Save 20%", "Save ~17%"), ("save 20%", "save ~17%")]:
         s = s.replace(old, new)
     write(p, s)
 
@@ -93,50 +87,25 @@ s = once(s, old, new, "register fallback")
 s = once(s, old, new, "google fallback")
 write(p, s)
 
-# Registration referral attribution at the moment the account exists + readiness health.
+# Referral attribution and readiness are delegated to small modules so gateway stays an orchestrator.
 p = "src/gpt_windows_connector/gateway.py"
 s = read(p)
-if "def _claim_referral_cookie" not in s:
-    marker = "async def auth_register(request: Request):\n"
-    helper = '''def _claim_referral_cookie(request: Request, user_id: str) -> None:
-    code = str(request.cookies.get("lucas_ref") or "").strip()
-    if code:
-        billing.referrals.claim(user_id, code)
-
-
-'''
-    s = once(s, marker, helper + marker, "referral cookie helper")
-s = once(s, '        auth.audit(user.id, "auth.register")\n        response = JSONResponse', '        auth.audit(user.id, "auth.register")\n        _claim_referral_cookie(request, user.id)\n        response = JSONResponse', "register referral")
-s = once(s, '        auth.audit(user.id, "auth.email_verified")\n        response = JSONResponse', '        auth.audit(user.id, "auth.email_verified")\n        _claim_referral_cookie(request, user.id)\n        response = JSONResponse', "verify referral")
-s = once(s, '        auth.audit(user.id, "auth.google_login")\n        response = RedirectResponse', '        auth.audit(user.id, "auth.google_login")\n        _claim_referral_cookie(request, user.id)\n        response = RedirectResponse', "google referral")
+if "from .gateway_readiness import" not in s:
+    s = once(s, "from .task_runs import TaskRunStore\n", "from .task_runs import TaskRunStore\nfrom .gateway_readiness import readiness_checks, critical_ready\nfrom .gateway_referral import claim_referral_cookie\n", "gateway helper imports")
+s = once(s, '        auth.audit(user.id, "auth.register")\n        response = JSONResponse', '        auth.audit(user.id, "auth.register")\n        claim_referral_cookie(request, billing.referrals, user.id)\n        response = JSONResponse', "register referral")
+s = once(s, '        auth.audit(user.id, "auth.email_verified")\n        response = JSONResponse', '        auth.audit(user.id, "auth.email_verified")\n        claim_referral_cookie(request, billing.referrals, user.id)\n        response = JSONResponse', "verify referral")
+s = once(s, '        auth.audit(user.id, "auth.google_login")\n        response = RedirectResponse', '        auth.audit(user.id, "auth.google_login")\n        claim_referral_cookie(request, billing.referrals, user.id)\n        response = RedirectResponse', "google referral")
 health_start = s.index("async def health(_: Request):")
 health_end = s.index("\n\nasync def browser_events_websocket", health_start)
 health = '''async def health(_: Request):
-    try:
-        version = importlib.metadata.version("gpt-windows-connector")
-    except importlib.metadata.PackageNotFoundError:
-        version = "unknown"
-    db_ok = True
-    try:
-        with sqlite3.connect(db_path, timeout=3) as db:
-            db.execute("SELECT 1").fetchone()
-    except Exception:
-        db_ok = False
-    checks = {
-        "database": db_ok,
-        "jwt_secret": bool(settings.jwt_secret),
-        "super_admin_configured": bool(os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip()),
-        "email_verification": bool(email_verification_enabled()),
-        "google_oauth": bool(settings.google_client_id and settings.google_client_secret),
-        "turnstile": bool(os.getenv("GWC_TURNSTILE_SECRET_KEY", "").strip()),
-        "stripe_checkout": bool(billing.checkout_configured),
-        "stripe_annual": bool(billing.annual_checkout_configured),
-        "stripe_webhook": bool(billing.webhook_configured),
-    }
-    critical = checks["database"] and checks["jwt_secret"] and checks["super_admin_configured"]
-    return JSONResponse({"ok": bool(critical), "version": version, "online_nodes": len(registry.nodes), "auth": "multi-user", "checks": checks}, status_code=200 if critical else 503)
+    try: version=importlib.metadata.version("gpt-windows-connector")
+    except importlib.metadata.PackageNotFoundError: version="unknown"
+    checks=readiness_checks(db_path,settings,billing,email_verification_enabled); ready=critical_ready(checks)
+    return JSONResponse({"ok":ready,"version":version,"online_nodes":len(registry.nodes),"auth":"multi-user","checks":checks},status_code=200 if ready else 503)
 '''
 s = s[:health_start] + health + s[health_end:]
+# Remove two obsolete architecture comments now documented in README/ARCHITECTURE.
+s = s.replace('    # Do not preflight every operation with a separate workspace.info RPC. The\n    # Windows Node is the final security authority and Executor._prepare_call()\n    # validates local approval, Allowed Folders and the workspace immediately\n    # before the requested operation. A Gateway preflight only duplicated that\n    # check, added a full network round trip, and could block for up to 180s.\n', '')
 write(p, s)
 
 # Legal/support routes, sitemap entries, and footer links.
