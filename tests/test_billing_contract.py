@@ -5,7 +5,7 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 def test_pricing_contract():
     html=pricing_html()
-    for text in ["$9.99","$19.99","$14.99","$95.90","$191.90","$143.90","Save 20%","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
+    for text in ["$9.99","$19.99","$14.99","$99.99","$199.99","$149.99","Save ~17%","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
         assert text in html
 
 
@@ -49,12 +49,12 @@ def test_billable_request_guard_is_before_node_rpc():
     assert "ensure_node_active" in prefix
 
 
-def test_annual_billing_discount_contract():
+def test_annual_billing_contract():
     billing=Path("src/gpt_windows_connector/billing.py").read_text(encoding="utf-8")
     assert "STRIPE_PRICE_PRO_ANNUAL" in billing
     assert "STRIPE_PRICE_PRO_PLUS_ANNUAL" in billing
     assert "STRIPE_PRICE_EXPANSION_ANNUAL" in billing
-    assert "monthly*12*0.8" in billing
+    assert "ANNUAL_TOTALS" in billing
     runtime=Path("src/gpt_windows_connector/web_billing_runtime.py").read_text(encoding="utf-8")
     assert "billingSelectedInterval" in runtime
     assert "interval:billingSelectedInterval" in runtime
