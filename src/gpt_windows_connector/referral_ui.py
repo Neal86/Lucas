@@ -13,6 +13,8 @@ def referral_html(summary: dict) -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>Refer & Earn · Lucas</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/lucas-logo-square.png?v=20260908" />
+<link rel="shortcut icon" type="image/png" href="/assets/lucas-logo-square.png?v=20260908" />
 <style>
 body{{margin:0;background:#070a12;color:#f5f7ff;font:15px/1.5 Inter,system-ui,sans-serif}}
 .wrap{{max-width:920px;margin:0 auto;padding:42px 22px}} .card{{background:#101521;border:1px solid #242c3b;border-radius:18px;padding:22px;margin-top:16px}}
