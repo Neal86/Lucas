@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +89,7 @@ def main() -> None:
         test = test.replace(marker, replacement)
         _write(test_path, test)
 
+    sys.path.insert(0, str(ROOT / "src"))
     from gpt_windows_connector.web_assets import DASHBOARD_HTML
     required = [
         'id="landing"', 'class="token-section"', 'id="security"', 'id="how"',
