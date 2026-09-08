@@ -45,25 +45,37 @@ class BillingService:
             """)
 
     @property
+    def webhook_configured(self) -> bool:
+        return bool(self.secret and self.webhook_secret)
+
+    @property
+    def checkout_configured(self) -> bool:
+        return bool(self.secret and self.price_pro and self.price_pro_plus and self.price_expansion)
+
+    @property
     def configured(self) -> bool:
-        return bool(self.secret and self.webhook_secret and self.price_pro and self.price_pro_plus and self.price_expansion)
+        # Backward-compatible meaning for the UI: paid checkout is ready.
+        return self.checkout_configured
 
     def summary(self,user_id: str) -> dict[str,Any]:
-        ent=snapshot(self.db_path,user_id); out=ent.as_dict(); out['billing_configured']=self.configured
+        ent=snapshot(self.db_path,user_id); out=ent.as_dict(); out['billing_configured']=self.checkout_configured; out['webhook_configured']=self.webhook_configured
         with self._connect() as db:
             row=db.execute('SELECT billing_customer_id,stripe_subscription_id,scheduled_plan FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
         out['has_customer']=bool(row and row['billing_customer_id']); out['has_subscription']=bool(row and row['stripe_subscription_id']); out['scheduled_plan']=row['scheduled_plan'] if row else None
         out['monthly_price']=float(PLANS[ent.plan]['price'])+ent.expansion_quantity*float(EXPANSION['price'])
         return out
 
-    def _require_configured(self) -> None:
-        if not self.configured: raise RuntimeError('Stripe billing is not configured yet.')
+    def _require_checkout_configured(self) -> None:
+        if not self.checkout_configured: raise RuntimeError('Stripe checkout is not configured yet. Add the Stripe Price IDs first.')
+
+    def _require_webhook_configured(self) -> None:
+        if not self.webhook_configured: raise RuntimeError('Stripe webhook is not configured yet.')
 
     def _sub_row(self,user_id: str):
         with self._connect() as db: return db.execute('SELECT * FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
 
     def checkout(self,user,plan: str) -> str:
-        self._require_configured()
+        self._require_checkout_configured()
         if plan not in {'pro','pro_plus'}: raise ValueError('Invalid paid plan')
         row=self._sub_row(user.id)
         if row and row['stripe_subscription_id'] and str(row['status']) in ACTIVE_STATUSES:
@@ -87,7 +99,7 @@ class BillingService:
         session=stripe.checkout.Session.create(**params); return str(session.url)
 
     def add_expansion(self,user_id: str,quantity: int=1) -> str:
-        self._require_configured(); quantity=max(1,min(int(quantity),100)); ent=snapshot(self.db_path,user_id)
+        self._require_checkout_configured(); quantity=max(1,min(int(quantity),100)); ent=snapshot(self.db_path,user_id)
         if not ent.can_buy_expansion: raise PermissionError('Expansion Packs are available only on Pro+. Upgrade to Pro+ first.')
         row=self._sub_row(user_id)
         if not row or not row['stripe_subscription_id']: raise RuntimeError('Active Stripe subscription not found')
@@ -98,7 +110,8 @@ class BillingService:
         return self.base_url+'/billing?expansion=1'
 
     def portal(self,user_id: str) -> str:
-        self._require_configured(); row=self._sub_row(user_id)
+        if not self.secret: raise RuntimeError('Stripe API key is not configured yet.')
+        row=self._sub_row(user_id)
         if not row or not row['billing_customer_id']: raise ValueError('No Stripe customer exists for this account yet')
         s=stripe.billing_portal.Session.create(customer=str(row['billing_customer_id']),return_url=self.base_url+'/billing'); return str(s.url)
 
@@ -127,7 +140,7 @@ class BillingService:
             db.execute("UPDATE subscriptions SET plan=?,status=?,billing_provider='stripe',billing_customer_id=?,stripe_subscription_id=?,stripe_price_id=?,expansion_quantity=?,current_period_start=?,current_period_end=?,cancel_at_period_end=?,started_at=COALESCE(started_at,?),ends_at=?,updated_at=?,last_synced_at=? WHERE user_id=?",(plan,status,customer,sid,base_price,expansion,start,end,cancel,start or time.time(),end or None,time.time(),time.time(),user_id))
 
     def handle_webhook(self,payload: bytes,signature: str) -> str:
-        self._require_configured(); event=stripe.Webhook.construct_event(payload,signature,self.webhook_secret); eid=str(event['id']); etype=str(event['type']); digest=hashlib.sha256(payload).hexdigest()
+        self._require_webhook_configured(); event=stripe.Webhook.construct_event(payload,signature,self.webhook_secret); eid=str(event['id']); etype=str(event['type']); digest=hashlib.sha256(payload).hexdigest()
         with self._connect() as db:
             if db.execute('SELECT 1 FROM billing_events WHERE stripe_event_id=?',(eid,)).fetchone(): return 'duplicate'
         obj=event['data']['object']
