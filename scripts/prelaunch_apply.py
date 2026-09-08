@@ -104,15 +104,24 @@ health = '''async def health(_: Request):
     return JSONResponse({"ok":ready,"version":version,"online_nodes":len(registry.nodes),"auth":"multi-user","checks":checks},status_code=200 if ready else 503)
 '''
 s = s[:health_start] + health + s[health_end:]
-# Remove two obsolete architecture comments now documented in README/ARCHITECTURE.
 s = s.replace('    # Do not preflight every operation with a separate workspace.info RPC. The\n    # Windows Node is the final security authority and Executor._prepare_call()\n    # validates local approval, Allowed Folders and the workspace immediately\n    # before the requested operation. A Gateway preflight only duplicated that\n    # check, added a full network round trip, and could block for up to 180s.\n', '')
 write(p, s)
 
-# Legal/support routes, sitemap entries, and footer links.
+# Legal/support routes, sitemap entries, footer links, and optional Turnstile loading.
 p = "src/gpt_windows_connector/webapp.py"
 s = read(p)
 if "from .legal_ui import" not in s:
     s = once(s, "from .entitlements import active_node_ids, ensure_node_capacity, set_active_node\n", "from .entitlements import active_node_ids, ensure_node_capacity, set_active_node\nfrom .legal_ui import privacy_html, terms_html, refund_html, contact_html\n", "legal import")
+# Cloudflare's auto-render script must not run against an empty sitekey.
+turn_old = '''    turnstile_site_key = os.getenv("GWC_TURNSTILE_SITE_KEY", "").strip()
+    html = html.replace("__TURNSTILE_SITE_KEY__", turnstile_site_key).replace("__TURNSTILE_CLASS__", "" if turnstile_site_key else "hidden")
+'''
+turn_new = '''    turnstile_site_key = os.getenv("GWC_TURNSTILE_SITE_KEY", "").strip()
+    html = html.replace("__TURNSTILE_SITE_KEY__", turnstile_site_key).replace("__TURNSTILE_CLASS__", "" if turnstile_site_key else "hidden")
+    if not turnstile_site_key:
+        html = html.replace('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>', '')
+'''
+s = once(s, turn_old, turn_new, "optional turnstile")
 if "async def privacy_page" not in s:
     handlers = '''\n\nasync def privacy_page(_: Request): return HTMLResponse(privacy_html())
 async def terms_page(_: Request): return HTMLResponse(terms_html())
