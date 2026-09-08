@@ -488,7 +488,7 @@ async def api_referral_summary(request: Request):
 
 async def api_billing_checkout(request: Request):
     try:
-        user=_auth_user(request); body=await request.json(); url=gateway.billing.checkout(user,str(body.get("plan") or ""))
+        user=_auth_user(request); body=await request.json(); url=gateway.billing.checkout(user,str(body.get("plan") or ""),str(body.get("interval") or "month"))
         return JSONResponse({"url":url})
     except Exception as exc:
         return JSONResponse({"error":str(exc)},status_code=403 if isinstance(exc,PermissionError) else 400)

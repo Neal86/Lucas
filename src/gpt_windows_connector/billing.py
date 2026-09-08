@@ -18,6 +18,7 @@ class BillingService:
         self.db_path=Path(db_path); self.base_url=base_url.rstrip('/')
         self.secret=os.getenv('STRIPE_SECRET_KEY','').strip(); self.webhook_secret=os.getenv('STRIPE_WEBHOOK_SECRET','').strip()
         self.price_pro=os.getenv('STRIPE_PRICE_PRO','').strip(); self.price_pro_plus=os.getenv('STRIPE_PRICE_PRO_PLUS','').strip(); self.price_expansion=os.getenv('STRIPE_PRICE_EXPANSION','').strip()
+        self.price_pro_annual=os.getenv('STRIPE_PRICE_PRO_ANNUAL','').strip(); self.price_pro_plus_annual=os.getenv('STRIPE_PRICE_PRO_PLUS_ANNUAL','').strip(); self.price_expansion_annual=os.getenv('STRIPE_PRICE_EXPANSION_ANNUAL','').strip()
         self._init_db()
         self.referrals=ReferralService(self.db_path,self.base_url)
         if self.secret: stripe.api_key=self.secret
@@ -53,6 +54,10 @@ class BillingService:
         return bool(self.secret and self.price_pro and self.price_pro_plus and self.price_expansion)
 
     @property
+    def annual_checkout_configured(self) -> bool:
+        return bool(self.secret and self.price_pro_annual and self.price_pro_plus_annual and self.price_expansion_annual)
+
+    @property
     def configured(self) -> bool:
         # Backward-compatible meaning for the UI: paid checkout is ready.
         return self.checkout_configured
@@ -62,7 +67,15 @@ class BillingService:
         with self._connect() as db:
             row=db.execute('SELECT billing_customer_id,stripe_subscription_id,scheduled_plan FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
         out['has_customer']=bool(row and row['billing_customer_id']); out['has_subscription']=bool(row and row['stripe_subscription_id']); out['scheduled_plan']=row['scheduled_plan'] if row else None
-        out['monthly_price']=float(PLANS[ent.plan]['price'])+ent.expansion_quantity*float(EXPANSION['price'])
+        stripe_price_id=str(ent.stripe_price_id or '')
+        annual_ids={self.price_pro_annual,self.price_pro_plus_annual}
+        interval='year' if stripe_price_id and stripe_price_id in annual_ids else 'month'
+        out['billing_interval']=interval
+        out['annual_billing_configured']=self.annual_checkout_configured
+        monthly=float(PLANS[ent.plan]['price'])+ent.expansion_quantity*float(EXPANSION['price'])
+        out['monthly_price']=monthly
+        out['billing_total']=round(monthly*12*0.8,2) if interval=='year' else round(monthly,2)
+        out['monthly_equivalent']=round(monthly*0.8,2) if interval=='year' else round(monthly,2)
         return out
 
     def _require_checkout_configured(self) -> None:
@@ -74,26 +87,32 @@ class BillingService:
     def _sub_row(self,user_id: str):
         with self._connect() as db: return db.execute('SELECT * FROM subscriptions WHERE user_id=?',(user_id,)).fetchone()
 
-    def checkout(self,user,plan: str) -> str:
+    def checkout(self,user,plan: str,interval: str='month') -> str:
         self._require_checkout_configured()
         if plan not in {'pro','pro_plus'}: raise ValueError('Invalid paid plan')
+        interval='year' if str(interval).lower() in {'year','annual','yearly'} else 'month'
+        if interval=='year' and not self.annual_checkout_configured:
+            raise RuntimeError('Annual Stripe prices are not configured yet. Add STRIPE_PRICE_PRO_ANNUAL, STRIPE_PRICE_PRO_PLUS_ANNUAL, and STRIPE_PRICE_EXPANSION_ANNUAL.')
+        target_price=(self.price_pro_annual if plan=='pro' else self.price_pro_plus_annual) if interval=='year' else (self.price_pro if plan=='pro' else self.price_pro_plus)
         row=self._sub_row(user.id)
         if row and row['stripe_subscription_id'] and str(row['status']) in ACTIVE_STATUSES:
             current=str(row['plan'] or 'free')
-            if current==plan: return self.base_url+'/billing'
+            current_interval='year' if str(row['stripe_price_id'] or '') in {self.price_pro_annual,self.price_pro_plus_annual} else 'month'
+            if current==plan and current_interval==interval: return self.base_url+'/billing'
             if current=='pro_plus' and plan=='pro':
                 raise ValueError('Downgrades take effect next cycle. Use Manage Billing to schedule the downgrade.')
             sub=stripe.Subscription.retrieve(str(row['stripe_subscription_id']))
-            base_item=next((i for i in sub['items']['data'] if i['price']['id'] in {self.price_pro,self.price_pro_plus}),None)
+            base_ids={self.price_pro,self.price_pro_plus,self.price_pro_annual,self.price_pro_plus_annual}
+            base_item=next((i for i in sub['items']['data'] if i['price']['id'] in base_ids),None)
             if not base_item: raise RuntimeError('Stripe subscription base item was not found')
-            stripe.SubscriptionItem.modify(base_item['id'],price=self.price_pro_plus,proration_behavior='create_prorations')
+            stripe.SubscriptionItem.modify(base_item['id'],price=target_price,proration_behavior='create_prorations')
             return self.base_url+'/billing?updated=1'
-        price=self.price_pro if plan=='pro' else self.price_pro_plus
+        price=target_price
         params={
           'mode':'subscription','line_items':[{'price':price,'quantity':1}],
           'success_url':self.base_url+'/billing/success?session_id={CHECKOUT_SESSION_ID}',
           'cancel_url':self.base_url+'/billing/cancel','client_reference_id':user.id,'customer_email':user.email,
-          'metadata':{'user_id':user.id,'plan':plan},'subscription_data':{'metadata':{'user_id':user.id,'plan':plan}},
+          'metadata':{'user_id':user.id,'plan':plan,'billing_interval':interval},'subscription_data':{'metadata':{'user_id':user.id,'plan':plan,'billing_interval':interval}},
           'allow_promotion_codes':True,
         }
         session=stripe.checkout.Session.create(**params); return str(session.url)
@@ -104,9 +123,12 @@ class BillingService:
         row=self._sub_row(user_id)
         if not row or not row['stripe_subscription_id']: raise RuntimeError('Active Stripe subscription not found')
         sub=stripe.Subscription.retrieve(str(row['stripe_subscription_id'])); items=list(sub['items']['data'])
-        exp=next((i for i in items if i['price']['id']==self.price_expansion),None); new_qty=ent.expansion_quantity+quantity
-        if exp: stripe.SubscriptionItem.modify(exp['id'],quantity=new_qty,proration_behavior='create_prorations')
-        else: stripe.SubscriptionItem.create(subscription=str(row['stripe_subscription_id']),price=self.price_expansion,quantity=new_qty,proration_behavior='create_prorations')
+        annual=str(row['stripe_price_id'] or '') in {self.price_pro_annual,self.price_pro_plus_annual}
+        expansion_price=self.price_expansion_annual if annual else self.price_expansion
+        if annual and not expansion_price: raise RuntimeError('Annual Expansion Pack Stripe price is not configured yet.')
+        exp=next((i for i in items if i['price']['id'] in {self.price_expansion,self.price_expansion_annual}),None); new_qty=ent.expansion_quantity+quantity
+        if exp: stripe.SubscriptionItem.modify(exp['id'],price=expansion_price,quantity=new_qty,proration_behavior='create_prorations')
+        else: stripe.SubscriptionItem.create(subscription=str(row['stripe_subscription_id']),price=expansion_price,quantity=new_qty,proration_behavior='create_prorations')
         return self.base_url+'/billing?expansion=1'
 
     def portal(self,user_id: str) -> str:
@@ -131,9 +153,9 @@ class BillingService:
         items=self._value(self._value(sub,'items',{}),'data',[]) or []; plan='free'; base_price=''; expansion=0
         for item in items:
             price=self._value(self._value(item,'price',{}),'id',''); qty=int(self._value(item,'quantity',1) or 1)
-            if price==self.price_pro: plan='pro'; base_price=price
-            elif price==self.price_pro_plus: plan='pro_plus'; base_price=price
-            elif price==self.price_expansion: expansion=qty
+            if price in {self.price_pro,self.price_pro_annual}: plan='pro'; base_price=price
+            elif price in {self.price_pro_plus,self.price_pro_plus_annual}: plan='pro_plus'; base_price=price
+            elif price in {self.price_expansion,self.price_expansion_annual}: expansion=qty
         if plan!='pro_plus': expansion=0
         status=str(self._value(sub,'status','inactive')); start=float(self._value(sub,'current_period_start',0) or 0); end=float(self._value(sub,'current_period_end',0) or 0); cancel=1 if self._value(sub,'cancel_at_period_end',False) else 0
         with self._connect() as db:

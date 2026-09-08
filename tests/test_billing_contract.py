@@ -5,7 +5,7 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 def test_pricing_contract():
     html=pricing_html()
-    for text in ["$9.99","$19.99","$14.99","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
+    for text in ["$9.99","$19.99","$14.99","$95.90","$191.90","$143.90","Save 20%","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
         assert text in html
 
 
@@ -22,7 +22,7 @@ def test_billing_endpoints_and_webhook_exist():
     server=Path("src/gpt_windows_connector/server.py").read_text(encoding="utf-8")
     assert '"/api/billing/webhook"' in server
     compose=Path("docker-compose.yml").read_text(encoding="utf-8")
-    for key in ["STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_PRO","STRIPE_PRICE_PRO_PLUS","STRIPE_PRICE_EXPANSION"]:
+    for key in ["STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_PRO","STRIPE_PRICE_PRO_PLUS","STRIPE_PRICE_EXPANSION","STRIPE_PRICE_PRO_ANNUAL","STRIPE_PRICE_PRO_PLUS_ANNUAL","STRIPE_PRICE_EXPANSION_ANNUAL"]:
         assert key in compose
 
 
@@ -47,3 +47,14 @@ def test_billable_request_guard_is_before_node_rpc():
     prefix=text[start:end]
     assert "ensure_request_capacity" in prefix
     assert "ensure_node_active" in prefix
+
+
+def test_annual_billing_discount_contract():
+    billing=Path("src/gpt_windows_connector/billing.py").read_text(encoding="utf-8")
+    assert "STRIPE_PRICE_PRO_ANNUAL" in billing
+    assert "STRIPE_PRICE_PRO_PLUS_ANNUAL" in billing
+    assert "STRIPE_PRICE_EXPANSION_ANNUAL" in billing
+    assert "monthly*12*0.8" in billing
+    runtime=Path("src/gpt_windows_connector/web_billing_runtime.py").read_text(encoding="utf-8")
+    assert "billingSelectedInterval" in runtime
+    assert "interval:billingSelectedInterval" in runtime
