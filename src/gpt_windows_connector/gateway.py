@@ -325,6 +325,7 @@ async def auth_register(request: Request):
     try:
         body = await request.json()
         email = str(body.get("email", "")).strip().lower()
+        meta_event_id = str(body.get("meta_event_id") or f"register_{uuid.uuid4().hex}")[:200]
         if str(body.get("website", "")).strip():
             return JSONResponse({"error": "Registration could not be completed"}, status_code=400)
         if not _registration_rate_ok(request, email):
