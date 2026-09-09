@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -559,7 +560,9 @@ async def api_referral_summary(request: Request):
 
 async def api_billing_checkout(request: Request):
     try:
-        user=_auth_user(request); body=await request.json(); url=gateway.billing.checkout(user,str(body.get("plan") or ""),str(body.get("interval") or "month"))
+        user=_auth_user(request); body=await request.json(); plan=str(body.get("plan") or ""); interval=str(body.get("interval") or "month"); event_id=str(body.get("meta_event_id") or f"checkout_{uuid.uuid4().hex}")[:200]; url=gateway.billing.checkout(user,plan,interval)
+        value=(99.99 if interval=="year" else 9.99) if plan=="pro" else ((199.99 if interval=="year" else 19.99) if plan=="pro_plus" else 0)
+        await gateway.meta_capi.send_async("InitiateCheckout",event_id=event_id,email=user.email,user_id=user.id,custom_data={"value":value,"currency":"USD","content_name":plan,"content_category":"subscription"},**gateway.meta_request_context(request))
         return JSONResponse({"url":url})
     except Exception as exc:
         return JSONResponse({"error":str(exc)},status_code=403 if isinstance(exc,PermissionError) else 400)
@@ -567,7 +570,9 @@ async def api_billing_checkout(request: Request):
 
 async def api_billing_expansion(request: Request):
     try:
-        user=_auth_user(request); body=await request.json(); url=gateway.billing.add_expansion(user.id,int(body.get("quantity") or 1))
+        user=_auth_user(request); body=await request.json(); quantity=max(1,int(body.get("quantity") or 1)); event_id=str(body.get("meta_event_id") or f"expansion_{uuid.uuid4().hex}")[:200]; url=gateway.billing.add_expansion(user.id,quantity)
+        interval=str(gateway.billing.summary(user.id).get("billing_interval") or "month"); value=quantity*(149.99 if interval=="year" else 14.99)
+        await gateway.meta_capi.send_async("InitiateCheckout",event_id=event_id,email=user.email,user_id=user.id,custom_data={"value":value,"currency":"USD","content_name":"Expansion Pack","content_category":"addon","num_items":quantity},**gateway.meta_request_context(request))
         return JSONResponse({"url":url})
     except Exception as exc:
         return JSONResponse({"error":str(exc)},status_code=403 if isinstance(exc,PermissionError) else 400)
