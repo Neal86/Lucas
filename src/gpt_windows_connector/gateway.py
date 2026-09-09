@@ -339,6 +339,7 @@ async def auth_register(request: Request):
         user = auth.register(email, body.get("password", ""), body.get("name"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.register")
+        await meta_capi.send_async("CompleteRegistration", event_id=meta_event_id, email=user.email, user_id=user.id, custom_data={"content_name":"Email Registration","status":"completed"}, **meta_request_context(request))
         claim_referral_cookie(request, billing.referrals, user.id)
         response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__}, status_code=201)
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
