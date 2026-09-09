@@ -117,7 +117,7 @@ class BillingService:
         price=target_price
         params={
           'mode':'subscription','line_items':[{'price':price,'quantity':1}],
-          'success_url':self.base_url+'/billing/success?session_id={CHECKOUT_SESSION_ID}',
+          'success_url':self.base_url+f'/billing/success?session_id={{CHECKOUT_SESSION_ID}}&plan={plan}&interval={interval}',
           'cancel_url':self.base_url+'/billing/cancel','client_reference_id':user.id,'customer_email':user.email,
           'metadata':{'user_id':user.id,'plan':plan,'billing_interval':interval},'subscription_data':{'metadata':{'user_id':user.id,'plan':plan,'billing_interval':interval}},
           'allow_promotion_codes':True,
