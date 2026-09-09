@@ -355,10 +355,12 @@ async def auth_verify_email(request: Request):
         return JSONResponse({"error": "Email verification is not configured"}, status_code=503)
     try:
         body = await request.json()
+        meta_event_id = str(body.get("meta_event_id") or f"verify_{uuid.uuid4().hex}")[:200]
         user_id = registration_security.verify(str(body.get("email", "")), str(body.get("code", "")))
         user = auth.get_user(user_id)
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.email_verified")
+        await meta_capi.send_async("CompleteRegistration", event_id=meta_event_id, email=user.email, user_id=user.id, custom_data={"content_name":"Email Registration","status":"verified"}, **meta_request_context(request))
         claim_referral_cookie(request, billing.referrals, user.id)
         response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
@@ -401,11 +403,14 @@ async def auth_me(_: Request):
     return JSONResponse({"user": _user().__dict__})
 
 
-async def auth_google_start(_: Request):
+async def auth_google_start(request: Request):
     if not settings.google_client_id or not settings.google_redirect_uri:
         return JSONResponse({"error": "google_login_not_configured"}, status_code=503)
     state = auth.new_oauth_state()
-    return RedirectResponse(google_authorize_url(settings.google_client_id, settings.google_redirect_uri, state), status_code=302)
+    meta_event_id = f"google_registration_{uuid.uuid4().hex}"
+    response = RedirectResponse(google_authorize_url(settings.google_client_id, settings.google_redirect_uri, state), status_code=302)
+    response.set_cookie("lucas_meta_google_registration", meta_event_id, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=600)
+    return response
 
 
 async def auth_google_callback(request: Request):
@@ -418,12 +423,19 @@ async def auth_google_callback(request: Request):
     try:
         auth.consume_oauth_state(state)
         info = await google_exchange_code(settings.google_client_id, settings.google_client_secret, settings.google_redirect_uri, code)
-        user = auth.google_login(sub=str(info.get("sub", "")), email=str(info.get("email", "")), name=info.get("name"), picture=info.get("picture"))
+        sub = str(info.get("sub", "")); email = str(info.get("email", ""))
+        is_new_user = not auth.google_identity_exists(sub=sub, email=email)
+        user = auth.google_login(sub=sub, email=email, name=info.get("name"), picture=info.get("picture"))
         token = auth.issue_token(user)
         auth.audit(user.id, "auth.google_login")
+        meta_event_id = str(request.cookies.get("lucas_meta_google_registration") or f"google_registration_{uuid.uuid4().hex}")[:200]
+        if is_new_user:
+            await meta_capi.send_async("CompleteRegistration", event_id=meta_event_id, email=user.email, user_id=user.id, custom_data={"content_name":"Google Registration","status":"completed"}, **meta_request_context(request))
         claim_referral_cookie(request, billing.referrals, user.id)
-        response = RedirectResponse("/dashboard", status_code=302)
+        target = "/dashboard?meta_registration=" + quote(meta_event_id, safe="") if is_new_user else "/dashboard"
+        response = RedirectResponse(target, status_code=302)
         response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
+        response.delete_cookie("lucas_meta_google_registration")
         return response
     except Exception as exc:
         return JSONResponse({"error": f"google_login_failed: {exc}"}, status_code=400)
