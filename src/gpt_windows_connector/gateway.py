@@ -37,6 +37,7 @@ from .auth import (
 )
 from .config import GatewaySettings
 from .billing import BillingService
+from .meta_capi import MetaConversionsAPI
 from .entitlements import ensure_node_active, ensure_node_capacity, ensure_request_capacity
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
@@ -47,7 +48,8 @@ from .gateway_referral import claim_referral_cookie
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
 auth = AuthStore(db_path, settings.jwt_secret, settings.jwt_ttl_seconds)
-billing = BillingService(db_path, settings.public_base_url)
+meta_capi = MetaConversionsAPI(settings.public_base_url)
+billing = BillingService(db_path, settings.public_base_url, meta_capi=meta_capi)
 oauth = OAuthProvider(db_path, auth, settings.public_base_url)
 registration_security = RegistrationSecurity(db_path)
 task_runs = TaskRunStore(db_path)
@@ -286,6 +288,16 @@ async def _desktop_lock(node_id: str, workspace: str, ttl_seconds: int = 120) ->
 def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     return forwarded or (request.client.host if request.client else "unknown")
+
+
+def meta_request_context(request: Request) -> dict[str, str]:
+    return {
+        "source_url": str(request.url),
+        "client_ip": _client_ip(request),
+        "user_agent": request.headers.get("user-agent", ""),
+        "fbp": request.cookies.get("_fbp", ""),
+        "fbc": request.cookies.get("_fbc", ""),
+    }
 
 
 def _registration_rate_ok(request: Request, email: str, *, resend: bool = False) -> bool:
