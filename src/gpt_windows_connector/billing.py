@@ -16,8 +16,8 @@ ANNUAL_TOTALS = {"pro": 99.99, "pro_plus": 199.99, "expansion": 149.99}
 
 
 class BillingService:
-    def __init__(self, db_path: Path, base_url: str) -> None:
-        self.db_path=Path(db_path); self.base_url=base_url.rstrip('/')
+    def __init__(self, db_path: Path, base_url: str, meta_capi=None) -> None:
+        self.db_path=Path(db_path); self.base_url=base_url.rstrip('/'); self.meta_capi=meta_capi
         self.secret=os.getenv('STRIPE_SECRET_KEY','').strip(); self.webhook_secret=os.getenv('STRIPE_WEBHOOK_SECRET','').strip()
         self.price_pro=os.getenv('STRIPE_PRICE_PRO','').strip(); self.price_pro_plus=os.getenv('STRIPE_PRICE_PRO_PLUS','').strip(); self.price_expansion=os.getenv('STRIPE_PRICE_EXPANSION','').strip()
         self.price_pro_annual=os.getenv('STRIPE_PRICE_PRO_ANNUAL','').strip(); self.price_pro_plus_annual=os.getenv('STRIPE_PRICE_PRO_PLUS_ANNUAL','').strip(); self.price_expansion_annual=os.getenv('STRIPE_PRICE_EXPANSION_ANNUAL','').strip()
@@ -144,6 +144,12 @@ class BillingService:
         if not row or not row['billing_customer_id']: raise ValueError('No Stripe customer exists for this account yet')
         s=stripe.billing_portal.Session.create(customer=str(row['billing_customer_id']),return_url=self.base_url+'/billing'); return str(s.url)
 
+    def _user_email(self,user_id: str) -> str:
+        if not user_id: return ''
+        with self._connect() as db:
+            row=db.execute('SELECT email FROM users WHERE id=?',(user_id,)).fetchone()
+        return str(row['email'] if row else '')
+
     def _value(self,obj,key,default=None):
         try: return obj[key]
         except Exception: return getattr(obj,key,default)
@@ -178,6 +184,10 @@ class BillingService:
             if uid:
                 with self._connect() as db: db.execute("UPDATE subscriptions SET billing_provider='stripe',billing_customer_id=?,stripe_subscription_id=?,updated_at=? WHERE user_id=?",(customer,sid,time.time(),uid))
             if sid: self.sync_subscription(stripe.Subscription.retrieve(sid))
+            if uid and self.meta_capi and str(obj.get('payment_status') or '')=='paid':
+                meta=dict(obj.get('metadata') or {}); plan=str(meta.get('plan') or 'subscription'); interval=str(meta.get('billing_interval') or 'month'); amount=float(obj.get('amount_total') or 0)/100.0; currency=str(obj.get('currency') or 'usd').upper(); event_id='stripe_checkout_'+str(obj.get('id') or eid); email=self._user_email(uid); custom={'value':amount,'currency':currency,'content_name':plan,'content_category':'subscription','billing_interval':interval}
+                self.meta_capi.send('Purchase',event_id=event_id,email=email,user_id=uid,source_url=self.base_url+'/billing',custom_data=custom)
+                self.meta_capi.send('Subscribe',event_id=event_id,email=email,user_id=uid,source_url=self.base_url+'/billing',custom_data=custom)
         elif etype.startswith('customer.subscription.'):
             self.sync_subscription(obj)
             if etype=='customer.subscription.deleted':
@@ -191,6 +201,10 @@ class BillingService:
                     with self._connect() as db: db.execute("UPDATE subscriptions SET status='past_due',updated_at=? WHERE stripe_subscription_id=?",(time.time(),sid))
                 elif etype=='invoice.paid':
                     uid=self.referrals.resolve_user_from_invoice(obj)
-                    if uid: self.referrals.qualify_paid_user(uid,eid)
+                    if uid:
+                        self.referrals.qualify_paid_user(uid,eid)
+                        if self.meta_capi and str(obj.get('billing_reason') or '')!='subscription_create':
+                            amount=float(obj.get('amount_paid') or 0)/100.0; currency=str(obj.get('currency') or 'usd').upper(); event_id='stripe_invoice_'+str(obj.get('id') or eid); email=self._user_email(uid)
+                            self.meta_capi.send('Purchase',event_id=event_id,email=email,user_id=uid,source_url=self.base_url+'/billing',custom_data={'value':amount,'currency':currency,'content_name':'Subscription payment','content_category':'subscription'})
         with self._connect() as db: db.execute('INSERT INTO billing_events(stripe_event_id,event_type,payload_hash,processed_at,result) VALUES(?,?,?,?,?)',(eid,etype,digest,time.time(),'processed'))
         return 'processed'
