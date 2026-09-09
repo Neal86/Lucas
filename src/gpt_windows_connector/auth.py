@@ -171,6 +171,12 @@ class AuthStore:
             db.execute("INSERT INTO login_sessions(user_id,provider,created_at) VALUES(?,?,?)", (row["id"], "email", now))
         return self.get_user(str(row["id"]))
 
+    def google_identity_exists(self, *, sub: str, email: str) -> bool:
+        email = email.strip().lower()
+        with self._connect() as db:
+            row = db.execute("SELECT 1 FROM users WHERE google_sub=? OR email=? COLLATE NOCASE LIMIT 1", (sub, email)).fetchone()
+        return bool(row)
+
     def google_login(self, *, sub: str, email: str, name: str | None, picture: str | None) -> User:
         if not sub or not email:
             raise ValueError("Google account did not provide required identity fields")
