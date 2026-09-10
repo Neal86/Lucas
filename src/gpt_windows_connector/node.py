@@ -461,10 +461,7 @@ async def _serve_connection(
                 local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type} if error_type else {},context_key=workspace or "default")
             except Exception:
                 log.exception("Could not record local Task Run")
-            try:
-                await send_json(response)
-            except Exception:
-                log.exception("Failed sending response for %s", method)
+            await _deliver_response(response)
 
         try:
             while True:
