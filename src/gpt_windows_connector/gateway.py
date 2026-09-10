@@ -762,8 +762,7 @@ async def node_websocket(websocket: WebSocket):
         log.info("Node connected node_id=%s name=%s authorized_users=%d runtime=%s", node_id, display_name, len(authorized_user_ids), runtime_id or "legacy")
         bindings.reconcile_node(node_id, authorized_user_ids)
         await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False, "node_auth_required": True}})
-        if same_runtime:
-            await registry.replay_pending(node_id)
+        await registry.replay_pending(node_id)
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
