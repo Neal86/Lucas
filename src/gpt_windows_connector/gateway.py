@@ -734,6 +734,8 @@ async def node_websocket(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat_ack", "time": time.time()})
             elif message.get("type") == "response":
                 registry.resolve(node_id, message)
+                async with connection.send_lock:
+                    await websocket.send_json({"type": "response.ack", "id": message.get("id")})
             elif message.get("type") == "access.sync":
                 added, removed = bindings.reconcile_node(node_id, [str(v) for v in message.get("authorized_user_ids") or []])
                 for user_id in added:
