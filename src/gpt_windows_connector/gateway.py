@@ -715,15 +715,18 @@ async def node_websocket(websocket: WebSocket):
         allowed_roots = hello_roots or stored_roots
         display_name = str(record.get("name") or name) if record else name
         await auth_store.update_config(node_id, display_name, allowed_roots)
-        connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket)
+        connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket, runtime_id=runtime_id)
+        same_runtime = registry.register_connection(node_id, runtime_id)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):
                 await old.websocket.close(code=4001)
         registry.nodes[node_id] = connection
-        log.info("Node connected node_id=%s name=%s authorized_users=%d", node_id, display_name, len(authorized_user_ids))
+        log.info("Node connected node_id=%s name=%s authorized_users=%d runtime=%s", node_id, display_name, len(authorized_user_ids), runtime_id or "legacy")
         bindings.reconcile_node(node_id, authorized_user_ids)
         await websocket.send_json({"type": "welcome", "ok": True, "config": {"local_security_authority": True, "multi_user_access": True, "pairing_required": False, "node_auth_required": True}})
+        if same_runtime:
+            await registry.replay_pending(node_id)
         while True:
             message = await websocket.receive_json()
             if message.get("type") == "heartbeat":
