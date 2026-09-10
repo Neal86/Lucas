@@ -526,8 +526,16 @@ async def _serve_connection(
                     continue
 
                 task = asyncio.create_task(execute_request(request_id, method, params, actor), name=f"lucas:{method}:{request_id}")
-                request_tasks.add(task)
-                task.add_done_callback(request_tasks.discard)
+                _REQUEST_TASKS.add(task)
+                if request_key:
+                    _INFLIGHT_REQUEST_IDS.add(request_key)
+
+                def request_done(done: asyncio.Task[None], key: str = request_key) -> None:
+                    _REQUEST_TASKS.discard(done)
+                    if key:
+                        _INFLIGHT_REQUEST_IDS.discard(key)
+
+                task.add_done_callback(request_done)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -535,10 +543,11 @@ async def _serve_connection(
             log.warning("Node session disconnected reason=%s error=%s", reason, exc)
             raise NodeSessionDisconnected(f"{reason}: {exc}") from exc
         finally:
-            if request_tasks:
-                for task in request_tasks:
-                    task.cancel()
-                await asyncio.gather(*request_tasks, return_exceptions=True)
+            # Do not cancel work on a transport disconnect. Long PowerShell/build
+            # operations keep running and publish their cached result through the
+            # next WebSocket session. Only detach this specific dead sender.
+            if _active_sender is send_json:
+                _active_sender = None
 
 
 async def run_node() -> None:
