@@ -492,7 +492,13 @@ async def _serve_connection(
                         # the same side effect twice while the original is still alive.
                         continue
                 method = message.get("method", "")
-                params = message.get("params") or {}
+                params = dict(message.get("params") or {})
+                # shell.run is a durable at-most-once job keyed by the Gateway
+                # request ID. If the Node process itself restarts, replaying this
+                # request attaches to the detached worker/result instead of running
+                # the command twice.
+                if method == "shell.run" and request_key:
+                    params["_request_id"] = request_key
                 actor = message.get("actor") if isinstance(message.get("actor"), dict) else {}
                 if method == "access.request":
                     try:
