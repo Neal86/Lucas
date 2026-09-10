@@ -181,6 +181,57 @@ class NodeRegistry:
             raise RuntimeError(f"Node is offline: {node_id}")
         return node
 
+    async def wait_online(self, node_id: str, timeout: float = DISCONNECT_GRACE_SECONDS) -> NodeConnection:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            node = self.nodes.get(node_id)
+            if node:
+                return node
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Node is offline: {node_id}")
+            await asyncio.sleep(0.1)
+
+    def register_connection(self, node_id: str, runtime_id: str) -> bool:
+        previous = self.runtime_ids.get(node_id)
+        self.runtime_ids[node_id] = runtime_id
+        self.disconnect_epochs[node_id] = self.disconnect_epochs.get(node_id, 0) + 1
+        same_runtime = not previous or not runtime_id or previous == runtime_id
+        if previous and runtime_id and previous != runtime_id:
+            pending = self.pending_requests.pop(node_id, {})
+            self.pending_payloads.pop(node_id, None)
+            for future in pending.values():
+                if not future.done():
+                    future.set_exception(RuntimeError(f"Node restarted during operation: {node_id}"))
+        return same_runtime
+
+    def begin_disconnect_grace(self, node_id: str) -> None:
+        epoch = self.disconnect_epochs.get(node_id, 0) + 1
+        self.disconnect_epochs[node_id] = epoch
+
+        async def expire() -> None:
+            await asyncio.sleep(DISCONNECT_GRACE_SECONDS)
+            if self.disconnect_epochs.get(node_id) != epoch or node_id in self.nodes:
+                return
+            self.control_locks.pop(node_id, None)
+            pending = self.pending_requests.pop(node_id, {})
+            self.pending_payloads.pop(node_id, None)
+            for future in pending.values():
+                if not future.done():
+                    future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
+
+        asyncio.create_task(expire())
+
+    async def replay_pending(self, node_id: str) -> None:
+        node = self.nodes.get(node_id)
+        if not node:
+            return
+        payloads = list(self.pending_payloads.get(node_id, {}).values())
+        for payload in payloads:
+            async with node.send_lock:
+                await node.websocket.send_json(payload)
+        if payloads:
+            log.info("Replayed %d pending RPC(s) after Node reconnect node_id=%s", len(payloads), node_id)
+
     def acquire_control(self, node_id: str, user_id: str, context_id: str, ttl_seconds: int = 120) -> dict:
         self.require_online(node_id)
         now = time.time()
