@@ -13,6 +13,7 @@ import psutil
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+CREATE_BREAKAWAY_FROM_JOB = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 JOB_ROOT = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Lucas" / "jobs"
 
 
@@ -114,7 +115,7 @@ def run_powershell(workspace: Path, command: str, timeout: int = 120, shell_type
         subprocess.Popen(
             [sys.executable, "-m", "gpt_windows_connector.shell_job", str(spec_path)],
             cwd=workspace, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, close_fds=True, shell=False,
+            creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB, close_fds=True, shell=False,
         )
 
     deadline = time.monotonic() + timeout + 15
