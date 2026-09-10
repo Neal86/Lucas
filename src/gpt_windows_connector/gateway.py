@@ -753,7 +753,7 @@ async def node_websocket(websocket: WebSocket):
         display_name = str(record.get("name") or name) if record else name
         await auth_store.update_config(node_id, display_name, allowed_roots)
         connection = NodeConnection(node_id=node_id, name=display_name, allowed_roots=allowed_roots, websocket=websocket, runtime_id=runtime_id)
-        same_runtime = registry.register_connection(node_id, runtime_id)
+        registry.register_connection(node_id, runtime_id)
         old = registry.nodes.get(node_id)
         if old:
             with contextlib.suppress(Exception):
