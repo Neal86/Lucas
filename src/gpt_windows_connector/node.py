@@ -36,6 +36,38 @@ local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
+# One runtime ID lives for the lifetime of the Node process. The Gateway uses it
+# to distinguish a harmless WebSocket reconnect from an actual Node restart.
+RUNTIME_ID = secrets.token_hex(8)
+RESPONSE_CACHE_SECONDS = 600.0
+_active_sender = None
+_REQUEST_TASKS: set[asyncio.Task[None]] = set()
+_INFLIGHT_REQUEST_IDS: set[str] = set()
+_COMPLETED_RESPONSES: dict[str, tuple[float, dict[str, object]]] = {}
+
+
+async def _deliver_response(response: dict[str, object]) -> None:
+    request_id = str(response.get("id") or "")
+    now = time.time()
+    for cached_id, (created_at, _) in list(_COMPLETED_RESPONSES.items()):
+        if now - created_at > RESPONSE_CACHE_SECONDS:
+            _COMPLETED_RESPONSES.pop(cached_id, None)
+    if request_id:
+        _COMPLETED_RESPONSES[request_id] = (now, response)
+    sender = _active_sender
+    if sender is None:
+        log.info("Response queued until reconnect request_id=%s", request_id)
+        return
+    try:
+        await sender(response)
+    except Exception as exc:
+        log.info("Response delivery deferred request_id=%s error=%s", request_id, exc)
+
+
+async def _flush_completed_responses(sender) -> None:
+    for _, response in list(_COMPLETED_RESPONSES.values()):
+        await sender(response)
+
 
 class NodeSessionDisconnected(ConnectionError):
     """A previously established Gateway session was lost. Retry direct immediately."""
