@@ -369,7 +369,13 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     wall_started = time.time()
     started = time.monotonic()
     try:
-        result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user))
+        rpc_timeout = 180.0
+        if method == "shell.run":
+            try:
+                rpc_timeout = max(180.0, min(float(payload.get("timeout") or 120) + 60.0, 3660.0))
+            except (TypeError, ValueError):
+                rpc_timeout = 180.0
+        result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration)
