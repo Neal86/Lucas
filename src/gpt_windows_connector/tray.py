@@ -24,8 +24,11 @@ STATUS_FILE = CONFIG_DIR / "node-status.json"
 LOG_FILE = CONFIG_DIR / "lucas-node.log"
 TRAY_LOG_FILE = CONFIG_DIR / "lucas-tray.log"
 PID_FILE = CONFIG_DIR / "lucas-tray.pid"
-STATUS_STALE_SECONDS = 45.0
-RESUME_GAP_SECONDS = 8.0
+STATUS_STALE_SECONDS = 90.0
+# A busy Windows machine can stall the Python supervisor for several seconds.
+# Treat only a clearly long gap as suspend/resume so builds and scans never cause
+# false-positive Node restarts.
+RESUME_GAP_SECONDS = 30.0
 NODE_STARTUP_GRACE_SECONDS = 20.0
 
 log = logging.getLogger("lucas.tray")
