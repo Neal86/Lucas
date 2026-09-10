@@ -398,16 +398,25 @@ class LucasTray:
             return
 
         status = _load_json(STATUS_FILE)
+        # A status-file read can transiently fail while Windows, antivirus, an updater,
+        # or another local Lucas process is replacing the JSON. Never interpret one
+        # unreadable/missing sample as an infinite-age heartbeat and kill a healthy
+        # Node. The Node now owns network reconnects itself; the tray only recovers
+        # from a genuinely stale, successfully parsed heartbeat.
+        if not status:
+            log.debug("Node status unavailable for one supervisor tick; keeping live process")
+            return
         value = str(status.get("status") or "").strip()
         try:
             status_time = float(status.get("time") or 0.0)
         except (TypeError, ValueError):
             status_time = 0.0
-        age = time.time() - status_time if status_time else float("inf")
         process_age = time.monotonic() - self._process_started_monotonic if self._process_started_monotonic else float("inf")
-        if _stale_status_requires_recovery(age, process_age):
-            self._recover_node(f"stale node heartbeat/status ({age:.1f}s)")
-            return
+        if status_time:
+            age = time.time() - status_time
+            if _stale_status_requires_recovery(age, process_age):
+                self._recover_node(f"stale node heartbeat/status ({age:.1f}s)")
+                return
         if _status_requests_recovery(status, process.pid):
             self._recover_node(str(status.get("detail") or "node reported reconnect failure"))
             return
