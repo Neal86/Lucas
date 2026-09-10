@@ -233,7 +233,6 @@ class NodeRegistry:
             log.info("Replayed %d pending RPC(s) after Node reconnect node_id=%s", len(payloads), node_id)
 
     def acquire_control(self, node_id: str, user_id: str, context_id: str, ttl_seconds: int = 120) -> dict:
-        self.require_online(node_id)
         now = time.time()
         ttl_seconds = max(15, min(ttl_seconds, 1800))
         current = self.control_locks.get(node_id)
