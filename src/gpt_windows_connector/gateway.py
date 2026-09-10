@@ -566,7 +566,6 @@ async def control_acquire(node_id: str, workspace: str, ttl_seconds: int = 120) 
 @mcp.tool()
 def control_release(node_id: str, workspace: str) -> dict:
     user = _user()
-    registry.require_online(node_id)
     return registry.release_control(node_id, user.id, workspace)
 
 
