@@ -59,6 +59,7 @@ log = logging.getLogger("lucas.gateway")
 class AuthMiddleware:
     PUBLIC_PATHS = {
         "/health",
+        "/live",
         "/auth/register",
         "/auth/verify-email",
         "/auth/resend-verification",
@@ -448,6 +449,10 @@ async def computer_tool(node_id: str, workspace: str, action: str, params: dict 
     return await _node_rpc(node_id, workspace, f"computer.{action}", params, task_title=task_title)
 
 
+async def live(_: Request):
+    return JSONResponse({"ok": True, "service": "lucas-gateway"})
+
+
 async def health(_: Request):
     try: version=importlib.metadata.version("gpt-windows-connector")
     except importlib.metadata.PackageNotFoundError: version="unknown"
@@ -596,6 +601,7 @@ app = Starlette(
         Route("/oauth/authorize/login", oauth.authorize_login, methods=["POST"]),
         Route("/oauth/authorize/decision", oauth.authorize_decision, methods=["POST"]),
         Route("/oauth/token", oauth.token, methods=["POST"]),
+        Route("/live", live, methods=["GET"]),
         Route("/health", health, methods=["GET"]),
         Route("/auth/register", auth_register, methods=["POST"]),
         Route("/auth/verify-email", auth_verify_email, methods=["POST"]),

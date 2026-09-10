@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 import time
+import shutil
+import threading
 from pathlib import Path
 
 import psutil
@@ -15,6 +17,12 @@ DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 CREATE_BREAKAWAY_FROM_JOB = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0x01000000)
 JOB_ROOT = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "Lucas" / "jobs"
+JOB_RETENTION_SECONDS = 7 * 24 * 3600
+JOB_STALE_SECONDS = 24 * 3600
+JOB_DISK_LIMIT_BYTES = 512 * 1024 * 1024
+JOB_CLEANUP_INTERVAL_SECONDS = 300.0
+_CLEANUP_LOCK = threading.Lock()
+_LAST_CLEANUP = 0.0
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -64,6 +72,93 @@ def _legacy_run(workspace: Path, command: str, timeout: int, shell_type: str) ->
     return {"exit_code": completed.returncode, "stdout": completed.stdout, "stderr": completed.stderr, "shell": shell_type}
 
 
+def _job_dir_size(path: Path) -> int:
+    total = 0
+    try:
+        for item in path.rglob("*"):
+            if item.is_file():
+                try:
+                    total += item.stat().st_size
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return total
+
+
+def cleanup_jobs(*, force: bool = False, now: float | None = None) -> dict[str, int]:
+    """Best-effort bounded cleanup for durable shell history. Never deletes live jobs."""
+    global _LAST_CLEANUP
+    current = time.time() if now is None else float(now)
+    with _CLEANUP_LOCK:
+        if not force and current - _LAST_CLEANUP < JOB_CLEANUP_INTERVAL_SECONDS:
+            return {"removed": 0, "freed_bytes": 0}
+        _LAST_CLEANUP = current
+        try:
+            JOB_ROOT.mkdir(parents=True, exist_ok=True)
+            jobs = [p for p in JOB_ROOT.iterdir() if p.is_dir()]
+        except OSError:
+            return {"removed": 0, "freed_bytes": 0}
+
+        removable: list[tuple[float, Path, int]] = []
+        total_bytes = 0
+        for job in jobs:
+            state = _read_json(job / "state.json")
+            if _state_alive(state):
+                total_bytes += _job_dir_size(job)
+                continue
+            result = _read_json(job / "result.json")
+            spec = _read_json(job / "spec.json") or {}
+            try:
+                mtime = job.stat().st_mtime
+            except OSError:
+                continue
+            age = current - float((result or {}).get("ended_at") or state and state.get("ended_at") or spec.get("created_at") or mtime)
+            size = _job_dir_size(job)
+            total_bytes += size
+            completed = result is not None or bool(state and state.get("state") == "completed")
+            stale = age > JOB_STALE_SECONDS
+            expired = completed and age > JOB_RETENTION_SECONDS
+            if expired or stale:
+                removable.append((mtime, job, size))
+
+        removed = 0
+        freed = 0
+        for _, job, size in sorted(removable, key=lambda item: item[0]):
+            try:
+                shutil.rmtree(job)
+                removed += 1
+                freed += size
+                total_bytes -= size
+            except OSError:
+                pass
+
+        if total_bytes > JOB_DISK_LIMIT_BYTES:
+            candidates = []
+            for job in JOB_ROOT.iterdir():
+                if not job.is_dir():
+                    continue
+                state = _read_json(job / "state.json")
+                if _state_alive(state):
+                    continue
+                try:
+                    mtime = job.stat().st_mtime
+                except OSError:
+                    continue
+                candidates.append((mtime, job, _job_dir_size(job)))
+            for _, job, size in sorted(candidates, key=lambda item: item[0]):
+                if total_bytes <= JOB_DISK_LIMIT_BYTES:
+                    break
+                try:
+                    shutil.rmtree(job)
+                    removed += 1
+                    freed += size
+                    total_bytes -= size
+                except OSError:
+                    pass
+        return {"removed": removed, "freed_bytes": freed}
+
+
 def _state_alive(state: dict | None) -> bool:
     if not state:
         return False
@@ -90,6 +185,7 @@ def run_powershell(workspace: Path, command: str, timeout: int = 120, shell_type
     if not _request_id:
         return _legacy_run(workspace, command, timeout, shell_type)
 
+    cleanup_jobs()
     job_dir = JOB_ROOT / _job_key(str(_request_id))
     spec_path = job_dir / "spec.json"
     state_path = job_dir / "state.json"
