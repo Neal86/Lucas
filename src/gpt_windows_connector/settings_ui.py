@@ -292,9 +292,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def regenerate_connection_code():
         new_code=f"{secrets.randbelow(100_000_000):08d}"
         connection_code.set(new_code)
-        # Always merge into the latest on-disk config. A Settings window can stay
-        # open for a long time, so its startup snapshot must never overwrite newer
-        # Allowed Folders or security settings.
         latest=_load_config_file() or dict(existing)
         latest["connection_code"]=new_code
         _save_config(latest)
@@ -562,15 +559,14 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     section(logs_body,"日志")
     log_card=card(logs_body)
 
-    # Terminal-style log viewer: compact toolbar, selectable text, scrollbars and
-    # quick copy/open actions similar to modern deployment log consoles.
     log_shell=tk.Frame(log_card,bg="#0D0F12",highlightthickness=1,highlightbackground="#2B2F36")
     log_shell.pack(fill="both",expand=True,padx=18,pady=(14,14))
     log_toolbar=tk.Frame(log_shell,bg="#15181D",height=42); log_toolbar.pack(fill="x"); log_toolbar.pack_propagate(False)
     tk.Label(log_toolbar,text=str(LOG_FILE),font=("Consolas",8),fg="#AEB4BE",bg="#15181D",anchor="w").pack(side="left",fill="x",expand=True,padx=(12,8))
 
     log_wrap=tk.BooleanVar(value=False)
-    log_last_mtime={"value":None}
+    log_state={"mtime":None,"offset":0,"lines":0}
+    active_page={"name":""}
     log_status=tk.StringVar(value="")
 
     def log_toolbar_button(text,command,width=None):
@@ -622,30 +618,51 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         try: menu.tk_popup(more_btn.winfo_rootx(),more_btn.winfo_rooty()+more_btn.winfo_height())
         finally: menu.grab_release()
 
+    def _replace_log_text(text, mtime, offset):
+        lines=text.splitlines()[-1000:]
+        at_end=log_text.yview()[1] >= 0.98 if log_text.get("1.0","end-1c") else True
+        log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0","\n".join(lines)); log_text.configure(state="disabled")
+        if at_end: log_text.see("end")
+        log_state.update({"mtime":mtime,"offset":offset,"lines":len(lines)})
+
+    def _load_log_tail(stat):
+        size=stat.st_size
+        with LOG_FILE.open("rb") as handle:
+            start=max(0,size-(512*1024)); handle.seek(start)
+            raw=handle.read()
+        if start and b"\n" in raw: raw=raw.split(b"\n",1)[1]
+        _replace_log_text(raw.decode("utf-8",errors="replace"),stat.st_mtime,size)
+
     def refresh_logs(force=True):
         try:
-            if LOG_FILE.exists():
-                stat=LOG_FILE.stat(); mtime=stat.st_mtime
-                if force or log_last_mtime["value"] != mtime:
-                    data=LOG_FILE.read_text(encoding="utf-8",errors="replace")
-                    lines=data.splitlines()[-2000:]; text="\n".join(lines)
-                    at_end=log_text.yview()[1] >= 0.98 if log_text.get("1.0","end-1c") else True
+            if not LOG_FILE.exists():
+                if force:
+                    text="日志文件尚未生成。Lucas Node 启动后会在这里显示连接、认证和重连信息。"
                     log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled")
+                log_status.set("等待日志文件 · 可见时刷新")
+                return
+            stat=LOG_FILE.stat(); size=stat.st_size
+            if force or log_state["mtime"] is None or size < log_state["offset"] or size-log_state["offset"] > 512*1024:
+                _load_log_tail(stat)
+            elif size > log_state["offset"]:
+                with LOG_FILE.open("rb") as handle:
+                    handle.seek(log_state["offset"]); chunk=handle.read()
+                text=chunk.decode("utf-8",errors="replace")
+                if text:
+                    at_end=log_text.yview()[1] >= 0.98
+                    log_text.configure(state="normal"); log_text.insert("end",text)
+                    total=int(float(log_text.index("end-1c").split('.')[0]))
+                    if total > 1000: log_text.delete("1.0",f"{total-1000+1}.0")
+                    log_text.configure(state="disabled")
+                    log_state["lines"]=min(1000,int(float(log_text.index("end-1c").split('.')[0])))
                     if at_end: log_text.see("end")
-                    log_last_mtime["value"]=mtime
-                else:
-                    data=""
-                count=len(LOG_FILE.read_text(encoding="utf-8",errors="replace").splitlines()[-2000:]) if force or not data else len(data.splitlines()[-2000:])
-                log_status.set(f"{count} 行以内 · {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(mtime))} · 实时刷新")
-            else:
-                text="日志文件尚未生成。Lucas Node 启动后会在这里显示连接、认证和重连信息。"
-                log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled")
-                log_status.set("等待日志文件 · 实时刷新")
+                log_state["offset"]=size; log_state["mtime"]=stat.st_mtime
+            log_status.set(f"最近 {log_state['lines']} 行 · {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(stat.st_mtime))} · 增量刷新")
         except Exception as exc:
             log_status.set(f"读取失败：{exc}")
 
     def auto_refresh_logs():
-        refresh_logs(False)
+        if active_page["name"] == "日志": refresh_logs(False)
         try: root.after(1000,auto_refresh_logs)
         except tk.TclError: pass
 
@@ -656,7 +673,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     log_text.bind("<Control-c>",lambda _e:(copy_log_selection(),"break")[1])
     log_text.bind("<Control-a>",lambda _e:(log_text.tag_add("sel","1.0","end-1c"),"break")[1])
     log_text.bind("<Button-3>",lambda e: show_log_menu())
-    refresh_logs(True); root.after(1000,auto_refresh_logs)
+    root.after(1000,auto_refresh_logs)
 
     wrap,body=scroll_page(); pages["系统访问"]=wrap
     section(body,"Windows 权限"); c=card(body); row(c,"当前 Windows 权限","Lucas 应用权限与 Windows 管理员权限是两层独立控制。",lambda p: tk.Label(p,text=("管理员" if is_admin else "标准用户"),font=(FONT,10,"bold"),fg=(C["green"] if is_admin else C["orange"]),bg=C["card"])); divider(c); row(c,"Elevated / Admin",("当前进程已提升，可以执行 Windows 允许的管理员操作。" if is_admin else "服务、受保护注册表、驱动及部分硬件控制可能需要 Windows 管理员权限。"),lambda p: tk.Label(p,text=("已启用" if is_admin else "未启用"),font=(FONT,9,"bold"),fg=(C["green"] if is_admin else C["muted"]),bg=C["card"])); c=card(body); row(c,"重要","Full Access 不会自动提升 Windows 权限；Windows UAC 仍是最终系统边界。")
@@ -665,10 +682,12 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     def show_page(name):
         nonlocal active_scroll_canvas
         if name not in pages: name="常规"
+        active_page["name"]=name
         for p in pages.values(): p.pack_forget()
         pages[name].pack(fill="both",expand=True); active_scroll_canvas=getattr(pages[name],"_lucas_canvas",None); title.set(name if language=="zh" else NAV_EN[name]); subtitle.set(desc[name] if language=="zh" else SETTINGS_EN.get(desc[name], desc[name])); _save_last_page(name)
         if active_scroll_canvas is not None: root.after_idle(lambda c=active_scroll_canvas: c.yview_moveto(0) if c.winfo_exists() else None)
         for k,b in nav_buttons.items(): b.configure(bg=("#E1E1E1" if k==name else C["sidebar"]),fg=C["text"])
+        if name == "日志": root.after_idle(lambda: refresh_logs(True))
     for name in ("常规","安全","用户与权限","文件访问","网络","任务记录","日志","系统访问"):
         b=tk.Button(nav_frame,text=(name if language=="zh" else NAV_EN[name]),command=lambda n=name: show_page(n),font=(FONT,10),fg=C["text"],bg=C["sidebar"],activebackground=C["sidebar_hover"],activeforeground=C["text"],relief="flat",bd=0,anchor="w",padx=14,pady=9,cursor="hand2"); b.pack(fill="x",pady=1); nav_buttons[name]=b
     sidebar_footer=tk.Frame(sidebar,bg=C["sidebar"]); sidebar_footer.pack(side="bottom",fill="x",padx=22,pady=20); tk.Label(sidebar_footer,textvariable=sidebar_version,font=(FONT,8,"bold"),fg=C["muted"],bg=C["sidebar"]).pack(anchor="w"); tk.Label(sidebar_footer,text="安全策略仅在此电脑上生效",font=(FONT,8),fg=C["subtle"],bg=C["sidebar"]).pack(anchor="w",pady=(3,0))
@@ -683,10 +702,6 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): raise ValueError("电脑名称和 Node ID 不能为空。")
         if not rv or any(not Path(v).is_dir() for v in rv): raise ValueError("Allowed Folders 中的每个目录都必须真实存在。")
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
-        # Merge UI edits into the latest persisted config instead of the snapshot
-        # captured when this Settings window opened. This makes node-config.json the
-        # single authoritative state and prevents stale UI actions from deleting
-        # newly saved Allowed Folders.
         updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_initial,"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         return updated
 
