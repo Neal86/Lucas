@@ -225,11 +225,33 @@ class NodeRegistry:
             if self.disconnect_epochs.get(node_id) != epoch or node_id in self.nodes:
                 return
             self.control_locks.pop(node_id, None)
+            pending = self.pending_requests.get(node_id, {})
+            payloads = self.pending_payloads.get(node_id, {})
+            # Fail ordinary UI/file/browser operations quickly, but allow durable
+            # shell jobs enough time for the Windows Node process to restart and
+            # reconnect without surfacing a false failure to the AI/user.
+            for request_id, future in list(pending.items()):
+                method = str((payloads.get(request_id) or {}).get("method") or "")
+                if method == "shell.run":
+                    continue
+                pending.pop(request_id, None)
+                payloads.pop(request_id, None)
+                if not future.done():
+                    future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
+            if not pending:
+                self.pending_requests.pop(node_id, None)
+            if not payloads:
+                self.pending_payloads.pop(node_id, None)
+                return
+
+            await asyncio.sleep(max(0.0, DURABLE_DISCONNECT_GRACE_SECONDS - DISCONNECT_GRACE_SECONDS))
+            if self.disconnect_epochs.get(node_id) != epoch or node_id in self.nodes:
+                return
             pending = self.pending_requests.pop(node_id, {})
             self.pending_payloads.pop(node_id, None)
             for future in pending.values():
                 if not future.done():
-                    future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
+                    future.set_exception(RuntimeError(f"Node did not recover durable operation in time: {node_id}"))
 
         asyncio.create_task(expire())
 
