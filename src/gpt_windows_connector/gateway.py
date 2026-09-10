@@ -250,7 +250,6 @@ class NodeRegistry:
         return {"released": False, "node_id": node_id, "context": context_id}
 
     def control_status(self, node_id: str, user_id: str) -> dict:
-        self.require_online(node_id)
         now = time.time()
         current = self.control_locks.get(node_id)
         if current and current.expires_at <= now:
