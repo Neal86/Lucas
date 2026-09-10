@@ -561,36 +561,101 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     logs_wrapper,logs_body=scroll_page(); pages["日志"]=logs_wrapper
     section(logs_body,"日志")
     log_card=card(logs_body)
-    log_header=tk.Frame(log_card,bg=C["card"]); log_header.pack(fill="x",padx=18,pady=(14,8))
-    tk.Label(log_header,text=str(LOG_FILE),font=(FONT,8),fg=C["muted"],bg=C["card"]).pack(side="left")
-    log_text=tk.Text(log_card,height=25,font=("Consolas",9),bg="#111111",fg="#E6E6E6",insertbackground="#FFFFFF",relief="flat",bd=0,wrap="none",padx=10,pady=10,state="disabled")
-    log_text.pack(fill="both",expand=True,padx=18,pady=(0,10))
-    log_status=tk.StringVar(value="")
-    tk.Label(log_card,textvariable=log_status,font=(FONT,8),fg=C["muted"],bg=C["card"]).pack(anchor="w",padx=18,pady=(0,8))
+
+    # Terminal-style log viewer: compact toolbar, selectable text, scrollbars and
+    # quick copy/open actions similar to modern deployment log consoles.
+    log_shell=tk.Frame(log_card,bg="#0D0F12",highlightthickness=1,highlightbackground="#2B2F36")
+    log_shell.pack(fill="both",expand=True,padx=18,pady=(14,14))
+    log_toolbar=tk.Frame(log_shell,bg="#15181D",height=42); log_toolbar.pack(fill="x"); log_toolbar.pack_propagate(False)
+    tk.Label(log_toolbar,text=str(LOG_FILE),font=("Consolas",8),fg="#AEB4BE",bg="#15181D",anchor="w").pack(side="left",fill="x",expand=True,padx=(12,8))
+
+    log_wrap=tk.BooleanVar(value=False)
     log_last_mtime={"value":None}
+    log_status=tk.StringVar(value="")
+
+    def log_toolbar_button(text,command,width=None):
+        return tk.Button(log_toolbar,text=text,command=command,font=(FONT,9),fg="#E8EAED",bg="#15181D",activeforeground="#FFFFFF",activebackground="#292D33",relief="flat",bd=0,padx=9,pady=4,cursor="hand2",width=width)
+
+    log_view=tk.Frame(log_shell,bg="#0D0F12"); log_view.pack(fill="both",expand=True)
+    log_y=tk.Scrollbar(log_view,orient="vertical")
+    log_x=tk.Scrollbar(log_view,orient="horizontal")
+    log_text=tk.Text(log_view,height=27,font=("Cascadia Mono",9),bg="#0D0F12",fg="#D7DAE0",selectbackground="#315A8C",selectforeground="#FFFFFF",insertbackground="#FFFFFF",relief="flat",bd=0,wrap="none",padx=12,pady=12,state="disabled",yscrollcommand=log_y.set,xscrollcommand=log_x.set,undo=False)
+    log_y.configure(command=log_text.yview); log_x.configure(command=log_text.xview)
+    log_y.pack(side="right",fill="y"); log_x.pack(side="bottom",fill="x"); log_text.pack(side="left",fill="both",expand=True)
+
+    log_footer=tk.Frame(log_shell,bg="#15181D",height=30); log_footer.pack(fill="x"); log_footer.pack_propagate(False)
+    tk.Label(log_footer,textvariable=log_status,font=(FONT,8),fg="#8F96A3",bg="#15181D",anchor="w").pack(side="left",fill="x",expand=True,padx=12)
+
+    def copy_log_selection():
+        try: value=log_text.get("sel.first","sel.last")
+        except tk.TclError: value=log_text.get("1.0","end-1c")
+        copy_to_clipboard(value)
+
+    def copy_all_logs():
+        copy_to_clipboard(log_text.get("1.0","end-1c"))
+
+    def toggle_log_wrap():
+        log_wrap.set(not log_wrap.get())
+        log_text.configure(wrap=("word" if log_wrap.get() else "none"))
+        wrap_btn.configure(bg=("#2B5D87" if log_wrap.get() else "#15181D"))
+        if log_wrap.get(): log_x.pack_forget()
+        elif not log_x.winfo_ismapped(): log_x.pack(side="bottom",fill="x")
+
+    def open_log_file():
+        try:
+            LOG_FILE.parent.mkdir(parents=True,exist_ok=True)
+            if not LOG_FILE.exists(): LOG_FILE.touch()
+            os.startfile(str(LOG_FILE))
+        except Exception as exc: messagebox.showerror("Lucas",f"无法打开日志文件：{exc}")
+
+    def open_log_folder():
+        try:
+            LOG_FILE.parent.mkdir(parents=True,exist_ok=True); os.startfile(str(LOG_FILE.parent))
+        except Exception as exc: messagebox.showerror("Lucas",f"无法打开日志目录：{exc}")
+
+    def show_log_menu():
+        menu=tk.Menu(root,tearoff=False)
+        menu.add_command(label="打开日志文件",command=open_log_file)
+        menu.add_command(label="打开日志目录",command=open_log_folder)
+        menu.add_separator()
+        menu.add_command(label="复制全部",command=copy_all_logs)
+        try: menu.tk_popup(more_btn.winfo_rootx(),more_btn.winfo_rooty()+more_btn.winfo_height())
+        finally: menu.grab_release()
+
     def refresh_logs(force=True):
         try:
             if LOG_FILE.exists():
                 stat=LOG_FILE.stat(); mtime=stat.st_mtime
                 if force or log_last_mtime["value"] != mtime:
                     data=LOG_FILE.read_text(encoding="utf-8",errors="replace")
-                    lines=data.splitlines()[-1000:]; text="\n".join(lines)
-                    log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled"); log_text.see("end")
+                    lines=data.splitlines()[-2000:]; text="\n".join(lines)
+                    at_end=log_text.yview()[1] >= 0.98 if log_text.get("1.0","end-1c") else True
+                    log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled")
+                    if at_end: log_text.see("end")
                     log_last_mtime["value"]=mtime
-                log_status.set(f"{len(data.splitlines()[-1000:]) if 'data' in locals() else 1000} 行以内 · 文件更新 {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(mtime))} · 自动刷新")
+                else:
+                    data=""
+                count=len(LOG_FILE.read_text(encoding="utf-8",errors="replace").splitlines()[-2000:]) if force or not data else len(data.splitlines()[-2000:])
+                log_status.set(f"{count} 行以内 · {time.strftime('%Y-%m-%d %H:%M:%S',time.localtime(mtime))} · 实时刷新")
             else:
                 text="日志文件尚未生成。Lucas Node 启动后会在这里显示连接、认证和重连信息。"
                 log_text.configure(state="normal"); log_text.delete("1.0","end"); log_text.insert("1.0",text); log_text.configure(state="disabled")
-                log_status.set("等待日志文件 · 自动刷新")
+                log_status.set("等待日志文件 · 实时刷新")
         except Exception as exc:
             log_status.set(f"读取失败：{exc}")
+
     def auto_refresh_logs():
         refresh_logs(False)
         try: root.after(1000,auto_refresh_logs)
         except tk.TclError: pass
-    log_actions=tk.Frame(log_card,bg=C["card"]); log_actions.pack(fill="x",padx=18,pady=(0,14))
-    button(log_actions,"复制全部",lambda: copy_to_clipboard(log_text.get("1.0","end-1c"))).pack(side="right")
-    button(log_actions,"刷新",lambda: refresh_logs(True)).pack(side="right",padx=(0,8))
+
+    copy_btn=log_toolbar_button("⧉  复制",copy_log_selection); copy_btn.pack(side="right",padx=(0,2))
+    wrap_btn=log_toolbar_button("↩  换行",toggle_log_wrap); wrap_btn.pack(side="right",padx=(0,2))
+    refresh_btn=log_toolbar_button("↻",lambda: refresh_logs(True),width=2); refresh_btn.pack(side="right",padx=(0,2))
+    more_btn=log_toolbar_button("⋯",show_log_menu,width=2); more_btn.pack(side="right",padx=(0,6))
+    log_text.bind("<Control-c>",lambda _e:(copy_log_selection(),"break")[1])
+    log_text.bind("<Control-a>",lambda _e:(log_text.tag_add("sel","1.0","end-1c"),"break")[1])
+    log_text.bind("<Button-3>",lambda e: show_log_menu())
     refresh_logs(True); root.after(1000,auto_refresh_logs)
 
     wrap,body=scroll_page(); pages["系统访问"]=wrap
