@@ -498,70 +498,75 @@ async def _serve_connection(
 async def run_node() -> None:
     delay = 1.0
     while True:
-        try:
-            config = _load_config()
-            _apply_config(config)
-            settings = NodeSettings.from_env()
-            primary = settings.gateway_ws_url.rstrip("/") or DEFAULT_GATEWAY
-            # Try distinct transport paths, but never retired domains. Direct uses
-            # Happy Eyeballs; explicit IPv4 is a fast fallback for broken IPv6 after
-            # sleep/network changes; system proxy is last for managed networks.
-            strategies = [
-                ("direct", False, None),
-                ("direct-ipv4", True, None),
-                ("system-proxy", False, True),
-            ]
-            last_error: Exception | None = None
-            retry_primary = False
-            for strategy_name, force_ipv4, proxy_mode in strategies:
-                try:
-                    detail = f"Connecting to {primary} via {strategy_name}"
-                    _write_status("Connecting", detail)
-                    log.info("Gateway attempt %s via %s", primary, strategy_name)
-                    await _serve_connection(
-                        settings,
-                        primary,
-                        force_ipv4=force_ipv4,
-                        proxy_mode=proxy_mode,
-                    )
+        config = _load_config()
+        _apply_config(config)
+        settings = NodeSettings.from_env()
+        primary = settings.gateway_ws_url.rstrip("/") or DEFAULT_GATEWAY
+        # Keep the Node process alive across ordinary WebSocket/network failures.
+        # Killing and respawning the process turns a sub-second transport blip into a
+        # visible offline window and can make an AI session believe local control was
+        # lost. Try direct first, then IPv4, then the system proxy, and retry in this
+        # same process with a short bounded backoff.
+        strategies = [
+            ("direct", False, None),
+            ("direct-ipv4", True, None),
+            ("system-proxy", False, True),
+        ]
+        last_error: Exception | None = None
+        reconnect_immediately = False
+
+        for strategy_name, force_ipv4, proxy_mode in strategies:
+            try:
+                detail = f"Connecting to {primary} via {strategy_name}"
+                _write_status("Connecting" if delay <= 1.0 else "Reconnecting", detail)
+                log.info("Gateway attempt %s via %s", primary, strategy_name)
+                await _serve_connection(
+                    settings,
+                    primary,
+                    force_ipv4=force_ipv4,
+                    proxy_mode=proxy_mode,
+                )
+                delay = 1.0
+                reconnect_immediately = True
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as candidate_error:
+                last_error = candidate_error
+                reason = _disconnect_reason(candidate_error)
+                log.warning(
+                    "Gateway connection failed %s via %s reason=%s: %s",
+                    primary,
+                    strategy_name,
+                    reason,
+                    candidate_error,
+                )
+                if isinstance(candidate_error, NodeSessionDisconnected):
+                    # A connection that was already healthy has dropped. Do not burn
+                    # time trying proxy variants first and do not terminate the Node.
+                    _write_status("Reconnecting", f"{reason}: retrying direct")
+                    reconnect_immediately = True
                     delay = 1.0
                     break
-                except asyncio.CancelledError:
-                    raise
-                except Exception as candidate_error:
-                    last_error = candidate_error
-                    log.warning(
-                        "Gateway connection failed %s via %s: %s",
-                        primary,
-                        strategy_name,
-                        candidate_error,
-                    )
-                    if isinstance(candidate_error, NodeSessionDisconnected):
-                        detail = f"Session lost ({candidate_error}); requesting fresh Node process"
-                        log.info(detail)
-                        _write_status("Reconnecting", detail)
-                        raise SystemExit(75)
-                    if _is_gateway_restart_error(candidate_error):
-                        detail = "Gateway restarting; requesting fresh Node process"
-                        log.info(detail)
-                        _write_status("Reconnecting", detail)
-                        raise SystemExit(75)
-                    _write_status(
-                        "Reconnecting",
-                        f"{candidate_error}; failed {primary} via {strategy_name}",
-                    )
-            if retry_primary:
-                delay = 1.0
-                continue
-            if last_error is not None:
-                raise last_error
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            reason = _disconnect_reason(exc)
-            log.warning("Disconnected reason=%s error=%s; requesting fresh Node process", reason, exc)
-            _write_status("Reconnecting", f"{reason}: {exc}")
-            raise SystemExit(75)
+                if _is_gateway_restart_error(candidate_error):
+                    _write_status("Reconnecting", "Gateway restarting; retrying shortly")
+                    reconnect_immediately = True
+                    delay = 1.0
+                    break
+                _write_status(
+                    "Reconnecting",
+                    f"{reason}: failed {primary} via {strategy_name}",
+                )
+
+        if reconnect_immediately:
+            await asyncio.sleep(0.35)
+            continue
+
+        reason = _disconnect_reason(last_error) if last_error is not None else "unknown"
+        _write_status("Reconnecting", f"{reason}: retrying in {delay:.1f}s")
+        log.warning("All Gateway strategies failed; retrying in %.1fs", delay)
+        await asyncio.sleep(delay)
+        delay = min(delay * 2.0, 15.0)
 
 
 def main() -> None:
