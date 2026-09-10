@@ -678,6 +678,7 @@ async def node_websocket(websocket: WebSocket):
         hello_roots = [str(item) for item in (hello.get("allowed_roots") or []) if str(item).strip()]
         authorized_user_ids = [str(v) for v in hello.get("authorized_user_ids") or [] if str(v).strip()]
         supplied_token = str(hello.get("node_token") or "").strip()
+        runtime_id = str(hello.get("runtime_id") or "").strip()
         if not supplied_token:
             log.warning("Node rejected node_id=%s reason=missing-device-token", node_id)
             await websocket.send_json({"type": "welcome", "ok": False, "error": "node device token required"})
