@@ -264,23 +264,39 @@ class NodeRegistry:
         }
 
     async def rpc(self, node_id: str, user_id: str, method: str, params: dict, timeout: float = 180.0, actor: dict | None = None) -> Any:
-        node = self.require_online(node_id)
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
-        node.pending[request_id] = future
+        payload = {"type": "request", "id": request_id, "method": method, "params": params, "actor": actor or {"user_id": user_id}}
+        pending = self.pending_requests.setdefault(node_id, {})
+        payloads = self.pending_payloads.setdefault(node_id, {})
+        pending[request_id] = future
+        payloads[request_id] = payload
+        started = time.monotonic()
         try:
-            async with node.send_lock:
-                await node.websocket.send_json({"type": "request", "id": request_id, "method": method, "params": params, "actor": actor or {"user_id": user_id}})
-            return await asyncio.wait_for(future, timeout=timeout)
+            node = await self.wait_online(node_id, min(DISCONNECT_GRACE_SECONDS, timeout))
+            try:
+                async with node.send_lock:
+                    await node.websocket.send_json(payload)
+            except Exception:
+                remaining = max(0.1, min(DISCONNECT_GRACE_SECONDS, timeout - (time.monotonic() - started)))
+                node = await self.wait_online(node_id, remaining)
+                async with node.send_lock:
+                    await node.websocket.send_json(payload)
+            remaining = max(0.1, timeout - (time.monotonic() - started))
+            return await asyncio.wait_for(future, timeout=remaining)
         finally:
-            node.pending.pop(request_id, None)
+            pending.pop(request_id, None)
+            payloads.pop(request_id, None)
+            if not pending:
+                self.pending_requests.pop(node_id, None)
+            if not payloads:
+                self.pending_payloads.pop(node_id, None)
 
     def resolve(self, node_id: str, message: dict) -> None:
         node = self.nodes.get(node_id)
-        if not node:
-            return
-        node.last_seen = time.time()
-        future = node.pending.get(message.get("id", ""))
+        if node:
+            node.last_seen = time.time()
+        future = self.pending_requests.get(node_id, {}).get(str(message.get("id") or ""))
         if not future or future.done():
             return
         if message.get("ok"):
