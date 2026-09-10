@@ -346,6 +346,7 @@ async def _serve_connection(
             "node_id": settings.node_id,
             "name": settings.node_name,
             "node_token": token,
+            "runtime_id": RUNTIME_ID,
             "allowed_roots": [str(path) for path in settings.allowed_roots],
             "authorized_user_ids": [str(item.get("user_id")) for item in local_access.list_users() if item.get("enabled", True) and item.get("user_id")],
         }))
