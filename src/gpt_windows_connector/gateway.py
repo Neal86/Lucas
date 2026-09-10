@@ -115,14 +115,17 @@ def _token_digest(token: str) -> str:
 bindings = UserNodeBindingStore(db_path)
 
 
+DISCONNECT_GRACE_SECONDS = 20.0
+
+
 @dataclass
 class NodeConnection:
     node_id: str
     name: str
     allowed_roots: list[str]
     websocket: WebSocket
+    runtime_id: str = ""
     last_seen: float = field(default_factory=time.time)
-    pending: dict[str, asyncio.Future] = field(default_factory=dict)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
