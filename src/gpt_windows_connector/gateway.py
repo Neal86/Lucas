@@ -116,6 +116,7 @@ bindings = UserNodeBindingStore(db_path)
 
 
 DISCONNECT_GRACE_SECONDS = 20.0
+DURABLE_DISCONNECT_GRACE_SECONDS = 180.0
 
 
 @dataclass
