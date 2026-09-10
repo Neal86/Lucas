@@ -20,7 +20,14 @@ def _atomic_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            return
+        except OSError:
+            if attempt == 7:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def _read_json(path: Path) -> dict | None:

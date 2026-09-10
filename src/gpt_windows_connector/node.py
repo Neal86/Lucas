@@ -7,7 +7,6 @@ import logging
 import os
 import secrets
 import socket
-import sys
 import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -15,10 +14,9 @@ from urllib.parse import urlencode
 
 import websockets
 
-from .access_control import LocalAccessStore, clamp_roots, intersect_security, normalize_preset, preset_security
+from .access_control import LocalAccessStore, intersect_security, normalize_preset, preset_security
 from .config import NodeSettings
 from .executor import Executor
-from .i18n import tr
 from .settings_ui import configure_gui as _configure_gui
 from .task_runs import TaskRunStore
 
@@ -36,84 +34,14 @@ local_access = LocalAccessStore(ACCESS_FILE)
 DEFAULT_GATEWAY = "wss://lucasmcp.com/ws/node"
 log = logging.getLogger("lucas.node")
 
-# One runtime ID lives for the lifetime of the Node process. The Gateway uses it
-# to distinguish a harmless WebSocket reconnect from an actual Node restart.
-RUNTIME_ID = secrets.token_hex(8)
-RESPONSE_CACHE_SECONDS = 600.0
-_active_sender = None
-_REQUEST_TASKS: set[asyncio.Task[None]] = set()
-_INFLIGHT_REQUEST_IDS: set[str] = set()
-_COMPLETED_RESPONSES: dict[str, tuple[float, dict[str, object]]] = {}
+from .node_reconnect import (
+    RUNTIME_ID, completed_responses, inflight_request_ids, request_tasks,
+    deliver_response, flush_completed_responses, disconnect_reason, is_gateway_restart_error,
+    set_active_sender, clear_active_sender, NodeSessionDisconnected, acquire_node_mutex,
+)
 
-
-async def _deliver_response(response: dict[str, object]) -> None:
-    request_id = str(response.get("id") or "")
-    now = time.time()
-    for cached_id, (created_at, _) in list(_COMPLETED_RESPONSES.items()):
-        if now - created_at > RESPONSE_CACHE_SECONDS:
-            _COMPLETED_RESPONSES.pop(cached_id, None)
-    if request_id:
-        _COMPLETED_RESPONSES[request_id] = (now, response)
-    sender = _active_sender
-    if sender is None:
-        log.info("Response queued until reconnect request_id=%s", request_id)
-        return
-    try:
-        await sender(response)
-    except Exception as exc:
-        log.info("Response delivery deferred request_id=%s error=%s", request_id, exc)
-
-
-async def _flush_completed_responses(sender) -> None:
-    for _, response in list(_COMPLETED_RESPONSES.values()):
-        await sender(response)
-
-
-class NodeSessionDisconnected(ConnectionError):
-    """A previously established Gateway session was lost. Retry direct immediately."""
-
-
-def _disconnect_reason(exc: Exception) -> str:
-    text = str(exc).lower()
-    if "keepalive ping timeout" in text or "ping timeout" in text:
-        return "ping_timeout"
-    if "1012" in text or "service restart" in text:
-        return "gateway_restart"
-    if "1006" in text or "connection closed" in text or "closed" in text:
-        return "connection_closed"
-    if "timed out" in text or "timeout" in text:
-        return "network_timeout"
-    return type(exc).__name__
-
-
-def _is_gateway_restart_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-    return (
-        "1012" in text
-        or "service restart" in text
-        or "http 502" in text
-        or "http 503" in text
-        or "bad gateway" in text
-        or "service unavailable" in text
-    )
-
-
-def _acquire_node_mutex() -> object | None:
-    if sys.platform != "win32":
-        return object()
-    try:
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.CreateMutexW(None, False, "Local\\LucasNodeSingleInstance")
-        if not handle:
-            return None
-        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            kernel32.CloseHandle(handle)
-            return None
-        return handle
-    except Exception:
-        log.exception("Could not create node single-instance mutex")
-        return object()
+_disconnect_reason = disconnect_reason
+_is_gateway_restart_error = is_gateway_restart_error
 
 
 def _default_node_id() -> str:
@@ -152,9 +80,6 @@ def _load_config() -> dict[str, object]:
         if not isinstance(data, dict):
             return {}
         gateway = str(data.get("gateway_ws_url") or "").strip().rstrip("/")
-        # Older local-development builds persisted localhost as the Gateway. Once
-        # installed on another PC that makes the Node connect back to itself forever.
-        # Heal those stale configs automatically; users never need to edit JSON.
         if gateway in {
             "ws://127.0.0.1:8787/ws/node",
             "ws://localhost:8787/ws/node",
@@ -269,8 +194,6 @@ def _load_saved_token(settings: NodeSettings) -> str:
     for path in candidates:
         token = _read_token_file(path, settings.node_id)
         if token:
-            # Heal all credential stores so future updates cannot silently create a
-            # second token for the same Node ID.
             _save_token(settings, token)
             return token
     token = secrets.token_urlsafe(32)
@@ -414,9 +337,8 @@ async def _serve_connection(
             async with send_lock:
                 await ws.send(json.dumps(payload, ensure_ascii=False))
 
-        global _active_sender
-        _active_sender = send_json
-        await _flush_completed_responses(send_json)
+        set_active_sender(send_json)
+        await flush_completed_responses(send_json)
 
         async def sync_local_access_if_changed() -> None:
             nonlocal access_file_mtime
@@ -461,7 +383,7 @@ async def _serve_connection(
                 local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type} if error_type else {},context_key=workspace or "default")
             except Exception:
                 log.exception("Could not record local Task Run")
-            await _deliver_response(response)
+            await deliver_response(response)
 
         try:
             while True:
@@ -476,18 +398,18 @@ async def _serve_connection(
                 await sync_local_access_if_changed()
                 message = json.loads(raw)
                 if message.get("type") == "response.ack":
-                    _COMPLETED_RESPONSES.pop(str(message.get("id") or ""), None)
+                    completed_responses.pop(str(message.get("id") or ""), None)
                     continue
                 if message.get("type") != "request":
                     continue
                 request_id = message.get("id")
                 request_key = str(request_id or "")
                 if request_key:
-                    cached = _COMPLETED_RESPONSES.get(request_key)
+                    cached = completed_responses.get(request_key)
                     if cached:
                         await send_json(cached[1])
                         continue
-                    if request_key in _INFLIGHT_REQUEST_IDS:
+                    if request_key in inflight_request_ids:
                         # The Gateway may replay a request after reconnect. Never run
                         # the same side effect twice while the original is still alive.
                         continue
@@ -532,28 +454,27 @@ async def _serve_connection(
                     continue
 
                 task = asyncio.create_task(execute_request(request_id, method, params, actor), name=f"lucas:{method}:{request_id}")
-                _REQUEST_TASKS.add(task)
+                request_tasks.add(task)
                 if request_key:
-                    _INFLIGHT_REQUEST_IDS.add(request_key)
+                    inflight_request_ids.add(request_key)
 
                 def request_done(done: asyncio.Task[None], key: str = request_key) -> None:
-                    _REQUEST_TASKS.discard(done)
+                    request_tasks.discard(done)
                     if key:
-                        _INFLIGHT_REQUEST_IDS.discard(key)
+                        inflight_request_ids.discard(key)
 
                 task.add_done_callback(request_done)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            reason = _disconnect_reason(exc)
+            reason = disconnect_reason(exc)
             log.warning("Node session disconnected reason=%s error=%s", reason, exc)
             raise NodeSessionDisconnected(f"{reason}: {exc}") from exc
         finally:
             # Do not cancel work on a transport disconnect. Long PowerShell/build
             # operations keep running and publish their cached result through the
             # next WebSocket session. Only detach this specific dead sender.
-            if _active_sender is send_json:
-                _active_sender = None
+            clear_active_sender(send_json)
 
 
 async def run_node() -> None:
@@ -594,7 +515,7 @@ async def run_node() -> None:
                 raise
             except Exception as candidate_error:
                 last_error = candidate_error
-                reason = _disconnect_reason(candidate_error)
+                reason = disconnect_reason(candidate_error)
                 log.warning(
                     "Gateway connection failed %s via %s reason=%s: %s",
                     primary,
@@ -609,7 +530,7 @@ async def run_node() -> None:
                     reconnect_immediately = True
                     delay = 1.0
                     break
-                if _is_gateway_restart_error(candidate_error):
+                if is_gateway_restart_error(candidate_error):
                     _write_status("Reconnecting", "Gateway restarting; retrying shortly")
                     reconnect_immediately = True
                     delay = 1.0
@@ -623,7 +544,7 @@ async def run_node() -> None:
             await asyncio.sleep(0.35)
             continue
 
-        reason = _disconnect_reason(last_error) if last_error is not None else "unknown"
+        reason = disconnect_reason(last_error) if last_error is not None else "unknown"
         _write_status("Reconnecting", f"{reason}: retrying in {delay:.1f}s")
         log.warning("All Gateway strategies failed; retrying in %.1fs", delay)
         await asyncio.sleep(delay)
@@ -646,7 +567,7 @@ def main() -> None:
         if updated is not None:
             log.info("Saved local Lucas security settings")
         return
-    mutex = _acquire_node_mutex()
+    mutex = acquire_node_mutex(log)
     if mutex is None:
         log.info("Another Lucas Node instance is already running; exiting duplicate process")
         return
