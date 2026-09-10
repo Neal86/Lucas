@@ -756,11 +756,9 @@ async def node_websocket(websocket: WebSocket):
         pass
     finally:
         if node_id and registry.nodes.get(node_id) and registry.nodes[node_id].websocket is websocket:
-            connection = registry.nodes.pop(node_id)
-            registry.control_locks.pop(node_id, None)
-            for future in connection.pending.values():
-                if not future.done():
-                    future.set_exception(RuntimeError(f"Node disconnected: {node_id}"))
+            registry.nodes.pop(node_id, None)
+            registry.begin_disconnect_grace(node_id)
+            log.info("Node transport disconnected; holding RPCs for %.1fs grace node_id=%s", DISCONNECT_GRACE_SECONDS, node_id)
 
 
 mcp_app = mcp.streamable_http_app()
