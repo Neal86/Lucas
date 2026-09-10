@@ -409,11 +409,14 @@ async def _serve_connection(
             return {"authorized": False, "pending": True, "decision": "pending", "user_id": user_id, "requested_at": pending.get("requested_at")}
 
         send_lock = asyncio.Lock()
-        request_tasks: set[asyncio.Task[None]] = set()
 
         async def send_json(payload: dict[str, object]) -> None:
             async with send_lock:
                 await ws.send(json.dumps(payload, ensure_ascii=False))
+
+        global _active_sender
+        _active_sender = send_json
+        await _flush_completed_responses(send_json)
 
         async def sync_local_access_if_changed() -> None:
             nonlocal access_file_mtime
