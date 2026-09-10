@@ -198,11 +198,22 @@ class NodeRegistry:
         self.disconnect_epochs[node_id] = self.disconnect_epochs.get(node_id, 0) + 1
         same_runtime = not previous or not runtime_id or previous == runtime_id
         if previous and runtime_id and previous != runtime_id:
-            pending = self.pending_requests.pop(node_id, {})
-            self.pending_payloads.pop(node_id, None)
-            for future in pending.values():
+            pending = self.pending_requests.get(node_id, {})
+            payloads = self.pending_payloads.get(node_id, {})
+            # Only shell.run has Node-process-restart durability. Keep those request
+            # IDs so the new Node runtime can attach to the detached job/result.
+            for request_id, future in list(pending.items()):
+                method = str((payloads.get(request_id) or {}).get("method") or "")
+                if method == "shell.run":
+                    continue
+                pending.pop(request_id, None)
+                payloads.pop(request_id, None)
                 if not future.done():
-                    future.set_exception(RuntimeError(f"Node restarted during operation: {node_id}"))
+                    future.set_exception(RuntimeError(f"Node restarted during non-durable operation: {node_id}"))
+            if not pending:
+                self.pending_requests.pop(node_id, None)
+            if not payloads:
+                self.pending_payloads.pop(node_id, None)
         return same_runtime
 
     def begin_disconnect_grace(self, node_id: str) -> None:
