@@ -475,9 +475,22 @@ async def _serve_connection(
                 _write_status("Online")
                 await sync_local_access_if_changed()
                 message = json.loads(raw)
+                if message.get("type") == "response.ack":
+                    _COMPLETED_RESPONSES.pop(str(message.get("id") or ""), None)
+                    continue
                 if message.get("type") != "request":
                     continue
                 request_id = message.get("id")
+                request_key = str(request_id or "")
+                if request_key:
+                    cached = _COMPLETED_RESPONSES.get(request_key)
+                    if cached:
+                        await send_json(cached[1])
+                        continue
+                    if request_key in _INFLIGHT_REQUEST_IDS:
+                        # The Gateway may replay a request after reconnect. Never run
+                        # the same side effect twice while the original is still alive.
+                        continue
                 method = message.get("method", "")
                 params = message.get("params") or {}
                 actor = message.get("actor") if isinstance(message.get("actor"), dict) else {}
