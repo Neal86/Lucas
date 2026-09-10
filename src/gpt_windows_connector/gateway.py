@@ -140,6 +140,10 @@ class NodeRegistry:
     def __init__(self) -> None:
         self.nodes: dict[str, NodeConnection] = {}
         self.control_locks: dict[str, ControlLock] = {}
+        self.pending_requests: dict[str, dict[str, asyncio.Future]] = {}
+        self.pending_payloads: dict[str, dict[str, dict[str, Any]]] = {}
+        self.runtime_ids: dict[str, str] = {}
+        self.disconnect_epochs: dict[str, int] = {}
 
     async def list(self, user) -> list[dict]:
         now = time.time()
