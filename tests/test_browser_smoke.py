@@ -73,7 +73,11 @@ def test_dashboard_browser_smoke():
                 for path in protected_paths + public_paths:
                     response = page.goto(base + path, wait_until="networkidle")
                     assert response is not None and response.status < 400, (path, response.status if response else None)
-                    assert "async function api(" not in page.locator("body").inner_text()
+                    body_text = page.locator("body").inner_text().strip()
+                    assert body_text, f"{path} rendered a blank page"
+                    assert "async function api(" not in body_text
+                    assert page.locator("body").evaluate("(el) => el.getBoundingClientRect().height") > 100
+                    assert not errors, (path, errors)
 
                 api_contracts = page.evaluate("""async()=>{
                     async function get(path){const r=await fetch(path);let body={};try{body=await r.json()}catch{}return {status:r.status,body}}
