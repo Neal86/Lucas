@@ -119,7 +119,7 @@ DEBUG:    8+    >>>> Get-FileHash -Path $file.FullName -Algorithm SHA256 | Out-N
 
 
 def test_runtime_trace_counts_pipeline_sink_once():
-    stdout = 'DEBUG:   10+   >>>> "Count=5" | Set-Content -Path $summary\n'
+    stdout = 'DEBUG:    3+   >>>> "Count=5" | Set-Content -Path $summary\n'
     clean, operations = _extract_runtime_shell_operations(stdout, '"Count=5" | Set-Content -Path $summary')
     assert clean == ""
     assert operations == ['Set-Content -Path $summary']
