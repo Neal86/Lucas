@@ -11,8 +11,10 @@ RUN apt-get update \
 RUN pip install --no-cache-dir -e ".[dev]"
 RUN python -m compileall -q src \
     && pytest -q tests/test_dashboard_js_syntax.py tests/test_dashboard_routes.py tests/test_operation_accounting.py
+RUN touch /quality-ok
 
 FROM python:3.12-slim
+COPY --from=quality /quality-ok /tmp/quality-ok
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
