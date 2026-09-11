@@ -64,10 +64,10 @@ async def dashboard(request: Request):
             new_7d = db.execute("SELECT COUNT(*) n FROM users WHERE created_at>=?", (week,)).fetchone()["n"]
             active_7d = db.execute("SELECT COUNT(DISTINCT user_id) n FROM audit_logs WHERE created_at>=?", (week,)).fetchone()["n"]
             nodes = db.execute("SELECT COUNT(*) n FROM nodes").fetchone()["n"]
-            ops_today = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (day,)).fetchone()["n"]
-            ops_30d = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (month,)).fetchone()["n"]
+            ops_today = db.execute("SELECT COALESCE(SUM(operation_count),0) n FROM task_steps WHERE started_at>=?", (day,)).fetchone()["n"]
+            ops_30d = db.execute("SELECT COALESCE(SUM(operation_count),0) n FROM task_steps WHERE started_at>=?", (month,)).fetchone()["n"]
             paid = db.execute("SELECT COUNT(*) n FROM subscriptions WHERE status='active' AND plan!='free'").fetchone()["n"]
-            usage = db.execute("SELECT COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?", (month,)).fetchone()
+            usage = db.execute("SELECT COALESCE(SUM(operation_count),0) operations,SUM(CASE WHEN status='success' THEN operation_count ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN operation_count ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?", (month,)).fetchone()
             recent = db.execute("SELECT a.created_at,a.action,a.target,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 12").fetchall()
         total_done = int(usage["success"] or 0) + int(usage["errors"] or 0)
         return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(ops_30d), "requests_30d": int(ops_30d), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
@@ -82,7 +82,7 @@ async def users(request: Request):
             sql = """SELECT u.id,u.email,u.name,u.provider,u.role,u.status,u.created_at,u.last_login_at,
                 COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') subscription_status,
                 (SELECT COUNT(*) FROM user_node_bindings b WHERE b.user_id=u.id) node_count,
-                (SELECT COUNT(*) FROM task_steps t WHERE t.owner_id=u.id AND t.started_at>=?) operations_30d
+                (SELECT COALESCE(SUM(t.operation_count),0) FROM task_steps t WHERE t.owner_id=u.id AND t.started_at>=?) operations_30d
                 FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id"""
             params: list[object] = [time.time()-30*86400]
             if q:
@@ -103,8 +103,8 @@ async def user_detail(request: Request):
             _ensure_entitlement_override_schema(db)
             override = db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts,expires_at,updated_at FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
             nodes = db.execute("SELECT n.node_id,n.name,n.updated_at FROM user_node_bindings b JOIN nodes n ON n.node_id=b.node_id WHERE b.user_id=? ORDER BY b.approved_at ASC",(user_id,)).fetchall()
-            ops = db.execute("SELECT id,action,target,details,started_at AS created_at,status FROM task_steps WHERE owner_id=? ORDER BY started_at DESC LIMIT 100", (user_id,)).fetchall()
-            counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN started_at>=? THEN 1 ELSE 0 END) last30 FROM task_steps WHERE owner_id=?", (time.time()-30*86400,user_id)).fetchone()
+            ops = db.execute("SELECT id,action,target,details,operation_count,started_at AS created_at,status FROM task_steps WHERE owner_id=? ORDER BY started_at DESC LIMIT 100", (user_id,)).fetchall()
+            counts = db.execute("SELECT COALESCE(SUM(operation_count),0) total,SUM(CASE WHEN started_at>=? THEN operation_count ELSE 0 END) last30 FROM task_steps WHERE owner_id=?", (time.time()-30*86400,user_id)).fetchone()
         ent=snapshot(gateway.db_path,user_id).as_dict()
         override_data=dict(override) if override else {"bonus_requests":0,"bonus_nodes":0,"bonus_ai_accounts":0,"expires_at":None,"updated_at":None}
         override_data["expired"]=bool(override_data.get("expires_at") and float(override_data["expires_at"])<=time.time())
@@ -153,10 +153,10 @@ async def usage(request: Request):
     try:
         _admin(request); since=time.time()-30*86400
         with _db() as db:
-            rows=db.execute("SELECT action,COUNT(*) n FROM task_steps WHERE started_at>=? GROUP BY action ORDER BY n DESC",(since,)).fetchall()
-            daily=db.execute("SELECT date(started_at,'unixepoch') day,COUNT(*) requests,COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=? GROUP BY date(started_at,'unixepoch') ORDER BY day",(since,)).fetchall()
-            totals=db.execute("SELECT COUNT(*) requests,COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?",(since,)).fetchone()
-            top_users=db.execute("SELECT u.email,COUNT(*) n FROM task_steps t JOIN users u ON u.id=t.owner_id WHERE t.started_at>=? GROUP BY t.owner_id ORDER BY n DESC LIMIT 20",(since,)).fetchall()
+            rows=db.execute("SELECT action,COALESCE(SUM(operation_count),0) n FROM task_steps WHERE started_at>=? GROUP BY action ORDER BY n DESC",(since,)).fetchall()
+            daily=db.execute("SELECT date(started_at,'unixepoch') day,COALESCE(SUM(operation_count),0) requests,COALESCE(SUM(operation_count),0) operations,SUM(CASE WHEN status='success' THEN operation_count ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN operation_count ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=? GROUP BY date(started_at,'unixepoch') ORDER BY day",(since,)).fetchall()
+            totals=db.execute("SELECT COALESCE(SUM(operation_count),0) requests,COALESCE(SUM(operation_count),0) operations,SUM(CASE WHEN status='success' THEN operation_count ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN operation_count ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?",(since,)).fetchone()
+            top_users=db.execute("SELECT u.email,COALESCE(SUM(t.operation_count),0) n FROM task_steps t JOIN users u ON u.id=t.owner_id WHERE t.started_at>=? GROUP BY t.owner_id ORDER BY n DESC LIMIT 20",(since,)).fetchall()
         groups=Counter()
         for r in rows:
             a=r["action"]; groups[a.split('.')[0] if '.' in a else a]+=r["n"]
@@ -180,7 +180,7 @@ async def nodes(request: Request):
 async def operations(request: Request):
     try:
         _admin(request); limit=max(1,min(int(request.query_params.get("limit","200")),1000)); user=request.query_params.get("user",""); action=request.query_params.get("action",""); status=request.query_params.get("status","")
-        sql="SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"; params=[]
+        sql="SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.operation_count,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"; params=[]
         if user: sql+=" AND (u.email LIKE ? OR t.owner_id=?)"; params += [f"%{user}%",user]
         if action: sql+=" AND t.action LIKE ?"; params.append(f"%{action}%")
         sql+=" ORDER BY t.id DESC LIMIT ?"; params.append(limit)
