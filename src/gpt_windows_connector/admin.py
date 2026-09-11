@@ -82,7 +82,7 @@ async def users(request: Request):
             sql = """SELECT u.id,u.email,u.name,u.provider,u.role,u.status,u.created_at,u.last_login_at,
                 COALESCE(s.plan,'free') plan,COALESCE(s.status,'inactive') subscription_status,
                 (SELECT COUNT(*) FROM user_node_bindings b WHERE b.user_id=u.id) node_count,
-                (SELECT COUNT(*) FROM audit_logs a WHERE a.user_id=u.id AND a.created_at>=?) operations_30d
+                (SELECT COUNT(*) FROM task_steps t WHERE t.owner_id=u.id AND t.started_at>=?) operations_30d
                 FROM users u LEFT JOIN subscriptions s ON s.user_id=u.id"""
             params: list[object] = [time.time()-30*86400]
             if q:
