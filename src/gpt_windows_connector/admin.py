@@ -64,13 +64,13 @@ async def dashboard(request: Request):
             new_7d = db.execute("SELECT COUNT(*) n FROM users WHERE created_at>=?", (week,)).fetchone()["n"]
             active_7d = db.execute("SELECT COUNT(DISTINCT user_id) n FROM audit_logs WHERE created_at>=?", (week,)).fetchone()["n"]
             nodes = db.execute("SELECT COUNT(*) n FROM nodes").fetchone()["n"]
-            ops_today = db.execute("SELECT COUNT(*) n FROM audit_logs WHERE created_at>=? AND action NOT LIKE 'auth.%'", (day,)).fetchone()["n"]
-            ops_30d = db.execute("SELECT COUNT(*) n FROM audit_logs WHERE created_at>=? AND action NOT LIKE 'auth.%'", (month,)).fetchone()["n"]
+            ops_today = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (day,)).fetchone()["n"]
+            ops_30d = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (month,)).fetchone()["n"]
             paid = db.execute("SELECT COUNT(*) n FROM subscriptions WHERE status='active' AND plan!='free'").fetchone()["n"]
             usage = db.execute("SELECT COALESCE(SUM(request_count),0) requests,COALESCE(SUM(operation_count),0) operations,COALESCE(SUM(success_count),0) success,COALESCE(SUM(error_count),0) errors,COALESCE(SUM(execution_seconds),0) seconds FROM usage_daily WHERE day>=date('now','-30 day')").fetchone()
             recent = db.execute("SELECT a.created_at,a.action,a.target,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 12").fetchall()
         total_done = int(usage["success"] or 0) + int(usage["errors"] or 0)
-        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(usage["operations"] or ops_30d), "requests_30d": int(usage["requests"] or 0), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
+        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(ops_30d), "requests_30d": int(usage["requests"] or 0), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
     except Exception as exc: return _error(exc)
 
 
@@ -103,8 +103,8 @@ async def user_detail(request: Request):
             _ensure_entitlement_override_schema(db)
             override = db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts,expires_at,updated_at FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
             nodes = db.execute("SELECT n.node_id,n.name,n.updated_at FROM user_node_bindings b JOIN nodes n ON n.node_id=b.node_id WHERE b.user_id=? ORDER BY b.approved_at ASC",(user_id,)).fetchall()
-            ops = db.execute("SELECT id,action,target,details,created_at FROM audit_logs WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,)).fetchall()
-            counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN created_at>=? THEN 1 ELSE 0 END) last30 FROM audit_logs WHERE user_id=?", (time.time()-30*86400,user_id)).fetchone()
+            ops = db.execute("SELECT id,action,target,details,started_at AS created_at,status FROM task_steps WHERE owner_id=? ORDER BY started_at DESC LIMIT 100", (user_id,)).fetchall()
+            counts = db.execute("SELECT COUNT(*) total,SUM(CASE WHEN started_at>=? THEN 1 ELSE 0 END) last30 FROM task_steps WHERE owner_id=?", (time.time()-30*86400,user_id)).fetchone()
         ent=snapshot(gateway.db_path,user_id).as_dict()
         override_data=dict(override) if override else {"bonus_requests":0,"bonus_nodes":0,"bonus_ai_accounts":0,"expires_at":None,"updated_at":None}
         override_data["expired"]=bool(override_data.get("expires_at") and float(override_data["expires_at"])<=time.time())
