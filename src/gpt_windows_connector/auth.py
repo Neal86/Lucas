@@ -252,10 +252,11 @@ class AuthStore:
         with self._connect() as db:
             db.execute("INSERT INTO usage_daily(user_id,day,request_count) VALUES(?,?,1) ON CONFLICT(user_id,day) DO UPDATE SET request_count=request_count+1", (user_id, day))
 
-    def record_operation(self, user_id: str, success: bool, duration_seconds: float) -> None:
+    def record_operation(self, user_id: str, success: bool, duration_seconds: float, operation_count: int = 1) -> None:
         day = time.strftime("%Y-%m-%d", time.gmtime())
+        count = max(1, int(operation_count or 1))
         with self._connect() as db:
-            db.execute("INSERT INTO usage_daily(user_id,day,operation_count,success_count,error_count,execution_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET operation_count=operation_count+1,success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count,execution_seconds=execution_seconds+excluded.execution_seconds", (user_id, day, 1, 1 if success else 0, 0 if success else 1, max(0.0, duration_seconds)))
+            db.execute("INSERT INTO usage_daily(user_id,day,operation_count,success_count,error_count,execution_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET operation_count=operation_count+excluded.operation_count,success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count,execution_seconds=execution_seconds+excluded.execution_seconds", (user_id, day, count, count if success else 0, 0 if success else count, max(0.0, duration_seconds)))
 
     def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None) -> None:
         with self._connect() as db:
