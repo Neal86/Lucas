@@ -182,8 +182,8 @@ async def operations(request: Request):
         _admin(request); limit=max(1,min(int(request.query_params.get("limit","200")),1000)); user=request.query_params.get("user",""); action=request.query_params.get("action",""); status=request.query_params.get("status","")
         sql="SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"; params=[]
         if user: sql+=" AND (u.email LIKE ? OR t.owner_id=?)"; params += [f"%{user}%",user]
-        if action: sql+=" AND a.action LIKE ?"; params.append(f"%{action}%")
-        sql+=" ORDER BY a.id DESC LIMIT ?"; params.append(limit)
+        if action: sql+=" AND t.action LIKE ?"; params.append(f"%{action}%")
+        sql+=" ORDER BY t.id DESC LIMIT ?"; params.append(limit)
         with _db() as db: rows=db.execute(sql,params).fetchall()
         out=[]
         for r in rows:
