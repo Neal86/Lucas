@@ -67,10 +67,10 @@ async def dashboard(request: Request):
             ops_today = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (day,)).fetchone()["n"]
             ops_30d = db.execute("SELECT COUNT(*) n FROM task_steps WHERE started_at>=?", (month,)).fetchone()["n"]
             paid = db.execute("SELECT COUNT(*) n FROM subscriptions WHERE status='active' AND plan!='free'").fetchone()["n"]
-            usage = db.execute("SELECT COALESCE(SUM(request_count),0) requests,COALESCE(SUM(operation_count),0) operations,COALESCE(SUM(success_count),0) success,COALESCE(SUM(error_count),0) errors,COALESCE(SUM(execution_seconds),0) seconds FROM usage_daily WHERE day>=date('now','-30 day')").fetchone()
+            usage = db.execute("SELECT COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?", (month,)).fetchone()
             recent = db.execute("SELECT a.created_at,a.action,a.target,u.email FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 12").fetchall()
         total_done = int(usage["success"] or 0) + int(usage["errors"] or 0)
-        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(ops_30d), "requests_30d": int(usage["requests"] or 0), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
+        return JSONResponse({"users": users, "new_users_7d": new_7d, "active_users_7d": active_7d, "nodes": nodes, "online_nodes": len(gateway.registry.nodes), "operations_today": ops_today, "operations_30d": int(ops_30d), "requests_30d": int(ops_30d), "execution_seconds_30d": float(usage["seconds"] or 0), "success_rate": round((int(usage["success"] or 0) / total_done * 100), 2) if total_done else 100.0, "paid_users": paid, "recent": [dict(r) for r in recent]})
     except Exception as exc: return _error(exc)
 
 
@@ -153,10 +153,10 @@ async def usage(request: Request):
     try:
         _admin(request); since=time.time()-30*86400
         with _db() as db:
-            rows=db.execute("SELECT action,COUNT(*) n FROM audit_logs WHERE created_at>=? GROUP BY action ORDER BY n DESC",(since,)).fetchall()
-            daily=db.execute("SELECT day,SUM(request_count) requests,SUM(operation_count) operations,SUM(success_count) success,SUM(error_count) errors,SUM(execution_seconds) seconds FROM usage_daily WHERE day>=date('now','-30 day') GROUP BY day ORDER BY day").fetchall()
-            totals=db.execute("SELECT COALESCE(SUM(request_count),0) requests,COALESCE(SUM(operation_count),0) operations,COALESCE(SUM(success_count),0) success,COALESCE(SUM(error_count),0) errors,COALESCE(SUM(execution_seconds),0) seconds FROM usage_daily WHERE day>=date('now','-30 day')").fetchone()
-            top_users=db.execute("SELECT u.email,COUNT(*) n FROM audit_logs a JOIN users u ON u.id=a.user_id WHERE a.created_at>=? GROUP BY a.user_id ORDER BY n DESC LIMIT 20",(since,)).fetchall()
+            rows=db.execute("SELECT action,COUNT(*) n FROM task_steps WHERE started_at>=? GROUP BY action ORDER BY n DESC",(since,)).fetchall()
+            daily=db.execute("SELECT date(started_at,'unixepoch') day,COUNT(*) requests,COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=? GROUP BY date(started_at,'unixepoch') ORDER BY day",(since,)).fetchall()
+            totals=db.execute("SELECT COUNT(*) requests,COUNT(*) operations,SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) success,SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) errors,COALESCE(SUM(duration_ms),0)/1000.0 seconds FROM task_steps WHERE started_at>=?",(since,)).fetchone()
+            top_users=db.execute("SELECT u.email,COUNT(*) n FROM task_steps t JOIN users u ON u.id=t.owner_id WHERE t.started_at>=? GROUP BY t.owner_id ORDER BY n DESC LIMIT 20",(since,)).fetchall()
         groups=Counter()
         for r in rows:
             a=r["action"]; groups[a.split('.')[0] if '.' in a else a]+=r["n"]
@@ -180,14 +180,14 @@ async def nodes(request: Request):
 async def operations(request: Request):
     try:
         _admin(request); limit=max(1,min(int(request.query_params.get("limit","200")),1000)); user=request.query_params.get("user",""); action=request.query_params.get("action",""); status=request.query_params.get("status","")
-        sql="SELECT a.id,a.user_id,u.email,a.action,a.target,a.details,a.created_at FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id WHERE 1=1"; params=[]
-        if user: sql+=" AND (u.email LIKE ? OR a.user_id=?)"; params += [f"%{user}%",user]
+        sql="SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"; params=[]
+        if user: sql+=" AND (u.email LIKE ? OR t.owner_id=?)"; params += [f"%{user}%",user]
         if action: sql+=" AND a.action LIKE ?"; params.append(f"%{action}%")
         sql+=" ORDER BY a.id DESC LIMIT ?"; params.append(limit)
         with _db() as db: rows=db.execute(sql,params).fetchall()
         out=[]
         for r in rows:
-            d=dict(r); d["details"]=_safe_details(d.get("details")); d["status"]=d["details"].get("status","success"); out.append(d)
+            d=dict(r); d["details"]=_safe_details(d.get("details")); d["status"]=d.get("status") or d["details"].get("status","success"); out.append(d)
         if status: out=[d for d in out if d["status"]==status]
         return JSONResponse({"operations":out})
     except Exception as exc: return _error(exc)
