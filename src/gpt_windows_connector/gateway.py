@@ -136,25 +136,81 @@ def _actor(user) -> dict:
     return {"user_id": user.id, "email": user.email, "name": user.name or ""}
 
 
-def _shell_operation_count(command: str) -> int:
-    """Estimate meaningful shell actions while keeping one simple action = one Operation."""
-    text = str(command or "").replace("\r\n", "\n").strip()
+_SHELL_STRUCTURAL = re.compile(
+    r"^(?:if|elseif|else|foreach|for|while|switch|try|catch|finally|function|filter|class|param|begin|process|end|do)\\b",
+    re.IGNORECASE,
+)
+_SHELL_NON_ACTION = re.compile(
+    r"^(?:return|break|continue|throw|exit|Write-(?:Host|Output|Verbose|Debug|Warning|Information)|Start-Sleep)\\b",
+    re.IGNORECASE,
+)
+
+
+def _split_shell_statements(command: str) -> list[str]:
+    """Split shell text on real statement separators, not separators inside quotes."""
+    text = str(command or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
-        return 1
-    # Collapse PowerShell here-strings so file contents are not mistaken for commands.
+        return []
     text = re.sub(r"@'(?s:.*?)'@", "'<here-string>'", text)
     text = re.sub(r'@"(?s:.*?)"@', '"<here-string>"', text)
-    parts = re.split(r"\s*(?:&&|\|\||;|\n)\s*", text)
-    actions = 0
-    for part in parts:
-        line = part.strip()
-        if not line or line.startswith("#"):
+    text = text.replace("`\n", " ")
+    out: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    escaped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if escaped:
+            buf.append(ch); escaped = False; i += 1; continue
+        if ch == "`" and quote == '"':
+            buf.append(ch); escaped = True; i += 1; continue
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1; continue
+        if ch in {"'", '"'}:
+            quote = ch; buf.append(ch); i += 1; continue
+        pair = text[i:i+2]
+        if ch in {";", "\n"} or pair in {"&&", "||"}:
+            item = "".join(buf).strip()
+            if item:
+                out.append(item)
+            buf = []
+            i += 2 if pair in {"&&", "||"} else 1
             continue
-        # Ignore structural-only PowerShell lines; count the actual commands inside them.
-        if line in {"{", "}", "(", ")"}:
+        buf.append(ch); i += 1
+    item = "".join(buf).strip()
+    if item:
+        out.append(item)
+    return out
+
+
+def _shell_operations(command: str) -> list[str]:
+    """Return billable shell actions while excluding PowerShell control/data syntax."""
+    actions: list[str] = []
+    for raw in _split_shell_statements(command):
+        line = raw.strip()
+        line = re.sub(r"^[{}()]+|[{}()]+$", "", line).strip()
+        if not line or line.startswith("#") or _SHELL_STRUCTURAL.match(line) or _SHELL_NON_ACTION.match(line):
             continue
-        actions += 1
-    return max(1, actions)
+        assignment = re.match(r"^\\$[A-Za-z_][\\w:.-]*\\s*(?:=|\\+=|-=|\\*=|/=)\\s*(.+)$", line)
+        if assignment:
+            rhs = assignment.group(1).strip()
+            if not rhs or re.match(r"^(?:['\"\\d@\[{(]|\\$|true\\b|false\\b|null\\b)", rhs, re.IGNORECASE):
+                continue
+            line = rhs
+        if re.match(r"^\\$[A-Za-z_][\\w:.-]*(?:\\.|\\[)", line):
+            continue
+        label = re.sub(r"\\s+", " ", line).strip()
+        if label:
+            actions.append(label[:240])
+    return actions or ["shell.run"]
+
+
+def _shell_operation_count(command: str) -> int:
+    return len(_shell_operations(command))
 
 
 def _operation_count(method: str, params: dict | None = None) -> int:
@@ -166,7 +222,8 @@ def _operation_count(method: str, params: dict | None = None) -> int:
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
     payload = dict(params or {})
-    operation_count = _operation_count(method, payload)
+    sub_operations = _shell_operations(str(payload.get("command") or "")) if method == "shell.run" else []
+    operation_count = len(sub_operations) if sub_operations else _operation_count(method, payload)
     ensure_request_capacity(db_path, user.id, operation_count)
     ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
@@ -190,12 +247,12 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration, operation_count)
         auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},operation_count=operation_count,context_key=run_context,task_title=task_title)
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration, operation_count)
     auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",operation_count=operation_count,context_key=run_context,task_title=task_title)
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
     return result
 
 
