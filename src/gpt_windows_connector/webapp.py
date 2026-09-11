@@ -458,8 +458,20 @@ async def api_task_runs(request: Request):
     user = _auth_user(request)
     limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
     node_id = request.query_params.get("node_id", "").strip() or None
-    billing = gateway.billing.summary(user.id)
-    return JSONResponse({"runs": gateway.task_runs.list_runs(user.id, node_id=node_id, limit=limit), "operations_this_period": int(billing.get("requests_used") or 0), "period_start": billing.get("period_start"), "period_end": billing.get("period_end")})
+    days_raw = request.query_params.get("days", "all").strip().lower()
+    days = int(days_raw) if days_raw in {"7", "30", "90"} else 0
+    since = time.time() - days * 86400 if days else None
+    runs = gateway.task_runs.list_runs(user.id, node_id=node_id, limit=limit, since=since)
+    with _db() as db:
+        run_where = "owner_id=?"; run_params: list[object] = [user.id]
+        step_where = "owner_id=?"; step_params: list[object] = [user.id]
+        if since is not None:
+            run_where += " AND started_at>=?"; run_params.append(since)
+            step_where += " AND started_at>=?"; step_params.append(since)
+        task_count = int(db.execute(f"SELECT COUNT(*) n FROM task_runs WHERE {run_where}", run_params).fetchone()["n"] or 0)
+        op_count = int(db.execute(f"SELECT COUNT(*) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
+        duration_ms = int(db.execute(f"SELECT COALESCE(SUM(duration_ms),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
+    return JSONResponse({"runs": runs, "summary": {"task_runs": task_count, "operations": op_count, "duration_ms": duration_ms, "days": days or None}})
 
 async def api_logs(request: Request):
     user = _auth_user(request)
