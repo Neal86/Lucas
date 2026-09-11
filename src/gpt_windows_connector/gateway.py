@@ -144,6 +144,97 @@ _SHELL_NON_ACTION = re.compile(
     r"^(?:return|break|continue|throw|exit|Write-(?:Host|Output|Verbose|Debug|Warning|Information)|Start-Sleep)\b",
     re.IGNORECASE,
 )
+_SHELL_NON_BILLABLE_COMMANDS = {
+    "join-path", "split-path", "foreach-object", "where-object", "select-object",
+    "sort-object", "group-object", "measure-object", "compare-object",
+    "write-output", "write-host", "write-debug", "write-verbose", "write-warning",
+    "write-information", "out-string", "format-table", "format-list", "format-wide",
+    "format-custom", "convertto-json", "convertfrom-json", "convertto-csv",
+    "convertfrom-csv", "get-date", "get-random", "start-sleep", "set-psdebug",
+    "new-object", "set-variable", "get-variable",
+}
+_SHELL_TRACE_RE = re.compile(r"^DEBUG:\s+\d+\+\s*.*?>>>>\s*(.*)$")
+
+
+def _split_pipeline(text: str) -> list[str]:
+    out: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    depth = 0
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote and (i == 0 or text[i - 1] != "`"):
+                quote = None
+            i += 1
+            continue
+        if ch in {"'", '"'}:
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch in "([": depth += 1
+        elif ch in ")]": depth = max(0, depth - 1)
+        if ch == "|" and depth == 0 and text[i:i+2] != "||":
+            item = "".join(buf).strip()
+            if item:
+                out.append(item)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    item = "".join(buf).strip()
+    if item:
+        out.append(item)
+    return out
+
+
+def _billable_commands_from_statement(statement: str) -> list[str]:
+    text = str(statement or "").strip()
+    if not text:
+        return []
+    if text.startswith(("{", "}")):
+        return []
+    if "{" in text:
+        text = text.split("{", 1)[0].strip()
+    if not text or _SHELL_STRUCTURAL.match(text) or _SHELL_NON_ACTION.match(text):
+        return []
+    assignment = re.match(r"^\$[A-Za-z_][\w:.-]*\s*(?:=|\+=|-=|\*=|/=)\s*(.+)$", text)
+    if assignment:
+        text = assignment.group(1).strip()
+    labels: list[str] = []
+    for stage in _split_pipeline(text):
+        stage = stage.strip()
+        if not stage:
+            continue
+        match = re.match(r"^(?:&\s*)?([A-Za-z][\w.-]*)\b", stage)
+        if not match:
+            continue
+        command = match.group(1)
+        if command.lower() in _SHELL_NON_BILLABLE_COMMANDS:
+            continue
+        labels.append(re.sub(r"\s+", " ", stage).strip()[:240])
+    return labels
+
+
+def _instrument_powershell(command: str) -> str:
+    return "Set-PSDebug -Trace 1\ntry {\n" + str(command or "") + "\n} finally { Set-PSDebug -Off }"
+
+
+def _extract_runtime_shell_operations(stdout: str) -> tuple[str, list[str]]:
+    clean: list[str] = []
+    actions: list[str] = []
+    for line in str(stdout or "").splitlines(keepends=True):
+        plain = line.rstrip("\r\n")
+        match = _SHELL_TRACE_RE.match(plain)
+        if not match:
+            clean.append(line)
+            continue
+        actions.extend(_billable_commands_from_statement(match.group(1)))
+    return "".join(clean), actions
 
 
 def _split_shell_statements(command: str) -> list[str]:
@@ -188,24 +279,13 @@ def _split_shell_statements(command: str) -> list[str]:
 
 
 def _shell_operations(command: str) -> list[str]:
-    """Return billable shell actions while excluding PowerShell control/data syntax."""
+    """Static fallback for shell accounting when runtime tracing is unavailable."""
     actions: list[str] = []
     for raw in _split_shell_statements(command):
-        line = raw.strip()
-        line = re.sub(r"^[{}()]+|[{}()]+$", "", line).strip()
-        if not line or line.startswith("#") or _SHELL_STRUCTURAL.match(line) or _SHELL_NON_ACTION.match(line):
+        line = re.sub(r"^[{}()]+|[{}()]+$", "", raw.strip()).strip()
+        if not line or line.startswith("#"):
             continue
-        assignment = re.match(r"^\$[A-Za-z_][\w:.-]*\s*(?:=|\+=|-=|\*=|/=)\s*(.+)$", line)
-        if assignment:
-            rhs = assignment.group(1).strip()
-            if not rhs or re.match(r"^(?:['\"\d@\[{(]|\$|true\b|false\b|null\b)", rhs, re.IGNORECASE):
-                continue
-            line = rhs
-        if re.match(r"^\$[A-Za-z_][\w:.-]*(?:\.|\[)", line):
-            continue
-        label = re.sub(r"\s+", " ", line).strip()
-        if label:
-            actions.append(label[:240])
+        actions.extend(_billable_commands_from_statement(line))
     return actions or ["shell.run"]
 
 
@@ -222,9 +302,16 @@ def _operation_count(method: str, params: dict | None = None) -> int:
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
     payload = dict(params or {})
-    sub_operations = _shell_operations(str(payload.get("command") or "")) if method == "shell.run" else []
+    original_command = str(payload.get("command") or "") if method == "shell.run" else ""
+    sub_operations = _shell_operations(original_command) if method == "shell.run" else []
     operation_count = len(sub_operations) if sub_operations else _operation_count(method, payload)
-    ensure_request_capacity(db_path, user.id, operation_count)
+    shell_type = str(payload.get("shell_type") or "powershell").lower().strip()
+    trace_shell = method == "shell.run" and shell_type in {"powershell", "pwsh"} and "Set-PSDebug" not in original_command
+    if trace_shell:
+        payload["command"] = _instrument_powershell(original_command)
+    # A shell may execute a dynamic number of actions. Require at least one unit up front;
+    # the exact runtime count is recorded after execution and the next call enforces quota.
+    ensure_request_capacity(db_path, user.id, 1 if method == "shell.run" else operation_count)
     ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
     if not workspace:
@@ -243,6 +330,12 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
             except (TypeError, ValueError):
                 rpc_timeout = 180.0
         result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
+        if trace_shell and isinstance(result, dict):
+            clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""))
+            result["stdout"] = clean_stdout
+            if runtime_operations:
+                sub_operations = runtime_operations
+                operation_count = len(runtime_operations)
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration, operation_count)

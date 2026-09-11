@@ -1,4 +1,8 @@
-from gpt_windows_connector.gateway import _shell_operation_count, _shell_operations
+from gpt_windows_connector.gateway import (
+    _extract_runtime_shell_operations,
+    _shell_operation_count,
+    _shell_operations,
+)
 from gpt_windows_connector.task_runs import TaskRunStore
 
 
@@ -43,6 +47,52 @@ npm test
 
 def test_shell_operation_count_counts_command_on_assignment_rhs():
     assert _shell_operations("$content = Get-Content file.txt\n$result = 42") == ["Get-Content file.txt"]
+
+
+def test_static_shell_operations_ignore_join_path_helpers():
+    command = """$root = Join-Path $env:USERPROFILE "demo"
+New-Item -ItemType Directory -Force -Path $root
+$input = Join-Path $root "input.csv"
+Import-Csv -Path $input
+"""
+    assert _shell_operations(command) == [
+        "New-Item -ItemType Directory -Force -Path $root",
+        "Import-Csv -Path $input",
+    ]
+
+
+def test_runtime_trace_counts_loop_iterations_and_ignores_helpers():
+    stdout = """DEBUG:    3+   >>>> $root = Join-Path $env:TEMP "demo"
+DEBUG:    4+   >>>> New-Item -ItemType Directory -Force -Path $root
+DEBUG:    5+   >>>> 1..3 | ForEach-Object { Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object  >>>> { Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object {  >>>> Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object { Set-Content -Path (Join-Path $root "$_.txt") -Value $_  >>>> }
+DEBUG:    5+   1..3 | ForEach-Object  >>>> { Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object {  >>>> Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object { Set-Content -Path (Join-Path $root "$_.txt") -Value $_  >>>> }
+DEBUG:    5+   1..3 | ForEach-Object  >>>> { Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    5+   1..3 | ForEach-Object {  >>>> Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+DEBUG:    6+   >>>> Get-ChildItem $root
+DEBUG:    7+   >>>> Set-PSDebug -Off
+visible output
+"""
+    clean, operations = _extract_runtime_shell_operations(stdout)
+    assert clean == "visible output\n"
+    assert operations == [
+        "New-Item -ItemType Directory -Force -Path $root",
+        'Set-Content -Path (Join-Path $root "$_.txt") -Value $_',
+        'Set-Content -Path (Join-Path $root "$_.txt") -Value $_',
+        'Set-Content -Path (Join-Path $root "$_.txt") -Value $_',
+        "Get-ChildItem $root",
+    ]
+
+
+def test_runtime_trace_counts_pipeline_sink_once():
+    stdout = 'DEBUG:   10+   >>>> "Count=5" | Set-Content -Path $summary\n'
+    clean, operations = _extract_runtime_shell_operations(stdout)
+    assert clean == ""
+    assert operations == ['Set-Content -Path $summary']
 
 
 def test_task_title_upgrades_fallback_run_and_preserves_weight(tmp_path):
