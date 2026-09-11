@@ -458,7 +458,8 @@ async def api_task_runs(request: Request):
     user = _auth_user(request)
     limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
     node_id = request.query_params.get("node_id", "").strip() or None
-    return JSONResponse({"runs": gateway.task_runs.list_runs(user.id, node_id=node_id, limit=limit)})
+    billing = gateway.billing.summary(user.id)
+    return JSONResponse({"runs": gateway.task_runs.list_runs(user.id, node_id=node_id, limit=limit), "operations_this_period": int(billing.get("requests_used") or 0), "period_start": billing.get("period_start"), "period_end": billing.get("period_end")})
 
 async def api_logs(request: Request):
     user = _auth_user(request)
