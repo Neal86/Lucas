@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import os
 import secrets
 import hashlib
@@ -135,16 +136,44 @@ def _actor(user) -> dict:
     return {"user_id": user.id, "email": user.email, "name": user.name or ""}
 
 
+def _shell_operation_count(command: str) -> int:
+    """Estimate meaningful shell actions while keeping one simple action = one Operation."""
+    text = str(command or "").replace("\r\n", "\n").strip()
+    if not text:
+        return 1
+    # Collapse PowerShell here-strings so file contents are not mistaken for commands.
+    text = re.sub(r"@'(?s:.*?)'@", "'<here-string>'", text)
+    text = re.sub(r'@"(?s:.*?)"@', '"<here-string>"', text)
+    parts = re.split(r"\s*(?:&&|\|\||;|\n)\s*", text)
+    actions = 0
+    for part in parts:
+        line = part.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Ignore structural-only PowerShell lines; count the actual commands inside them.
+        if line in {"{", "}", "(", ")"}:
+            continue
+        actions += 1
+    return max(1, actions)
+
+
+def _operation_count(method: str, params: dict | None = None) -> int:
+    if method == "shell.run":
+        return _shell_operation_count(str((params or {}).get("command") or ""))
+    return 1
+
+
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
-    ensure_request_capacity(db_path, user.id)
+    payload = dict(params or {})
+    operation_count = _operation_count(method, payload)
+    ensure_request_capacity(db_path, user.id, operation_count)
     ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
     task_title = " ".join(str(task_title or "").split())[:180] or None
     run_context = workspace
-    payload = dict(params or {})
     if include_workspace:
         payload["workspace"] = workspace
     wall_started = time.time()
@@ -159,14 +188,14 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
         result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
-        auth.record_operation(user.id, False, duration)
-        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},context_key=run_context,task_title=task_title)
+        auth.record_operation(user.id, False, duration, operation_count)
+        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__},operation_count=operation_count,context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
-    auth.record_operation(user.id, True, duration)
-    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000)})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",context_key=run_context,task_title=task_title)
+    auth.record_operation(user.id, True, duration, operation_count)
+    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",operation_count=operation_count,context_key=run_context,task_title=task_title)
     return result
 
 
@@ -342,7 +371,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. For every user-requested execution task, pass the same concise task_title (the user's goal, not the tool action) on every execution tool call so Lucas can group tool calls as subtasks under one Task Run.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, pass the same concise, human-readable task_title on every execution tool call. Use the user's actual goal, such as 'Create and review software service contract' or 'Analyze product profit and inventory', never a tool name, shell command, or file path. Lucas groups calls with that title into one Task Run.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
