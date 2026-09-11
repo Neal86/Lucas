@@ -26,7 +26,7 @@ from .legal_ui import privacy_html, terms_html, refund_html, contact_html
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
 
 from .web_assets import DASHBOARD_HTML
-from .web_document import META_PIXEL_HEAD
+from .web_document import TRACKING_HEAD
 
 
 def _auth_user(request: Request):
@@ -121,7 +121,7 @@ def _landing_html() -> str:
 <meta name="twitter:image" content="https://lucasmcp.com/assets/lucas-logo-square.png" />
 <script type="application/ld+json">{{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Lucas MCP","alternateName":"Lucas","url":"https://lucasmcp.com/","applicationCategory":"DeveloperApplication","operatingSystem":"Windows; macOS; Linux","description":"Lucas MCP securely connects MCP-compatible AI assistants such as ChatGPT, Claude and Gemini to computers for files, browser, terminal and desktop automation with local permission controls.","image":"https://lucasmcp.com/assets/lucas-logo-square.png","offers":{{"@type":"Offer","price":"0","priceCurrency":"USD"}}}}</script>
 <title>Lucas MCP — Connect Any AI to Your Computer</title>
-{META_PIXEL_HEAD}
+{TRACKING_HEAD}
 <style>
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth;background:#05070d}}body{{margin:0;background:#05070d}}button{{font:inherit}}
 {landing_css}

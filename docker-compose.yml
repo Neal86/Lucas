@@ -47,6 +47,7 @@ services:
       META_PIXEL_ID: ${META_PIXEL_ID:-}
       META_CAPI_ACCESS_TOKEN: ${META_CAPI_ACCESS_TOKEN:-}
       META_TEST_EVENT_CODE: ${META_TEST_EVENT_CODE:-}
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
       GWC_ALLOWED_HOSTS: ${GWC_ALLOWED_HOSTS:-lucasmcp.com,lucasmcp.com:*,localhost:*,127.0.0.1:*}
       GWC_ALLOWED_ORIGINS: ${GWC_ALLOWED_ORIGINS:-https://lucasmcp.com,https://lucasmcp.com:*,http://localhost:*,http://127.0.0.1:*}
     volumes:
