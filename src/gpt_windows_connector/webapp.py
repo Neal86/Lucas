@@ -469,7 +469,7 @@ async def api_task_runs(request: Request):
             run_where += " AND started_at>=?"; run_params.append(since)
             step_where += " AND started_at>=?"; step_params.append(since)
         task_count = int(db.execute(f"SELECT COUNT(*) n FROM task_runs WHERE {run_where}", run_params).fetchone()["n"] or 0)
-        op_count = int(db.execute(f"SELECT COUNT(*) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
+        op_count = int(db.execute(f"SELECT COALESCE(SUM(operation_count),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
         duration_ms = int(db.execute(f"SELECT COALESCE(SUM(duration_ms),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
     return JSONResponse({"runs": runs, "summary": {"task_runs": task_count, "operations": op_count, "duration_ms": duration_ms, "days": days or None}})
 
