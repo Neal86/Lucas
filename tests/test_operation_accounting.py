@@ -20,7 +20,7 @@ line three
 '@ | Set-Content report.txt
 npm test
 """
-    assert _shell_operations(command) == ["'<here-string>' | Set-Content report.txt", "npm test"]
+    assert _shell_operations(command) == ["Set-Content report.txt", "npm test"]
     assert _shell_operation_count(command) == 2
 
 

@@ -202,6 +202,7 @@ def _billable_commands_from_statement(statement: str) -> list[str]:
         text = text.split("{", 1)[0].strip()
     if not text or _SHELL_STRUCTURAL.match(text) or _SHELL_NON_ACTION.match(text):
         return []
+    text = re.sub(r"\s*}\s*$", "", text).strip()
     assignment = re.match(r"^\$[A-Za-z_][\w:.-]*\s*(?:=|\+=|-=|\*=|/=)\s*(.+)$", text)
     if assignment:
         text = assignment.group(1).strip()
