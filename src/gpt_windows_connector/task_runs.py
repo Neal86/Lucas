@@ -77,10 +77,11 @@ class TaskRunStore:
             db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,details) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,json.dumps(details or {},ensure_ascii=False)))
         return run_id
 
-    def list_runs(self, owner_id: str, *, node_id: str | None=None, limit: int=100) -> list[dict[str,Any]]:
+    def list_runs(self, owner_id: str, *, node_id: str | None=None, limit: int=100, since: float | None=None) -> list[dict[str,Any]]:
         owner_id=str(owner_id or "local"); limit=max(1,min(int(limit),500))
         where="owner_id=?"; params:list[Any]=[owner_id]
         if node_id: where+=" AND node_id=?"; params.append(str(node_id))
+        if since is not None: where+=" AND started_at>=?"; params.append(float(since))
         params.append(limit)
         with self._connect() as db:
             rows=db.execute(f"SELECT * FROM task_runs WHERE {where} ORDER BY started_at DESC LIMIT ?",params).fetchall()
