@@ -42,7 +42,7 @@ npm test
 
 
 def test_shell_operation_count_counts_command_on_assignment_rhs():
-    assert _shell_operations("$content = Get-Content file.txt\\n$result = 42") == ["Get-Content file.txt"]
+    assert _shell_operations("$content = Get-Content file.txt\n$result = 42") == ["Get-Content file.txt"]
 
 
 def test_task_title_upgrades_fallback_run_and_preserves_weight(tmp_path):
