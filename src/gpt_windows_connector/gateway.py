@@ -151,9 +151,9 @@ _SHELL_NON_BILLABLE_COMMANDS = {
     "write-information", "out-string", "format-table", "format-list", "format-wide",
     "format-custom", "convertto-json", "convertfrom-json", "convertto-csv",
     "convertfrom-csv", "get-date", "get-random", "start-sleep", "set-psdebug",
-    "new-object", "set-variable", "get-variable",
+    "new-object", "set-variable", "get-variable", "out-null",
 }
-_SHELL_TRACE_RE = re.compile(r"^DEBUG:\s+\d+\+\s*.*?>>>>\s*(.*)$")
+_SHELL_TRACE_RE = re.compile(r"^DEBUG:\s+(\d+)\+\s*.*?>>>>\s*(.*)$")
 
 
 def _split_pipeline(text: str) -> list[str]:
@@ -225,16 +225,67 @@ def _instrument_powershell(command: str) -> str:
     return "Set-PSDebug -Trace 1\ntry {\n" + str(command or "") + "\n} finally { Set-PSDebug -Off }"
 
 
-def _extract_runtime_shell_operations(stdout: str) -> tuple[str, list[str]]:
+def _source_operations_by_trace_line(command: str) -> dict[int, list[str]]:
+    """Map Set-PSDebug trace line numbers back to billable commands in the user's script."""
+    lines = str(command or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    mapping: dict[int, list[str]] = {}
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        trace_line = i + 3  # wrapper adds Set-PSDebug + try { before user code
+        if stripped.startswith(("@'", '@"')):
+            opener = stripped[:2]
+            closer = "'@" if opener == "@'" else '"@'
+            block = [line]
+            j = i + 1
+            while j < len(lines):
+                block.append(lines[j])
+                if closer in lines[j]:
+                    break
+                j += 1
+            collapsed = "\n".join(block)
+            collapsed = re.sub(r"@'(?s:.*?)'@", "'<here-string>'", collapsed)
+            collapsed = re.sub(r'@"(?s:.*?)"@', '"<here-string>"', collapsed)
+            ops = _billable_commands_from_statement(collapsed)
+            if ops:
+                mapping[trace_line] = ops
+            i = j + 1
+            continue
+        ops = _billable_commands_from_statement(line)
+        # One-line loop/conditional bodies need to be considered on the same source line.
+        if "{" in line and "}" in line:
+            inner = line.split("{", 1)[1].rsplit("}", 1)[0]
+            for part in _split_shell_statements(inner):
+                ops.extend(_billable_commands_from_statement(part))
+        if ops:
+            mapping[trace_line] = ops
+        i += 1
+    return mapping
+
+
+def _extract_runtime_shell_operations(stdout: str, source_command: str = "") -> tuple[str, list[str]]:
     clean: list[str] = []
     actions: list[str] = []
+    source_map = _source_operations_by_trace_line(source_command) if source_command else {}
     for line in str(stdout or "").splitlines(keepends=True):
         plain = line.rstrip("\r\n")
         match = _SHELL_TRACE_RE.match(plain)
         if not match:
             clean.append(line)
             continue
-        actions.extend(_billable_commands_from_statement(match.group(1)))
+        trace_line = int(match.group(1))
+        statement = match.group(2)
+        allowed = source_map.get(trace_line)
+        if source_map and not allowed:
+            continue
+        runtime = _billable_commands_from_statement(statement)
+        if not runtime and allowed and statement.strip().startswith(("@'", '@"')):
+            runtime = allowed
+        if allowed:
+            allowed_set = set(allowed)
+            runtime = [op for op in runtime if op in allowed_set]
+        actions.extend(runtime)
     return "".join(clean), actions
 
 
@@ -332,7 +383,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
                 rpc_timeout = 180.0
         result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
         if trace_shell and isinstance(result, dict):
-            clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""))
+            clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""), original_command)
             result["stdout"] = clean_stdout
             if runtime_operations:
                 sub_operations = runtime_operations

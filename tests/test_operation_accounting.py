@@ -77,7 +77,12 @@ DEBUG:    6+   >>>> Get-ChildItem $root
 DEBUG:    7+   >>>> Set-PSDebug -Off
 visible output
 """
-    clean, operations = _extract_runtime_shell_operations(stdout)
+    source = """$root = Join-Path $env:TEMP "demo"
+New-Item -ItemType Directory -Force -Path $root
+1..3 | ForEach-Object { Set-Content -Path (Join-Path $root "$_.txt") -Value $_ }
+Get-ChildItem $root
+"""
+    clean, operations = _extract_runtime_shell_operations(stdout, source)
     assert clean == "visible output\n"
     assert operations == [
         "New-Item -ItemType Directory -Force -Path $root",
@@ -88,9 +93,34 @@ visible output
     ]
 
 
+def test_runtime_trace_filters_internal_cmdlet_traces_and_counts_here_string():
+    command = """@'
+a
+b
+'@ | Set-Content -Path $input
+foreach ($file in $files) {
+  Get-FileHash -Path $file.FullName -Algorithm SHA256 | Out-Null
+}
+"""
+    stdout = """DEBUG:    3+  >>>> @'
+DEBUG:    7+  >>>> foreach ($file in $files) {
+DEBUG:    8+    >>>> Get-FileHash -Path $file.FullName -Algorithm SHA256 | Out-Null
+DEBUG:   42+    >>>> Resolve-Path $Path
+DEBUG:   43+    >>>> Test-Path -LiteralPath $filePath -PathType Container
+DEBUG:    8+    >>>> Get-FileHash -Path $file.FullName -Algorithm SHA256 | Out-Null
+"""
+    clean, operations = _extract_runtime_shell_operations(stdout, command)
+    assert clean == ""
+    assert operations == [
+        "Set-Content -Path $input",
+        "Get-FileHash -Path $file.FullName -Algorithm SHA256",
+        "Get-FileHash -Path $file.FullName -Algorithm SHA256",
+    ]
+
+
 def test_runtime_trace_counts_pipeline_sink_once():
     stdout = 'DEBUG:   10+   >>>> "Count=5" | Set-Content -Path $summary\n'
-    clean, operations = _extract_runtime_shell_operations(stdout)
+    clean, operations = _extract_runtime_shell_operations(stdout, '"Count=5" | Set-Content -Path $summary')
     assert clean == ""
     assert operations == ['Set-Content -Path $summary']
 
