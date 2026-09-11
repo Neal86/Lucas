@@ -639,6 +639,7 @@ routes = [
     Route("/dashboard", dashboard, methods=["GET"]),
     Route("/nodes", dashboard, methods=["GET"]),
     Route("/ai-connections", dashboard, methods=["GET"]),
+    Route("/task-runs", dashboard, methods=["GET"]),
     Route("/logs", dashboard, methods=["GET"]),
     Route("/account", dashboard, methods=["GET"]),
     Route("/admin", admin_page, methods=["GET"]),
