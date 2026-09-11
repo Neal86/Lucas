@@ -39,10 +39,14 @@ class TaskRunStore:
                 id TEXT PRIMARY KEY, task_run_id TEXT NOT NULL, owner_id TEXT NOT NULL,
                 node_id TEXT NOT NULL, action TEXT NOT NULL, target TEXT, status TEXT NOT NULL,
                 started_at REAL NOT NULL, ended_at REAL NOT NULL, duration_ms INTEGER NOT NULL,
+                operation_count INTEGER NOT NULL DEFAULT 1,
                 details TEXT NOT NULL DEFAULT '{}'
             );
             CREATE INDEX IF NOT EXISTS idx_task_steps_run_started ON task_steps(task_run_id, started_at ASC);
             """)
+            step_columns = {row[1] for row in db.execute("PRAGMA table_info(task_steps)").fetchall()}
+            if "operation_count" not in step_columns:
+                db.execute("ALTER TABLE task_steps ADD COLUMN operation_count INTEGER NOT NULL DEFAULT 1")
 
     @staticmethod
     def _title(action: str, target: str | None) -> str:
@@ -56,25 +60,37 @@ class TaskRunStore:
     def record_operation(self, *, owner_id: str, node_id: str, action: str,
                          target: str | None, started_at: float, ended_at: float,
                          status: str, details: dict[str, Any] | None = None,
-                         context_key: str | None = None, task_title: str | None = None) -> str:
+                         operation_count: int = 1, context_key: str | None = None,
+                         task_title: str | None = None) -> str:
         owner_id=str(owner_id or "local"); node_id=str(node_id or "unknown")
         action=str(action or "operation"); target=str(target or "") or None
         task_title=" ".join(str(task_title or "").split())[:180] or None
-        context_key=str(context_key or target or "default")
-        if task_title:
-            context_key=f"{context_key}::task::{task_title}"
+        base_context=str(context_key or target or "default")
+        titled_context=f"{base_context}::task::{task_title}" if task_title else None
         started_at=float(started_at); ended_at=max(started_at,float(ended_at))
         duration_ms=max(0,round((ended_at-started_at)*1000))
+        operation_count=max(1,int(operation_count or 1))
         with self._connect() as db:
-            row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,context_key)).fetchone()
+            if task_title:
+                row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,titled_context)).fetchone()
+                if not row:
+                    fallback=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context)).fetchone()
+                    if fallback and ended_at-float(fallback["last_activity_at"]) <= self.idle_seconds:
+                        db.execute("UPDATE task_runs SET context_key=?,title=? WHERE id=?",(titled_context,task_title,str(fallback["id"])))
+                        row=db.execute("SELECT * FROM task_runs WHERE id=?",(str(fallback["id"]),)).fetchone()
+            else:
+                row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND (context_key=? OR context_key LIKE ?) ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context,f"{base_context}::task::%")).fetchone()
+            context_key=titled_context or base_context
             if row and ended_at-float(row["last_activity_at"]) <= self.idle_seconds:
                 run_id=str(row["id"])
+                if task_title and str(row["title"]) != task_title:
+                    db.execute("UPDATE task_runs SET title=?,context_key=? WHERE id=?",(task_title,titled_context,run_id))
             else:
                 run_id=uuid.uuid4().hex
                 db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at))
             success=status=="success"
             db.execute("UPDATE task_runs SET last_activity_at=?,ended_at=?,success_count=success_count+?,error_count=error_count+? WHERE id=?",(ended_at,ended_at,1 if success else 0,0 if success else 1,run_id))
-            db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,details) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,json.dumps(details or {},ensure_ascii=False)))
+            db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,details) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,json.dumps(details or {},ensure_ascii=False)))
         return run_id
 
     def list_runs(self, owner_id: str, *, node_id: str | None=None, limit: int=100, since: float | None=None) -> list[dict[str,Any]]:
