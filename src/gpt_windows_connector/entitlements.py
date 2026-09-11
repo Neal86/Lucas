@@ -131,16 +131,18 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
             if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
         extra_requests,extra_nodes,extra_ai,override_expires_at,override_expired=_entitlement_override(db,user_id,now)
-        req=_count(db,"SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
+        req=_count(db,"SELECT COALESCE(SUM(operation_count),0) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
         ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,))
         node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
         connected=len(_bound_ids(db,user_id))
         active=len(_sync_active(db,user_id,node_limit))
     return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus+extra_requests,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"])+extra_ai,req,active,ai,pstart,pend,pend if plan!="free" and not admin_grant else None,cancel,bonus,connected,extra_nodes,extra_ai,admin_grant)
 
-def ensure_request_capacity(db_path: Path,user_id: str) -> Entitlements:
+def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1) -> Entitlements:
     e=snapshot(db_path,user_id)
-    if e.requests_used>=e.request_limit: raise PermissionError(f"Monthly Request limit reached ({e.requests_used}/{e.request_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
+    requested=max(1,int(requested_operations or 1))
+    if e.requests_used+requested>e.request_limit:
+        raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
     return e
 
 def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements:
