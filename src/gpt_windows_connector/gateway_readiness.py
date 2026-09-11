@@ -7,15 +7,23 @@ from pathlib import Path
 
 def readiness_checks(db_path: Path, settings, billing, email_verification_enabled) -> dict[str, bool]:
     db_ok = True
+    super_admin_configured = bool(os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip())
     try:
         with sqlite3.connect(db_path, timeout=3) as db:
             db.execute("SELECT 1").fetchone()
+            if not super_admin_configured:
+                try:
+                    super_admin_configured = db.execute(
+                        "SELECT 1 FROM users WHERE role='super_admin' LIMIT 1"
+                    ).fetchone() is not None
+                except sqlite3.OperationalError:
+                    pass
     except Exception:
         db_ok = False
     return {
         "database": db_ok,
         "jwt_secret": bool(settings.jwt_secret),
-        "super_admin_configured": bool(os.getenv("GWC_SUPER_ADMIN_EMAIL", "").strip()),
+        "super_admin_configured": super_admin_configured,
         "email_verification": bool(email_verification_enabled()),
         "google_oauth": bool(settings.google_client_id and settings.google_client_secret),
         "turnstile": bool(os.getenv("GWC_TURNSTILE_SECRET_KEY", "").strip()),
