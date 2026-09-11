@@ -137,11 +137,11 @@ def _actor(user) -> dict:
 
 
 _SHELL_STRUCTURAL = re.compile(
-    r"^(?:if|elseif|else|foreach|for|while|switch|try|catch|finally|function|filter|class|param|begin|process|end|do)\\b",
+    r"^(?:if|elseif|else|foreach|for|while|switch|try|catch|finally|function|filter|class|param|begin|process|end|do)\b",
     re.IGNORECASE,
 )
 _SHELL_NON_ACTION = re.compile(
-    r"^(?:return|break|continue|throw|exit|Write-(?:Host|Output|Verbose|Debug|Warning|Information)|Start-Sleep)\\b",
+    r"^(?:return|break|continue|throw|exit|Write-(?:Host|Output|Verbose|Debug|Warning|Information)|Start-Sleep)\b",
     re.IGNORECASE,
 )
 
@@ -195,15 +195,15 @@ def _shell_operations(command: str) -> list[str]:
         line = re.sub(r"^[{}()]+|[{}()]+$", "", line).strip()
         if not line or line.startswith("#") or _SHELL_STRUCTURAL.match(line) or _SHELL_NON_ACTION.match(line):
             continue
-        assignment = re.match(r"^\\$[A-Za-z_][\\w:.-]*\\s*(?:=|\\+=|-=|\\*=|/=)\\s*(.+)$", line)
+        assignment = re.match(r"^\$[A-Za-z_][\w:.-]*\s*(?:=|\+=|-=|\*=|/=)\s*(.+)$", line)
         if assignment:
             rhs = assignment.group(1).strip()
-            if not rhs or re.match(r"^(?:['\"\\d@\[{(]|\\$|true\\b|false\\b|null\\b)", rhs, re.IGNORECASE):
+            if not rhs or re.match(r"^(?:['\"\d@\[{(]|\$|true\b|false\b|null\b)", rhs, re.IGNORECASE):
                 continue
             line = rhs
-        if re.match(r"^\\$[A-Za-z_][\\w:.-]*(?:\\.|\\[)", line):
+        if re.match(r"^\$[A-Za-z_][\w:.-]*(?:\.|\[)", line):
             continue
-        label = re.sub(r"\\s+", " ", line).strip()
+        label = re.sub(r"\s+", " ", line).strip()
         if label:
             actions.append(label[:240])
     return actions or ["shell.run"]
