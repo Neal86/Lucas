@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 PLANS: dict[str, dict[str, Any]] = {
-    "free": {"name": "Free", "price": 0.0, "requests": 1_000, "nodes": 1, "ai_accounts": 1},
+    "free": {"name": "Lucas Beta", "price": 0.0, "requests": 100_000, "nodes": 3, "ai_accounts": 3},
     "pro": {"name": "Pro", "price": 9.99, "requests": 25_000, "nodes": 3, "ai_accounts": 1},
     "pro_plus": {"name": "Pro+", "price": 19.99, "requests": 100_000, "nodes": 6, "ai_accounts": 3},
 }
@@ -107,7 +107,6 @@ def _sync_active(db: sqlite3.Connection,user_id: str,limit: int,preferred_ids: I
     for v in preferred_ids or []:
         v=str(v)
         if v in bound_set and v not in preferred: preferred.append(v)
-    remaining=limit-len(manual)
     candidates=(preferred + existing_auto + bound) if preferred_ids is not None else (existing_auto + bound)
     desired=list(manual)
     for node_id in candidates:
@@ -146,8 +145,6 @@ def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int
     return e
 
 def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements:
-    # Connecting/authorizing extra computers is allowed. Plan limits control which
-    # computers are active, not whether historical bindings remain visible.
     return snapshot(db_path,user_id)
 
 def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlements:
