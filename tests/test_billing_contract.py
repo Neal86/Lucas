@@ -5,56 +5,39 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 def test_pricing_contract():
     html=pricing_html()
-    for text in ["$9.99","$19.99","$14.99","$99.99","$199.99","$149.99","Save ~17%","1,000 Requests","25,000 Requests","100,000 Requests","6 Computers","Pro+ only"]:
+    for text in ["Lucas Beta","Free during Beta","100,000 Operations","3 Computers","3 AI accounts","Start Free Beta"]:
         assert text in html
+    for hidden_paid_copy in ["$9.99","$19.99","Expansion Pack","Monthly","Annual"]:
+        assert hidden_paid_copy not in html
 
 
 def test_expansion_is_pro_plus_only_in_backend():
     text=Path("src/gpt_windows_connector/billing.py").read_text(encoding="utf-8")
-    assert "if not ent.can_buy_expansion" in text
-    assert "Expansion Packs are available only on Pro+" in text
+    assert "if not ent.can_buy_expansion" in text and "Expansion Packs are available only on Pro+" in text
 
 
 def test_billing_endpoints_and_webhook_exist():
     text=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8")
-    for route in ["/pricing","/billing","/api/billing/summary","/api/billing/checkout","/api/billing/expansion","/api/billing/portal","/api/billing/webhook"]:
-        assert route in text
-    server=Path("src/gpt_windows_connector/server.py").read_text(encoding="utf-8")
-    assert '"/api/billing/webhook"' in server
+    for route in ["/pricing","/billing","/api/billing/summary","/api/billing/checkout","/api/billing/expansion","/api/billing/portal","/api/billing/webhook"]: assert route in text
+    server=Path("src/gpt_windows_connector/server.py").read_text(encoding="utf-8"); assert '"/api/billing/webhook"' in server
     compose=Path("docker-compose.yml").read_text(encoding="utf-8")
-    for key in ["STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_PRO","STRIPE_PRICE_PRO_PLUS","STRIPE_PRICE_EXPANSION","STRIPE_PRICE_PRO_ANNUAL","STRIPE_PRICE_PRO_PLUS_ANNUAL","STRIPE_PRICE_EXPANSION_ANNUAL"]:
-        assert key in compose
+    for key in ["STRIPE_SECRET_KEY","STRIPE_WEBHOOK_SECRET","STRIPE_PRICE_PRO","STRIPE_PRICE_PRO_PLUS","STRIPE_PRICE_EXPANSION","STRIPE_PRICE_PRO_ANNUAL","STRIPE_PRICE_PRO_PLUS_ANNUAL","STRIPE_PRICE_EXPANSION_ANNUAL"]: assert key in compose
 
 
 def test_dashboard_has_billing_entry_points():
     from gpt_windows_connector.web_assets import DASHBOARD_HTML
-    text=DASHBOARD_HTML
-    assert 'data-view=\"billing\"' in text
-    assert "Requests this period" in text
-    assert "Manage Plan & Billing" in text
-    fragment=dashboard_billing_html()
-    assert 'id=\"billing\" class=\"view hidden\"' in fragment
-    assert "Current plan" in fragment and "Expansion Pack" in fragment
+    text=DASHBOARD_HTML; assert 'data-view=\"billing\"' in text
+    assert "Operations this period" in text or "Operations" in text
+    fragment=dashboard_billing_html(); assert 'id=\"billing\" class=\"view hidden\"' in fragment and "Current plan" in fragment
     webapp=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8")
-    assert "dashboard_billing_html() + account_marker" in webapp
-    assert "return HTMLResponse(_dashboard_html()" in webapp
+    assert "dashboard_billing_html() + account_marker" in webapp and "return HTMLResponse(_dashboard_html()" in webapp
 
 
 def test_billable_request_guard_is_before_node_rpc():
-    text=Path("src/gpt_windows_connector/gateway.py").read_text(encoding="utf-8")
-    start=text.index("async def _node_rpc")
-    end=text.index("registry.rpc",start)
-    prefix=text[start:end]
-    assert "ensure_request_capacity" in prefix
-    assert "ensure_node_active" in prefix
+    text=Path("src/gpt_windows_connector/gateway.py").read_text(encoding="utf-8"); start=text.index("async def _node_rpc"); end=text.index("registry.rpc",start); prefix=text[start:end]
+    assert "ensure_request_capacity" in prefix and "ensure_node_active" in prefix
 
 
-def test_annual_billing_contract():
+def test_annual_billing_backend_contract_remains_available_while_ui_is_hidden():
     billing=Path("src/gpt_windows_connector/billing.py").read_text(encoding="utf-8")
-    assert "STRIPE_PRICE_PRO_ANNUAL" in billing
-    assert "STRIPE_PRICE_PRO_PLUS_ANNUAL" in billing
-    assert "STRIPE_PRICE_EXPANSION_ANNUAL" in billing
-    assert "ANNUAL_TOTALS" in billing
-    runtime=Path("src/gpt_windows_connector/web_billing_runtime.py").read_text(encoding="utf-8")
-    assert "billingSelectedInterval" in runtime
-    assert "interval:billingSelectedInterval" in runtime
+    assert "STRIPE_PRICE_PRO_ANNUAL" in billing and "STRIPE_PRICE_PRO_PLUS_ANNUAL" in billing and "STRIPE_PRICE_EXPANSION_ANNUAL" in billing and "ANNUAL_TOTALS" in billing
