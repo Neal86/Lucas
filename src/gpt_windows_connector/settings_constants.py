@@ -45,18 +45,18 @@ INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/ins
 
 APPROVAL_DEFAULTS = {
     "system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask",
-    "service_control":"ask","process_control":"ask","desktop_control":"ask","foreground_control":"always_ask","screenshots":"allow",
+    "service_control":"ask","process_control":"ask","desktop_control":"always_ask","background_control":"allow","screenshots":"allow",
     "clipboard":"ask","browser_control":"ask","browser_transfer":"always_ask","git_write":"ask",
     "git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask",
 }
-_SAFETY_GATES = {"foreground_control","browser_transfer","git_push","software_install","registry_system","high_risk","service_control"}
+_SAFETY_GATES = {"desktop_control","browser_transfer","git_push","software_install","registry_system","high_risk","service_control"}
 PRESETS = {
     "请求批准（Recommended）": {"approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
-    "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES}},"network_external":"allow","network_lan":"allow","block_silent_network":False},
-    "完全访问权限": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES}},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "完全访问权限": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
 }
 PRESET_DESCRIPTIONS = {
-    "请求批准（Recommended）":"编辑外部文件和使用互联网时始终询问。",
+    "请求批准（Recommended）":"编辑外部文件和使用互联网时询问；前台控制始终单独确认。",
     "帮我批准":"普通操作自动批准；危险操作和前台控制仍单独确认。",
     "完全访问权限":"普通操作完全开放；危险操作和前台控制仍保留本机确认。",
     "自定义":"使用下方逐项设置。",
@@ -72,8 +72,7 @@ PERMISSION_ROWS = [
     ("service_control","Windows 服务启动 / 停止","启动、停止、重启或修改 Windows 服务。"),
     ("registry_system","注册表与系统配置","修改注册表、系统配置、电源、账户及受保护系统设置。"),
     ("software_install","安装 / 卸载软件","安装包管理器、MSI、winget、Chocolatey 或卸载软件。"),
-    ("desktop_control","后台电脑操控","优先使用 UIA 等后台方式，不移动鼠标、不抢焦点。"),
-    ("foreground_control","前台控制 / Focus Control","仅当操作会激活窗口、移动鼠标或向前台窗口发送键盘输入时确认。后台 UI 自动化不会触发。"),
+    ("desktop_control","前台控制 / Focus Control","仅当操作会激活窗口、移动鼠标或向前台窗口发送键盘输入时确认。后台 UI 自动化不会触发。"),
     ("screenshots","屏幕截图","读取当前屏幕内容用于 Computer Use。"),
     ("clipboard","剪贴板","读取或写入 Windows 剪贴板。"),
     ("browser_control","浏览器操控","打开页面、点击、输入、选择和浏览器自动化。"),
