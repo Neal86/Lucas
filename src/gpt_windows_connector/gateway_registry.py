@@ -32,6 +32,19 @@ class ControlLock:
     expires_at: float
 
 
+def _focus_candidate(method: str, params: dict[str, Any]) -> bool:
+    if method in {
+        "computer.launch", "computer.activate", "computer.click", "computer.move", "computer.drag",
+        "computer.type", "computer.hotkey", "computer.press", "computer.scroll",
+    }:
+        return True
+    if method in {"computer.ui_click", "computer.ui_set_text"}:
+        return bool(params.get("allow_foreground_fallback", False))
+    if method == "browser.launch_persistent":
+        return not bool(params.get("headless", False))
+    return False
+
+
 class NodeRegistry:
     def __init__(self, bindings=None) -> None:
         self.bindings = bindings
@@ -194,6 +207,12 @@ class NodeRegistry:
         payloads = self.pending_payloads.setdefault(node_id, {})
         pending[request_id] = future
         payloads[request_id] = payload
+        workspace = str(params.get("workspace") or "")
+        focus = _focus_candidate(method, params)
+        log.info(
+            "RPC dispatch request_id=%s user_id=%s node_id=%s method=%s workspace=%s focus_candidate=%s",
+            request_id, user_id, node_id, method, workspace or "-", focus,
+        )
         started = time.monotonic()
         try:
             node = await self.wait_online(node_id, min(DISCONNECT_GRACE_SECONDS, timeout))
@@ -206,7 +225,18 @@ class NodeRegistry:
                 async with node.send_lock:
                     await node.websocket.send_json(payload)
             remaining = max(0.1, timeout - (time.monotonic() - started))
-            return await asyncio.wait_for(future, timeout=remaining)
+            result = await asyncio.wait_for(future, timeout=remaining)
+            log.info(
+                "RPC complete request_id=%s user_id=%s node_id=%s method=%s ok=true duration_ms=%d focus_candidate=%s",
+                request_id, user_id, node_id, method, round((time.monotonic() - started) * 1000), focus,
+            )
+            return result
+        except Exception:
+            log.exception(
+                "RPC complete request_id=%s user_id=%s node_id=%s method=%s ok=false duration_ms=%d focus_candidate=%s",
+                request_id, user_id, node_id, method, round((time.monotonic() - started) * 1000), focus,
+            )
+            raise
         finally:
             pending.pop(request_id, None)
             payloads.pop(request_id, None)
