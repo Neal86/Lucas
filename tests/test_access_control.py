@@ -4,67 +4,45 @@ from gpt_windows_connector.access_control import LocalAccessStore, clamp_roots, 
 
 
 def test_roots_are_clamped_to_node_allowed_roots(tmp_path):
-    root = tmp_path / "allowed"
-    child = root / "project"
-    outside = tmp_path / "outside"
-    child.mkdir(parents=True)
-    outside.mkdir()
+    root = tmp_path / "allowed"; child = root / "project"; outside = tmp_path / "outside"
+    child.mkdir(parents=True); outside.mkdir()
     assert clamp_roots([str(root), str(child), str(outside)], [str(root)]) == [str(root.resolve()), str(child.resolve())]
 
 
 def test_persistent_user_access_round_trip(tmp_path):
-    root = tmp_path / "allowed"
-    root.mkdir()
-    store = LocalAccessStore(tmp_path / "node-access.json")
+    root = tmp_path / "allowed"; root.mkdir(); store = LocalAccessStore(tmp_path / "node-access.json")
     actor = {"user_id": "user-123", "email": "user@example.com", "name": "User"}
-    security = preset_security("auto_approve")
-    saved = store.upsert(actor, "auto_approve", [str(root)], security=security)
-    assert saved["user_id"] == "user-123"
-    assert saved["preset"] == "auto_approve"
-    effective = store.effective("user-123", [str(root)])
-    assert effective is not None
-    assert effective["preset"] == "auto_approve"
-    assert effective["security"]["approval_policy"]["git_push"] == "always_ask"
+    security = preset_security("auto_approve"); saved = store.upsert(actor, "auto_approve", [str(root)], security=security)
+    assert saved["user_id"] == "user-123" and saved["preset"] == "auto_approve"
+    effective = store.effective("user-123", [str(root)]); assert effective is not None
+    assert effective["preset"] == "auto_approve" and effective["security"]["approval_policy"]["git_push"] == "always_ask"
     assert effective["allowed_roots"] == [str(root.resolve())]
-    assert store.remove("user-123") is True
-    assert store.effective("user-123", [str(root)]) is None
+    assert store.remove("user-123") is True and store.effective("user-123", [str(root)]) is None
 
 
-def test_full_access_preset_allows_policy_categories():
-    security = preset_security("full_access")
-    assert all(value == "allow" for value in security["approval_policy"].values())
-    assert security["network_external"] == "allow"
-    assert security["network_lan"] == "allow"
+def test_full_access_keeps_foreground_and_dangerous_actions_guarded():
+    security = preset_security("full_access"); policy = security["approval_policy"]
+    assert security["network_external"] == "allow" and security["network_lan"] == "allow"
+    assert policy["background_control"] == "allow"
+    for key in ("desktop_control", "high_risk", "software_install", "git_push"):
+        assert policy[key] == "always_ask"
 
 
 def test_legacy_admin_access_migrates_to_full_access(tmp_path):
-    root = tmp_path / "allowed"
-    root.mkdir()
-    path = tmp_path / "node-access.json"
+    root = tmp_path / "allowed"; root.mkdir(); path = tmp_path / "node-access.json"
     path.write_text('{"version":1,"users":{"legacy":{"permission_level":"admin","allowed_roots":["' + str(root).replace('\\','\\\\') + '"],"enabled":true}}}', encoding="utf-8")
     effective = LocalAccessStore(path).effective("legacy", [str(root)])
-    assert effective is not None
-    assert effective["preset"] == "full_access"
-    assert "permission_level" not in effective
+    assert effective is not None and effective["preset"] == "full_access" and "permission_level" not in effective
 
 
 def test_disabled_user_is_denied(tmp_path):
-    root = tmp_path / "allowed"
-    root.mkdir()
-    store = LocalAccessStore(tmp_path / "node-access.json")
+    root = tmp_path / "allowed"; root.mkdir(); store = LocalAccessStore(tmp_path / "node-access.json")
     store.upsert({"user_id": "disabled"}, "request_approval", [str(root)], enabled=False)
     assert store.effective("disabled", [str(root)]) is None
 
 
 def test_prune_root_permanently_removes_user_grants(tmp_path):
-    store = LocalAccessStore(tmp_path / "node-access.json")
-    root = tmp_path / "root"
-    nested = root / "project"
-    other = tmp_path / "other"
-    nested.mkdir(parents=True)
-    other.mkdir()
-    store.upsert({"user_id": "u1"}, "full_access", [str(nested), str(other)])
+    store = LocalAccessStore(tmp_path / "node-access.json"); root = tmp_path / "root"; nested = root / "project"; other = tmp_path / "other"
+    nested.mkdir(parents=True); other.mkdir(); store.upsert({"user_id": "u1"}, "full_access", [str(nested), str(other)])
     assert store.prune_root(str(root)) == 1
-    record = store.get("u1")
-    assert record is not None
-    assert record["allowed_roots"] == [str(other)]
+    record = store.get("u1"); assert record is not None and record["allowed_roots"] == [str(other)]
