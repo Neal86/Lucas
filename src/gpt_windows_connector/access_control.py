@@ -8,6 +8,10 @@ from typing import Any
 
 
 _DECISION_RANK = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
+_SAFETY_GATES = {
+    "foreground_control", "browser_transfer", "git_push", "software_install",
+    "registry_system", "high_risk", "service_control",
+}
 
 
 def _stricter_decision(a: object, b: object, default: str = "ask") -> str:
@@ -20,6 +24,19 @@ def _stricter_decision(a: object, b: object, default: str = "ask") -> str:
     return left if _DECISION_RANK[left] >= _DECISION_RANK[right] else right
 
 
+def _apply_safety_floor(policy: dict[str, Any]) -> dict[str, Any]:
+    """Safety gates can never be relaxed below an explicit per-operation prompt.
+
+    This also migrates stale saved Full Access policies created by older Lucas
+    versions where dangerous and foreground actions were incorrectly stored as
+    plain allow.
+    """
+    effective = dict(policy)
+    for key in _SAFETY_GATES:
+        effective[key] = _stricter_decision(effective.get(key), "always_ask", "always_ask")
+    return effective
+
+
 def intersect_security(node_security: dict[str, Any] | None, user_security: dict[str, Any] | None) -> dict[str, Any]:
     """Return effective security where a user can only narrow Node-wide permissions."""
     from .security import DEFAULT_SECURITY
@@ -28,10 +45,10 @@ def intersect_security(node_security: dict[str, Any] | None, user_security: dict
     user = {**DEFAULT_SECURITY, **(user_security or {})}
     node_policy = {**DEFAULT_SECURITY["approval_policy"], **dict(node.get("approval_policy") or {})}
     user_policy = {**DEFAULT_SECURITY["approval_policy"], **dict(user.get("approval_policy") or {})}
-    effective_policy = {
+    effective_policy = _apply_safety_floor({
         key: _stricter_decision(node_policy.get(key), user_policy.get(key), DEFAULT_SECURITY["approval_policy"].get(key, "ask"))
         for key in set(node_policy) | set(user_policy)
-    }
+    })
 
     node_domains = [str(v).strip().lower() for v in node.get("allowed_domains") or [] if str(v).strip()]
     user_domains = [str(v).strip().lower() for v in user.get("allowed_domains") or [] if str(v).strip()]
@@ -59,15 +76,8 @@ def preset_security(preset: str) -> dict[str, Any]:
     from .security import DEFAULT_SECURITY
 
     base = {**DEFAULT_SECURITY, "approval_policy": dict(DEFAULT_SECURITY["approval_policy"])}
-    if preset == "auto_approve":
-        base["approval_policy"] = {k: "allow" for k in base["approval_policy"]}
-        for key in ("browser_transfer", "git_push", "software_install", "registry_system", "high_risk", "service_control"):
-            base["approval_policy"][key] = "always_ask"
-        base["network_external"] = "allow"
-        base["network_lan"] = "allow"
-        base["block_silent_network"] = False
-    elif preset == "full_access":
-        base["approval_policy"] = {k: "allow" for k in base["approval_policy"]}
+    if preset in {"auto_approve", "full_access"}:
+        base["approval_policy"] = _apply_safety_floor({k: "allow" for k in base["approval_policy"]})
         base["network_external"] = "allow"
         base["network_lan"] = "allow"
         base["block_silent_network"] = False
@@ -249,6 +259,9 @@ class LocalAccessStore:
             return None
         preset = normalize_preset(record.get("preset") or ("full_access" if record.get("permission_level") == "admin" else "request_approval"))
         security = record.get("security") if isinstance(record.get("security"), dict) else preset_security(preset)
+        # Always clamp stale saved policies through the current safety floor before
+        # they reach the executor.
+        security = {**security, "approval_policy": _apply_safety_floor(dict(security.get("approval_policy") or {}))}
         clean = dict(record)
         clean.pop("permission_level", None)
         return {**clean, "user_id": str(user_id), "preset": preset, "security": dict(security), "allowed_roots": roots}
