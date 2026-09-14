@@ -9,7 +9,10 @@ from typing import Any
 
 _DECISION_RANK = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
 _SAFETY_GATES = {
-    "foreground_control", "browser_transfer", "git_push", "software_install",
+    # desktop_control is the user-visible Focus Control slot. Keep the legacy
+    # foreground_control key as a migration floor for configs written by builds
+    # between the old and new policy layouts.
+    "desktop_control", "foreground_control", "browser_transfer", "git_push", "software_install",
     "registry_system", "high_risk", "service_control",
 }
 
@@ -25,15 +28,13 @@ def _stricter_decision(a: object, b: object, default: str = "ask") -> str:
 
 
 def _apply_safety_floor(policy: dict[str, Any]) -> dict[str, Any]:
-    """Safety gates can never be relaxed below an explicit per-operation prompt.
-
-    This also migrates stale saved Full Access policies created by older Lucas
-    versions where dangerous and foreground actions were incorrectly stored as
-    plain allow.
-    """
+    """Safety gates can never be relaxed below an explicit per-operation prompt."""
     effective = dict(policy)
     for key in _SAFETY_GATES:
         effective[key] = _stricter_decision(effective.get(key), "always_ask", "always_ask")
+    # Background UIA is not a focus-taking action and must stay independent from
+    # the foreground confirmation gate.
+    effective.setdefault("background_control", "allow")
     return effective
 
 
@@ -259,8 +260,6 @@ class LocalAccessStore:
             return None
         preset = normalize_preset(record.get("preset") or ("full_access" if record.get("permission_level") == "admin" else "request_approval"))
         security = record.get("security") if isinstance(record.get("security"), dict) else preset_security(preset)
-        # Always clamp stale saved policies through the current safety floor before
-        # they reach the executor.
         security = {**security, "approval_policy": _apply_safety_floor(dict(security.get("approval_policy") or {}))}
         clean = dict(record)
         clean.pop("permission_level", None)
