@@ -42,6 +42,18 @@ def _count(db: sqlite3.Connection,sql: str,params: tuple[Any,...]) -> int:
         if "no such table" not in str(exc).lower(): raise
         return 0
 
+def _operations_used(db: sqlite3.Connection,user_id: str,pstart: float,pend: float) -> int:
+    """Count billable operations while remaining compatible with pre-operation_count databases."""
+    try:
+        cols={str(r[1]) for r in db.execute("PRAGMA table_info(task_steps)").fetchall()}
+    except sqlite3.OperationalError:
+        return 0
+    if not cols:
+        return 0
+    if "operation_count" in cols:
+        return _count(db,"SELECT COALESCE(SUM(operation_count),0) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
+    return _count(db,"SELECT COUNT(*) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
+
 def _ensure_entitlement_override_schema(db: sqlite3.Connection) -> None:
     db.execute("""CREATE TABLE IF NOT EXISTS entitlement_overrides(
         user_id TEXT PRIMARY KEY, bonus_requests INTEGER NOT NULL DEFAULT 0,
@@ -49,8 +61,7 @@ def _ensure_entitlement_override_schema(db: sqlite3.Connection) -> None:
         expires_at REAL, updated_at REAL NOT NULL DEFAULT 0
     )""")
     cols={str(r[1]) for r in db.execute("PRAGMA table_info(entitlement_overrides)").fetchall()}
-    if "expires_at" not in cols:
-        db.execute("ALTER TABLE entitlement_overrides ADD COLUMN expires_at REAL")
+    if "expires_at" not in cols: db.execute("ALTER TABLE entitlement_overrides ADD COLUMN expires_at REAL")
 
 def _entitlement_override(db: sqlite3.Connection,user_id: str,now: float|None=None) -> tuple[int,int,int,float|None,bool]:
     _ensure_entitlement_override_schema(db)
@@ -62,90 +73,64 @@ def _entitlement_override(db: sqlite3.Connection,user_id: str,now: float|None=No
     return max(0,int(row[0] or 0)),max(0,int(row[1] or 0)),max(0,int(row[2] or 0)),expires,False
 
 def _is_admin(db: sqlite3.Connection,user_id: str) -> bool:
-    try:
-        row=db.execute("SELECT role FROM users WHERE id=?",(user_id,)).fetchone()
-    except sqlite3.OperationalError:
-        return False
+    try: row=db.execute("SELECT role FROM users WHERE id=?",(user_id,)).fetchone()
+    except sqlite3.OperationalError: return False
     return bool(row and str(row[0]) in {"admin","super_admin"})
 
 def _ensure_active_schema(db: sqlite3.Connection) -> None:
-    db.execute("""CREATE TABLE IF NOT EXISTS user_active_nodes(
-        user_id TEXT NOT NULL,node_id TEXT NOT NULL,activated_at REAL NOT NULL,manual INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY(user_id,node_id)
-    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS user_active_nodes(user_id TEXT NOT NULL,node_id TEXT NOT NULL,activated_at REAL NOT NULL,manual INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(user_id,node_id))""")
 
 def _plan_state(db: sqlite3.Connection,user_id: str,now: float) -> tuple[str,str,int,int,float,float,bool,dict[str,Any]]:
     row=db.execute("SELECT * FROM subscriptions WHERE user_id=?",(user_id,)).fetchone()
-    status=str(row["status"] if row and "status" in row.keys() else "inactive")
-    raw=str(row["plan"] if row and "plan" in row.keys() else "free")
-    plan=raw if raw in PLANS and status in ACTIVE_STATUSES else "free"
-    expansion=int((row["expansion_quantity"] if row and "expansion_quantity" in row.keys() else 0) or 0) if plan=="pro_plus" else 0
-    bonus=int((row["bonus_requests"] if row and "bonus_requests" in row.keys() else 0) or 0)
-    pstart=float((row["current_period_start"] if row and "current_period_start" in row.keys() else 0) or 0); pend=float((row["current_period_end"] if row and "current_period_end" in row.keys() else 0) or 0)
+    status=str(row["status"] if row and "status" in row.keys() else "inactive"); raw=str(row["plan"] if row and "plan" in row.keys() else "free")
+    plan=raw if raw in PLANS and status in ACTIVE_STATUSES else "free"; expansion=int((row["expansion_quantity"] if row and "expansion_quantity" in row.keys() else 0) or 0) if plan=="pro_plus" else 0
+    bonus=int((row["bonus_requests"] if row and "bonus_requests" in row.keys() else 0) or 0); pstart=float((row["current_period_start"] if row and "current_period_start" in row.keys() else 0) or 0); pend=float((row["current_period_end"] if row and "current_period_end" in row.keys() else 0) or 0)
     if plan=="free" or pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
     cancel=bool((row["cancel_at_period_end"] if row and "cancel_at_period_end" in row.keys() else 0) or 0)
     return plan,status,expansion,bonus,pstart,pend,cancel,PLANS[plan]
 
 def _bound_ids(db: sqlite3.Connection,user_id: str) -> list[str]:
-    try:
-        rows=db.execute("SELECT node_id FROM user_node_bindings WHERE user_id=? ORDER BY approved_at DESC,node_id ASC",(user_id,)).fetchall()
+    try: rows=db.execute("SELECT node_id FROM user_node_bindings WHERE user_id=? ORDER BY approved_at DESC,node_id ASC",(user_id,)).fetchall()
     except sqlite3.OperationalError as exc:
         if "no such table" in str(exc).lower(): return []
         raise
     return [str(r[0]) for r in rows]
 
 def _sync_active(db: sqlite3.Connection,user_id: str,limit: int,preferred_ids: Iterable[str] | None=None) -> list[str]:
-    _ensure_active_schema(db)
-    bound=_bound_ids(db,user_id); bound_set=set(bound)
+    _ensure_active_schema(db); bound=_bound_ids(db,user_id); bound_set=set(bound)
     db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id NOT IN (SELECT node_id FROM user_node_bindings WHERE user_id=?)",(user_id,user_id)) if bound else db.execute("DELETE FROM user_active_nodes WHERE user_id=?",(user_id,))
-    if limit<=0 or not bound:
-        db.execute("DELETE FROM user_active_nodes WHERE user_id=?",(user_id,)); return []
-    rows=db.execute("SELECT node_id,activated_at,manual FROM user_active_nodes WHERE user_id=? ORDER BY manual DESC,activated_at DESC",(user_id,)).fetchall()
-    manual=[str(r["node_id"]) for r in rows if int(r["manual"] or 0) and str(r["node_id"]) in bound_set][:limit]
-    existing_auto=[str(r["node_id"]) for r in rows if not int(r["manual"] or 0) and str(r["node_id"]) in bound_set]
+    if limit<=0 or not bound: db.execute("DELETE FROM user_active_nodes WHERE user_id=?",(user_id,)); return []
+    rows=db.execute("SELECT node_id,activated_at,manual FROM user_active_nodes WHERE user_id=? ORDER BY manual DESC,activated_at DESC",(user_id,)).fetchall(); manual=[str(r["node_id"]) for r in rows if int(r["manual"] or 0) and str(r["node_id"]) in bound_set][:limit]; existing_auto=[str(r["node_id"]) for r in rows if not int(r["manual"] or 0) and str(r["node_id"]) in bound_set]
     preferred=[]
     for v in preferred_ids or []:
         v=str(v)
         if v in bound_set and v not in preferred: preferred.append(v)
-    candidates=(preferred + existing_auto + bound) if preferred_ids is not None else (existing_auto + bound)
-    desired=list(manual)
+    candidates=(preferred+existing_auto+bound) if preferred_ids is not None else (existing_auto+bound); desired=list(manual)
     for node_id in candidates:
         if len(desired)>=limit: break
-        if node_id not in desired:
-            desired.append(node_id)
+        if node_id not in desired: desired.append(node_id)
     now=time.time()
-    for node_id in list({str(r["node_id"]) for r in rows}-set(desired)):
-        db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id=?",(user_id,node_id))
+    for node_id in list({str(r["node_id"]) for r in rows}-set(desired)): db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id=?",(user_id,node_id))
     for node_id in desired:
-        if node_id in manual: continue
-        db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,0) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=0",(user_id,node_id,now))
+        if node_id not in manual: db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,0) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=0",(user_id,node_id,now))
     return desired
 
 def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
     now=float(now or time.time())
     with _connect(db_path) as db:
-        plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
-        admin_grant=_is_admin(db,user_id)
+        plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now); admin_grant=_is_admin(db,user_id)
         if admin_grant:
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
             if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
-        extra_requests,extra_nodes,extra_ai,override_expires_at,override_expired=_entitlement_override(db,user_id,now)
-        req=_count(db,"SELECT COALESCE(SUM(operation_count),0) FROM task_steps WHERE owner_id=? AND started_at>=? AND started_at<?",(user_id,pstart,pend))
-        ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,))
-        node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
-        connected=len(_bound_ids(db,user_id))
-        active=len(_sync_active(db,user_id,node_limit))
+        extra_requests,extra_nodes,extra_ai,_,_=_entitlement_override(db,user_id,now); req=_operations_used(db,user_id,pstart,pend); ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,)); node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes; connected=len(_bound_ids(db,user_id)); active=len(_sync_active(db,user_id,node_limit))
     return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus+extra_requests,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"])+extra_ai,req,active,ai,pstart,pend,pend if plan!="free" and not admin_grant else None,cancel,bonus,connected,extra_nodes,extra_ai,admin_grant)
 
 def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1) -> Entitlements:
-    e=snapshot(db_path,user_id)
-    requested=max(1,int(requested_operations or 1))
-    if e.requests_used+requested>e.request_limit:
-        raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
+    e=snapshot(db_path,user_id); requested=max(1,int(requested_operations or 1))
+    if e.requests_used+requested>e.request_limit: raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
     return e
 
-def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements:
-    return snapshot(db_path,user_id)
+def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements: return snapshot(db_path,user_id)
 
 def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlements:
     e=snapshot(db_path,user_id)
@@ -155,39 +140,27 @@ def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlement
 
 def _effective_node_limit(db: sqlite3.Connection,user_id: str,now: float) -> int:
     plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
-    if _is_admin(db,user_id):
-        plan="pro_plus"; expansion=0; base=PLANS["pro_plus"]
-    _,extra_nodes,_,_,_=_entitlement_override(db,user_id,now)
-    return int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
+    if _is_admin(db,user_id): plan="pro_plus"; expansion=0; base=PLANS["pro_plus"]
+    _,extra_nodes,_,_,_=_entitlement_override(db,user_id,now); return int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
 
 def active_node_ids(db_path: Path,user_id: str,preferred_node_ids: Iterable[str] | None=None) -> list[str]:
-    now=time.time()
-    with _connect(db_path) as db:
-        limit=_effective_node_limit(db,user_id,now)
-        return _sync_active(db,user_id,limit,preferred_node_ids)
+    with _connect(db_path) as db: return _sync_active(db,user_id,_effective_node_limit(db,user_id,time.time()),preferred_node_ids)
 
 def set_active_node(db_path: Path,user_id: str,node_id: str) -> list[str]:
     node_id=str(node_id or "").strip()
     if not node_id: raise ValueError("Computer ID is required")
     now=time.time()
     with _connect(db_path) as db:
-        limit=_effective_node_limit(db,user_id,now)
-        bound=set(_bound_ids(db,user_id))
+        limit=_effective_node_limit(db,user_id,now); bound=set(_bound_ids(db,user_id))
         if node_id not in bound: raise ValueError("Computer is not connected to this account")
         current=_sync_active(db,user_id,limit)
-        if node_id in current:
-            db.execute("UPDATE user_active_nodes SET manual=1,activated_at=? WHERE user_id=? AND node_id=?",(now,user_id,node_id)); return active_node_ids(db_path,user_id)
+        if node_id in current: db.execute("UPDATE user_active_nodes SET manual=1,activated_at=? WHERE user_id=? AND node_id=?",(now,user_id,node_id)); return active_node_ids(db_path,user_id)
         if len(current)>=limit and current:
-            rows=db.execute("SELECT node_id,manual,activated_at FROM user_active_nodes WHERE user_id=? ORDER BY manual ASC,activated_at ASC",(user_id,)).fetchall()
-            victim=next((str(r["node_id"]) for r in rows if str(r["node_id"])!=node_id),current[-1])
-            db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id=?",(user_id,victim))
-        db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,1) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=1",(user_id,node_id,now))
-        return _sync_active(db,user_id,limit)
+            rows=db.execute("SELECT node_id,manual,activated_at FROM user_active_nodes WHERE user_id=? ORDER BY manual ASC,activated_at ASC",(user_id,)).fetchall(); victim=next((str(r["node_id"]) for r in rows if str(r["node_id"])!=node_id),current[-1]); db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id=?",(user_id,victim))
+        db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,1) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=1",(user_id,node_id,now)); return _sync_active(db,user_id,limit)
 
 def ensure_node_active(db_path: Path,user_id: str,node_id: str) -> Entitlements:
     e=snapshot(db_path,user_id)
-    with _connect(db_path) as db:
-        bound=db.execute("SELECT 1 FROM user_node_bindings WHERE user_id=? AND node_id=?",(user_id,node_id)).fetchone()
-    if bound and node_id not in active_node_ids(db_path,user_id):
-        raise PermissionError(f"This computer is inactive for your plan ({e.node_limit} active computer(s)). Activate it in Computers or upgrade your plan.")
+    with _connect(db_path) as db: bound=db.execute("SELECT 1 FROM user_node_bindings WHERE user_id=? AND node_id=?",(user_id,node_id)).fetchone()
+    if bound and node_id not in active_node_ids(db_path,user_id): raise PermissionError(f"This computer is inactive for your plan ({e.node_limit} active computer(s)). Activate it in Computers or upgrade your plan.")
     return e
