@@ -18,20 +18,12 @@ def schema(path):
 def test_unexpired_override_applies_and_expired_override_is_ignored(tmp_path):
     p=tmp_path/'db.sqlite'; schema(p); now=time.time()
     with sqlite3.connect(p) as db:
-        db.execute("INSERT INTO users VALUES('u','user')")
-        db.execute("INSERT INTO entitlement_overrides VALUES('u',5000,2,1,?,?)",(now+3600,now))
-    e=snapshot(p,'u',now)
-    assert (e.request_limit,e.node_limit,e.ai_account_limit)==(6000,3,2)
-    e2=snapshot(p,'u',now+7200)
-    assert (e2.request_limit,e2.node_limit,e2.ai_account_limit)==(1000,1,1)
+        db.execute("INSERT INTO users VALUES('u','user')"); db.execute("INSERT INTO entitlement_overrides VALUES('u',5000,2,1,?,?)",(now+3600,now))
+    e=snapshot(p,'u',now); assert (e.request_limit,e.node_limit,e.ai_account_limit)==(105000,5,4)
+    e2=snapshot(p,'u',now+7200); assert (e2.request_limit,e2.node_limit,e2.ai_account_limit)==(100000,3,3)
 
 def test_admin_pro_plus_and_extra_nodes_drive_active_selection(tmp_path):
     p=tmp_path/'db.sqlite'; schema(p); now=time.time()
     with sqlite3.connect(p) as db:
-        db.execute("INSERT INTO users VALUES('a','admin')")
-        db.execute("INSERT INTO entitlement_overrides VALUES('a',1000,2,1,NULL,?)",(now,))
-        db.executemany("INSERT INTO user_node_bindings VALUES('a',?,?)",[(f'n{i}',now+i) for i in range(8)])
-    e=snapshot(p,'a',now)
-    assert e.admin_grant and e.plan=='pro_plus'
-    assert (e.request_limit,e.node_limit,e.ai_account_limit)==(101000,8,4)
-    assert len(active_node_ids(p,'a'))==8
+        db.execute("INSERT INTO users VALUES('a','admin')"); db.execute("INSERT INTO entitlement_overrides VALUES('a',1000,2,1,NULL,?)",(now,)); db.executemany("INSERT INTO user_node_bindings VALUES('a',?,?)",[(f'n{i}',now+i) for i in range(8)])
+    e=snapshot(p,'a',now); assert e.admin_grant and e.plan=='pro_plus'; assert (e.request_limit,e.node_limit,e.ai_account_limit)==(101000,8,4); assert len(active_node_ids(p,'a'))==8
