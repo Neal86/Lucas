@@ -10,7 +10,7 @@ def schema(path):
     with sqlite3.connect(path) as db:
         db.executescript("""
         CREATE TABLE subscriptions(user_id TEXT PRIMARY KEY,plan TEXT,status TEXT,expansion_quantity INTEGER DEFAULT 0,current_period_start REAL,current_period_end REAL,cancel_at_period_end INTEGER DEFAULT 0,bonus_requests INTEGER DEFAULT 0);
-        CREATE TABLE task_steps(id INTEGER PRIMARY KEY,owner_id TEXT,started_at REAL);
+        CREATE TABLE task_steps(id INTEGER PRIMARY KEY,owner_id TEXT,started_at REAL,operation_count INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE user_node_bindings(user_id TEXT,node_id TEXT,approved_at REAL);
         CREATE TABLE oauth_client_users(client_id TEXT,user_id TEXT,authorized_at REAL);
         """)
@@ -36,11 +36,18 @@ def test_expansion_never_applies_to_pro(tmp_path):
     assert e.expansion_quantity==0 and not e.can_buy_expansion
 
 
-def test_requests_are_task_steps_not_http_requests(tmp_path):
+def test_beta_free_limits_match_pricing(tmp_path):
+    p=tmp_path/"db.sqlite"; schema(p)
+    e=snapshot(p,"u")
+    assert e.plan_name == "Lucas Beta"
+    assert (e.request_limit,e.node_limit,e.ai_account_limit)==(100000,3,3)
+
+
+def test_requests_are_task_step_operations_not_http_requests(tmp_path):
     p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
     now=time.time()
     with sqlite3.connect(p) as db:
-        db.executemany("INSERT INTO task_steps(owner_id,started_at) VALUES(?,?)",[("u",now)]*7)
+        db.executemany("INSERT INTO task_steps(owner_id,started_at,operation_count) VALUES(?,?,?)",[("u",now,1)]*3 + [("u",now,2)]*2)
     assert snapshot(p,"u").requests_used==7
 
 
@@ -74,22 +81,24 @@ def test_request_limit_blocks_before_next_operation(tmp_path):
     p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
     now=time.time()
     with sqlite3.connect(p) as db:
-        db.executemany("INSERT INTO task_steps(owner_id,started_at) VALUES(?,?)",[("u",now)]*25000)
+        db.executemany("INSERT INTO task_steps(owner_id,started_at,operation_count) VALUES(?,?,?)",[("u",now,1)]*25000)
     with pytest.raises(PermissionError): ensure_request_capacity(p,"u")
 
 
-def test_free_prefers_online_computer_and_allows_manual_switch(tmp_path):
+def test_beta_free_allows_three_active_computers_and_manual_switch(tmp_path):
     p=tmp_path/"db.sqlite"; schema(p)
     now=time.time()
     with sqlite3.connect(p) as db:
-        db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u","old-offline",now-100),("u","online",now-50),("u","other",now-10)])
-    assert active_node_ids(p,"u",["online"]) == ["online"]
-    assert snapshot(p,"u").nodes_used == 1
-    assert snapshot(p,"u").nodes_connected == 3
-    set_active_node(p,"u","other")
-    assert active_node_ids(p,"u",["online"]) == ["other"]
-    with pytest.raises(PermissionError): ensure_node_active(p,"u","online")
-    ensure_node_active(p,"u","other")
+        db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u","old-offline",now-100),("u","online",now-50),("u","other",now-10),("u","fourth",now)])
+    active=active_node_ids(p,"u",["online"])
+    assert len(active) == 3
+    assert "online" in active
+    assert snapshot(p,"u").nodes_used == 3
+    assert snapshot(p,"u").nodes_connected == 4
+    inactive=next(n for n in ["old-offline","online","other","fourth"] if n not in active)
+    set_active_node(p,"u",inactive)
+    assert inactive in active_node_ids(p,"u",["online"])
+    ensure_node_active(p,"u",inactive)
 
 
 def test_admin_is_effective_pro_plus_and_supports_extra_entitlements(tmp_path):
@@ -104,4 +113,3 @@ def test_admin_is_effective_pro_plus_and_supports_extra_entitlements(tmp_path):
     assert e.request_limit==105000
     assert e.node_limit==8
     assert e.ai_account_limit==7
-
