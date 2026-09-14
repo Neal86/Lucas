@@ -19,10 +19,11 @@ DEFAULT_SECURITY: dict[str, Any] = {
         "service_control": "ask",
         "registry_system": "always_ask",
         "software_install": "always_ask",
-        "desktop_control": "ask",
-        # Foreground/focus-taking input is intentionally independent from ordinary
-        # desktop automation and remains confirmation-gated even for Full Access.
-        "foreground_control": "always_ask",
+        # Existing Settings UI slot now means true foreground/focus control.
+        "desktop_control": "always_ask",
+        # Background UIA is intentionally separate and does not move the user's
+        # mouse, activate a window, or send keys to the foreground application.
+        "background_control": "allow",
         "screenshots": "allow",
         "clipboard": "ask",
         "browser_control": "ask",
@@ -51,9 +52,7 @@ READ_METHODS = {
 FILE_WRITE_METHODS = {"files.write", "files.patch", "files.mkdir", "files.move", "files.copy"}
 FILE_DELETE_METHODS = {"files.delete"}
 PROCESS_CONTROL_METHODS = {"process.start", "process.stop"}
-# Background-friendly UIA methods stay here. They are only promoted to
-# foreground_control when the caller explicitly opts into a real-input fallback.
-DESKTOP_CONTROL_METHODS = {"computer.ui_click", "computer.ui_set_text"}
+BACKGROUND_CONTROL_METHODS = {"computer.ui_click", "computer.ui_set_text"}
 FOREGROUND_CONTROL_METHODS = {
     "computer.launch", "computer.activate", "computer.click", "computer.move", "computer.drag",
     "computer.type", "computer.hotkey", "computer.press", "computer.scroll",
@@ -156,23 +155,21 @@ class LocalSecurityPolicy:
     def _requires_foreground(self, method: str, params: dict[str, Any]) -> bool:
         if method in FOREGROUND_CONTROL_METHODS:
             return True
-        if method in {"computer.ui_click", "computer.ui_set_text"}:
+        if method in BACKGROUND_CONTROL_METHODS:
             return bool(params.get("allow_foreground_fallback", False))
-        # Starting a visible persistent browser can create/activate a top-level
-        # window. Headless launches do not require foreground approval.
         if method == "browser.launch_persistent":
             return not bool(params.get("headless", False))
         return False
 
     def _category(self, method: str, params: dict[str, Any]) -> str:
         if self._requires_foreground(method, params):
-            return "foreground_control"
+            return "desktop_control"
         if method in SCREENSHOT_METHODS:
             return "screenshots"
         if method in CLIPBOARD_METHODS:
             return "clipboard"
-        if method in DESKTOP_CONTROL_METHODS:
-            return "desktop_control"
+        if method in BACKGROUND_CONTROL_METHODS:
+            return "background_control"
         if method in BROWSER_TRANSFER_METHODS:
             return "browser_transfer"
         if method in BROWSER_CONTROL_METHODS:
@@ -227,15 +224,14 @@ class LocalSecurityPolicy:
 
     def _prompt(self, category: str, method: str, summary: str) -> bool:
         rules = str(self.security.get("rules_text") or "").strip()
-        title = "Lucas 前台控制确认" if category == "foreground_control" else "Lucas 安全确认"
+        title = "Lucas 前台控制确认" if category == "desktop_control" else "Lucas 安全确认"
         text = f"Lucas 请求在此电脑执行操作：\n\n{summary}\n\n方法：{method}\n风险类别：{category}"
-        if category == "foreground_control":
+        if category == "desktop_control":
             text += "\n\n此操作可能激活窗口、移动鼠标或向当前前台窗口发送键盘输入。"
         if self.security.get("show_rule_summary", True) and rules:
             text += f"\n\n本地规则：\n{rules[:700]}"
         text += "\n\n是否允许这次操作？"
         try:
-            # MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND
             result = int(ctypes.windll.user32.MessageBoxW(None, text, title, 0x00000004 | 0x00000030 | 0x00040000 | 0x00010000))
             return result == 6
         except Exception:
@@ -274,8 +270,8 @@ class LocalSecurityPolicy:
             "service_control": "启动、停止或修改 Windows 服务",
             "registry_system": "修改注册表或系统配置",
             "software_install": "安装、卸载或升级软件",
-            "desktop_control": "使用后台 UI 自动化控制桌面控件",
-            "foreground_control": "执行可能抢占前台焦点的电脑操作",
+            "background_control": "使用后台 UI 自动化控制桌面控件",
+            "desktop_control": "执行可能抢占前台焦点的电脑操作",
             "screenshots": "读取屏幕截图",
             "clipboard": "读取或写入剪贴板",
             "browser_control": "控制浏览器页面",
