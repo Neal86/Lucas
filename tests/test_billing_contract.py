@@ -4,10 +4,25 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 
 def test_pricing_contract():
-    html=pricing_html()
-    for text in ["Lucas Beta","Free during Beta","100,000 Operations","3 Computers","3 AI accounts","Start Free Beta"]: assert text in html
-    assert ".legacy-pricing{display:none!important}" in html
-    assert 'class="plans legacy-pricing"' in html and 'class="billing-toggle legacy-pricing"' in html and 'class="expansion legacy-pricing"' in html
+    html = pricing_html()
+    for text in [
+        "Free",
+        "1,000 Operations / month",
+        "Pro",
+        "10,000 Operations / month",
+        "Pro+",
+        "30,000 Operations / month",
+        "Expansion Pack",
+        "+30,000 Operations / month",
+        "+6 Computers",
+        "+1 AI account",
+        "Beta Notice: Plans, pricing, and limits may change during Beta.",
+    ]:
+        assert text in html
+    assert "grid-template-columns:repeat(4,1fr)" in html
+    assert 'class="plans"' in html
+    assert 'class="expansion"' not in html
+    assert 'position:sticky;top:0' in html
 
 
 def test_expansion_is_pro_plus_only_in_backend():
@@ -25,7 +40,12 @@ def test_billing_endpoints_and_webhook_exist():
 def test_dashboard_has_billing_entry_points():
     from gpt_windows_connector.web_assets import DASHBOARD_HTML
     text=DASHBOARD_HTML; assert 'data-view=\"billing\"' in text and "Operations" in text
-    fragment=dashboard_billing_html(); assert 'id=\"billing\" class=\"view hidden\"' in fragment and "Current plan" in fragment and ".billing-legacy{display:none!important}" in fragment
+    fragment=dashboard_billing_html()
+    assert 'id="billing" class="view hidden"' in fragment
+    assert "Current plan" in fragment
+    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in fragment
+    assert 'id="billingCardExpansion" class="billing-plan-card"' in fragment
+    assert "Beta Notice: Plans, pricing, and limits may change during Beta." in fragment
     webapp=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8"); assert "dashboard_billing_html() + account_marker" in webapp and "return HTMLResponse(_dashboard_html()" in webapp
 
 
@@ -33,5 +53,5 @@ def test_billable_request_guard_is_before_node_rpc():
     text=Path("src/gpt_windows_connector/gateway.py").read_text(encoding="utf-8"); start=text.index("async def _node_rpc"); end=text.index("registry.rpc",start); prefix=text[start:end]; assert "ensure_request_capacity" in prefix and "ensure_node_active" in prefix
 
 
-def test_annual_billing_backend_contract_remains_available_while_ui_is_hidden():
+def test_annual_billing_backend_contract_remains_available():
     billing=Path("src/gpt_windows_connector/billing.py").read_text(encoding="utf-8"); assert "STRIPE_PRICE_PRO_ANNUAL" in billing and "STRIPE_PRICE_PRO_PLUS_ANNUAL" in billing and "STRIPE_PRICE_EXPANSION_ANNUAL" in billing and "ANNUAL_TOTALS" in billing
