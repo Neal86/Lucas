@@ -19,13 +19,48 @@ LANDING_HTML = '''<section id="landing" class="landing">
     .how-cta{justify-content:center;margin-top:42px}
     .landing-section-cta .hero-secondary,.landing-section-cta .hero-primary,.how-cta .hero-primary{display:inline-flex;align-items:center;gap:8px}
     .security .landing-section-cta{grid-column:1/-1}
+    .mobile-menu{display:none}
     @media(max-width:800px){
-      .landing-nav{padding-left:18px!important;padding-right:18px!important}
-      .hero{padding-top:72px!important}
+      .landing-nav{height:66px!important;padding:0 16px!important;display:grid!important;grid-template-columns:44px 1fr 44px;align-items:center}
+      .landing-nav>.landing-logo{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}
+      .landing-nav>.landing-logo img{width:132px!important;max-width:132px!important;height:auto!important}
+      .landing-nav>.landing-links,.landing-nav>.landing-signin{display:none!important}
+      .mobile-menu{display:block;grid-column:1;position:relative;z-index:3;margin:0;padding:0}
+      .mobile-menu summary{list-style:none;width:42px;height:42px;border:1px solid rgba(255,255,255,.12);border-radius:11px;background:rgba(255,255,255,.035);display:grid;place-items:center;cursor:pointer;color:#eef2ff;font-size:0}
+      .mobile-menu summary::-webkit-details-marker{display:none}
+      .mobile-menu summary:before{content:'☰';font-size:21px;line-height:1}
+      .mobile-menu[open] summary:before{content:'×';font-size:27px;font-weight:300}
+      .mobile-menu-panel{position:fixed;top:66px;left:12px;right:12px;padding:12px;background:rgba(10,13,22,.97);border:1px solid rgba(255,255,255,.11);border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.48);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);display:flex;flex-direction:column;gap:4px}
+      .mobile-menu-panel a,.mobile-menu-panel button{width:100%;min-height:48px;padding:12px 14px;border-radius:10px;text-align:left;color:#dfe4f3;text-decoration:none;font:600 15px/1.2 Inter,ui-sans-serif,system-ui;background:transparent;border:0}
+      .mobile-menu-panel a:active{background:rgba(255,255,255,.07)}
+      .mobile-menu-panel .mobile-signin{margin-top:6px;text-align:center;background:linear-gradient(110deg,#6473f4,#5969e9);color:#fff;cursor:pointer}
+      .hero{padding:58px 20px 62px!important}
+      .hero h1{font-size:clamp(46px,13.2vw,64px)!important;line-height:.94!important;letter-spacing:-.065em!important;margin-bottom:28px!important}
+      .hero-copy{font-size:16px!important;line-height:1.58!important;margin-bottom:28px!important;max-width:560px}
+      .hero-actions{width:min(100%,360px);margin:0 auto;flex-direction:column;gap:10px!important}
+      .hero-actions .hero-primary,.hero-actions .hero-secondary{width:100%;min-height:52px;display:flex;align-items:center;justify-content:center}
+      .hero-pills{margin:28px auto 0!important;display:grid!important;grid-template-columns:1fr!important;gap:12px!important;width:max-content;max-width:100%;text-align:left;font-size:12px!important}
+      .landing-section{padding:88px 20px!important}
+      .landing-section h2,.token-copy h2,.how-section h2,.final-cta h2{font-size:clamp(40px,11vw,54px)!important}
       .landing-section-cta{justify-content:center}
+    }
+    @media(max-width:390px){
+      .landing-nav>.landing-logo img{width:118px!important;max-width:118px!important}
+      .hero{padding-left:16px!important;padding-right:16px!important}
+      .hero h1{font-size:clamp(42px,12.7vw,50px)!important}
     }
   </style>
   <nav class="landing-nav">
+    <details class="mobile-menu">
+      <summary aria-label="Open navigation menu"></summary>
+      <div class="mobile-menu-panel">
+        <a href="#capabilities" onclick="this.closest('details').removeAttribute('open')">Capabilities</a>
+        <a href="#security" onclick="this.closest('details').removeAttribute('open')">Security</a>
+        <a href="#how" onclick="this.closest('details').removeAttribute('open')">How it works</a>
+        <a href="/pricing">Pricing</a>
+        <button class="mobile-signin" onclick="openAuth();this.closest('details').removeAttribute('open')">Sign in →</button>
+      </div>
+    </details>
     <div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>
     <div class="landing-links"><a href="#capabilities">Capabilities</a><a href="#security">Security</a><a href="#how">How it works</a><a href="/pricing">Pricing</a></div>
     <button class="landing-signin" onclick="openAuth()">Sign in <span>→</span></button>
