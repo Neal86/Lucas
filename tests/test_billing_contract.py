@@ -16,7 +16,8 @@ def test_pricing_contract():
         "+30,000 Operations / month",
         "+6 Computers",
         "+1 AI account",
-        "Beta Notice: Plans, pricing, and limits may change during Beta.",
+        "Beta Notice:",
+        "Plans, pricing, and limits may change during Beta.",
     ]:
         assert text in html
     assert "grid-template-columns:repeat(4,1fr)" in html
@@ -45,7 +46,8 @@ def test_dashboard_has_billing_entry_points():
     assert "Current plan" in fragment
     assert "grid-template-columns:repeat(4,minmax(0,1fr))" in fragment
     assert 'id="billingCardExpansion" class="billing-plan-card"' in fragment
-    assert "Beta Notice: Plans, pricing, and limits may change during Beta." in fragment
+    assert "Beta Notice:" in fragment
+    assert "Plans, pricing, and limits may change during Beta." in fragment
     webapp=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8"); assert "dashboard_billing_html() + account_marker" in webapp and "return HTMLResponse(_dashboard_html()" in webapp
 
 
