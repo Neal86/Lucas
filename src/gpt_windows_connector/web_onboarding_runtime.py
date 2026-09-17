@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 ONBOARDING_SCRIPT = r'''
-<script>
 (() => {
   let active = false, stage = 'welcome', pollTimer = null, target = null;
   const userKey = () => 'lucas-onboarding-v2:' + (state?.user?.email || 'guest');
@@ -66,5 +65,4 @@ ONBOARDING_SCRIPT = r'''
   function maybeStartOnboarding(){try{if(state?.user&&!localStorage.getItem(userKey()))openGettingStarted()}catch(_){openGettingStarted()}}
   window.openGettingStarted=openGettingStarted; window.maybeStartOnboarding=maybeStartOnboarding; window.finishOnboarding=finish; window.onboardingSync=sync; window.addEventListener('resize',()=>{if(active)sync()});
 })();
-</script>
 '''
