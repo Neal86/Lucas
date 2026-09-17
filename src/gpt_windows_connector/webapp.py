@@ -21,6 +21,7 @@ from .referral_ui import dashboard_referral_html, referral_html
 from .seo_pages import public_info_page
 from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 from .legal_ui import privacy_html, terms_html, refund_html, contact_html
+from .node_docs_ui import computer_node_docs_html
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -227,6 +228,11 @@ async def sitemap_xml(_: Request):
   </url>
   <url>
     <loc>https://lucasmcp.com/pricing</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://lucasmcp.com/docs/computer-node</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
@@ -513,6 +519,10 @@ async def download_page(_: Request):
     return HTMLResponse(public_info_page("download"))
 
 
+async def computer_node_docs_page(_: Request):
+    return HTMLResponse(computer_node_docs_html())
+
+
 async def privacy_page(_: Request): return HTMLResponse(privacy_html())
 async def terms_page(_: Request): return HTMLResponse(terms_html())
 async def refund_page(_: Request): return HTMLResponse(refund_html())
@@ -629,6 +639,7 @@ routes = [
     Route("/how-it-works", how_it_works_page, methods=["GET"]),
     Route("/security", security_page, methods=["GET"]),
     Route("/download", download_page, methods=["GET"]),
+    Route("/docs/computer-node", computer_node_docs_page, methods=["GET"]),
     Route("/pricing", pricing_page, methods=["GET"]),
     Route("/privacy", privacy_page, methods=["GET"]),
     Route("/terms", terms_page, methods=["GET"]),
