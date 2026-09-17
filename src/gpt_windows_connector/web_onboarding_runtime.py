@@ -4,10 +4,10 @@ ONBOARDING_SCRIPT = r'''
 <script>
 (() => {
   let active = false, stage = 'welcome', pollTimer = null, target = null;
-  const userKey = () => 'lucas-onboarding-v2:' + (window.state?.user?.email || 'guest');
-  const downloadKey = () => 'lucas-node-download-clicked:' + (window.state?.user?.email || 'guest');
-  const authorizedNodes = () => (window.state?.nodes || []).filter(n => n.authorized || n.access_state === 'authorized');
-  const hasAi = () => (window.state?.aiClients || []).length > 0;
+  const userKey = () => 'lucas-onboarding-v2:' + (state?.user?.email || 'guest');
+  const downloadKey = () => 'lucas-node-download-clicked:' + (state?.user?.email || 'guest');
+  const authorizedNodes = () => (state?.nodes || []).filter(n => n.authorized || n.access_state === 'authorized');
+  const hasAi = () => (state?.aiClients || []).length > 0;
   const ensureUi = () => {
     if (document.getElementById('lucasCoach')) return;
     const style = document.createElement('style');
@@ -61,9 +61,9 @@ ONBOARDING_SCRIPT = r'''
   };
   const showPermissionDetail = () => { const el=document.getElementById('managePermissionText'); if(!el)return showPermissions(); renderCoach({el,title:'Access mode',body:'This is the actual permission state reported by your computer. Security settings stay local-only. Open Lucas Settings from the Windows tray to change Background / Foreground focus / Sensitive confirmation, then return here.',progress:'4 / 4',primary:'Done',primaryAction:finish,secondary:'Back',secondaryAction:showPermissions}); };
   function sync(){ if(!active)return; if(stage==='ai'&&hasAi())showComputer(); else if(stage==='computer'&&authorizedNodes().length)showPermissions(); }
-  function finish(){active=false;stopPoll();clearTarget();const c=document.getElementById('lucasCoach');if(c)c.style.display='none';try{if(window.state?.user)localStorage.setItem(userKey(),'1')}catch(_){}}
+  function finish(){active=false;stopPoll();clearTarget();const c=document.getElementById('lucasCoach');if(c)c.style.display='none';try{if(state?.user)localStorage.setItem(userKey(),'1')}catch(_){}}
   function openGettingStarted(){active=true;stopPoll();showWelcome()}
-  function maybeStartOnboarding(){try{if(window.state?.user&&!localStorage.getItem(userKey()))openGettingStarted()}catch(_){openGettingStarted()}}
+  function maybeStartOnboarding(){try{if(state?.user&&!localStorage.getItem(userKey()))openGettingStarted()}catch(_){openGettingStarted()}}
   window.openGettingStarted=openGettingStarted; window.maybeStartOnboarding=maybeStartOnboarding; window.finishOnboarding=finish; window.onboardingSync=sync; window.addEventListener('resize',()=>{if(active)sync()});
 })();
 </script>
