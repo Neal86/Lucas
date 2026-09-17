@@ -18,4 +18,4 @@ def test_onboarding_uses_real_dashboard_controls():
 
 def test_new_onboarding_overrides_slide_tutorial_before_boot():
     assets = source("src/gpt_windows_connector/web_assets.py")
-    assert assets.index("CORE_SCRIPT") < assets.index("ONBOARDING_SCRIPT") < assets.index("ADMIN_SCRIPT")
+    assert assets.index("+ CORE_SCRIPT") < assets.index("+ ONBOARDING_SCRIPT") < assets.index("+ ADMIN_SCRIPT")
