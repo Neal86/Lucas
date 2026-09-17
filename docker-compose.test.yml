@@ -1,0 +1,55 @@
+services:
+  gateway:
+    build: .
+    restart: unless-stopped
+    expose:
+      - "8787"
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.lucas-test-redirect.redirectscheme.scheme=https
+      - traefik.http.routers.lucas-test-http.entrypoints=http
+      - traefik.http.routers.lucas-test-http.rule=Host(`${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io}`)
+      - traefik.http.routers.lucas-test-http.middlewares=lucas-test-redirect
+      - traefik.http.routers.lucas-test-https.entrypoints=https
+      - traefik.http.routers.lucas-test-https.rule=Host(`${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io}`)
+      - traefik.http.routers.lucas-test-https.tls=true
+      - traefik.http.routers.lucas-test-https.tls.certresolver=letsencrypt
+      - traefik.http.routers.lucas-test-https.service=lucas-test-gateway
+      - traefik.http.services.lucas-test-gateway.loadbalancer.server.port=8787
+    environment:
+      GWC_HOST: 0.0.0.0
+      GWC_PORT: 8787
+      GWC_DATA_DIR: /data
+      GWC_PUBLIC_BASE_URL: ${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io}
+      GWC_SUPER_ADMIN_EMAIL: ${GWC_SUPER_ADMIN_EMAIL:-}
+      GWC_JWT_SECRET: ${GWC_JWT_SECRET:-lucas-test-only-change-me}
+      GWC_JWT_TTL_SECONDS: ${GWC_JWT_TTL_SECONDS:-3600}
+      GWC_GOOGLE_CLIENT_ID: ""
+      GWC_GOOGLE_CLIENT_SECRET: ""
+      GWC_GOOGLE_REDIRECT_URI: ""
+      GWC_AUTH_SUCCESS_URL: ${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io}/dashboard
+      GWC_TURNSTILE_SITE_KEY: ""
+      GWC_TURNSTILE_SECRET_KEY: ""
+      GWC_SMTP_HOST: ""
+      GWC_SMTP_USERNAME: ""
+      GWC_SMTP_PASSWORD: ""
+      GWC_SMTP_FROM: ""
+      STRIPE_SECRET_KEY: ""
+      STRIPE_WEBHOOK_SECRET: ""
+      STRIPE_PRICE_PRO: ""
+      STRIPE_PRICE_PRO_PLUS: ""
+      STRIPE_PRICE_PRO_ANNUAL: ""
+      STRIPE_PRICE_PRO_PLUS_ANNUAL: ""
+      STRIPE_PRICE_EXPANSION_ANNUAL: ""
+      STRIPE_PRICE_EXPANSION: ""
+      META_PIXEL_ID: ""
+      META_CAPI_ACCESS_TOKEN: ""
+      META_TEST_EVENT_CODE: ""
+      GA_MEASUREMENT_ID: ""
+      GWC_ALLOWED_HOSTS: ${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io},${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io}:*,localhost:*,127.0.0.1:*
+      GWC_ALLOWED_ORIGINS: ${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io},${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io}:*,http://localhost:*,http://127.0.0.1:*
+    volumes:
+      - lucas_test_data:/data
+
+volumes:
+  lucas_test_data:
