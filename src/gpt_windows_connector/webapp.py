@@ -443,6 +443,9 @@ async def api_ai_connection(request: Request):
             db.execute("DELETE FROM oauth_codes WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM oauth_client_users WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM dashboard_ai_metadata WHERE client_id=? AND user_id=?", (client_id,user.id))
+            # Commit the OAuth disconnect before audit() opens its own SQLite connection.
+            # Otherwise two concurrent writers can deadlock with `database is locked`.
+            db.commit()
             gateway.auth.audit(user.id, "oauth.disconnect", client_id)
             return JSONResponse({"ok": True})
         body = await request.json()
