@@ -53,3 +53,5 @@ services:
 
 volumes:
   lucas_test_data:
+    external: true
+    name: fx88wgh4v9trn3zeknxl7v5k_gwc-data
