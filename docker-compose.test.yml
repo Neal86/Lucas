@@ -48,10 +48,3 @@ services:
       GA_MEASUREMENT_ID: ""
       GWC_ALLOWED_HOSTS: ${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io},${LUCAS_TEST_HOST:-lucas-test.185.211.4.132.sslip.io}:*,localhost:*,127.0.0.1:*
       GWC_ALLOWED_ORIGINS: ${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io},${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io}:*,http://localhost:*,http://127.0.0.1:*
-    volumes:
-      - lucas_test_data:/data
-
-volumes:
-  lucas_test_data:
-    external: true
-    name: fx88wgh4v9trn3zeknxl7v5k_gwc-data
