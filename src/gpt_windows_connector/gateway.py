@@ -573,7 +573,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. For browser tasks, prefer browser_tool action resolve -> observe -> semantic_click/semantic_type. Fall back to selector click/type only when needed, then computer.ui_click/ui_set_text, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -662,10 +662,10 @@ async def git_tool(node_id: str, workspace: str, action: str, params: dict | Non
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "new_page", "navigate", "inspect", "click", "type", "select", "upload", "download", "screenshot", "close"}
+    allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
-    if action not in {"discover", "pages", "inspect", "screenshot"}:
+    if action not in {"discover", "pages", "resolve", "observe", "inspect", "screenshot"}:
         await _desktop_lock(node_id, workspace)
     return await _node_rpc(node_id, workspace, f"browser.{action}", params, task_title=task_title)
 

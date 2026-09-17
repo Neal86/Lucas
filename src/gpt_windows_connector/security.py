@@ -46,7 +46,7 @@ READ_METHODS = {
     "workspace.info", "workspace.browse", "files.list", "files.read", "files.search", "files.stat",
     "git.status", "git.diff", "git.log", "git.branch", "git.show", "process.poll", "process.list",
     "computer.info", "computer.processes", "computer.windows", "computer.screenshot", "computer.clipboard_get",
-    "computer.ui_elements", "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot",
+    "computer.ui_elements", "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot", "browser.resolve", "browser.observe",
 }
 
 FILE_WRITE_METHODS = {"files.write", "files.patch", "files.mkdir", "files.move", "files.copy"}
@@ -59,7 +59,7 @@ FOREGROUND_CONTROL_METHODS = {
 }
 SCREENSHOT_METHODS = {"computer.screenshot", "browser.screenshot"}
 CLIPBOARD_METHODS = {"computer.clipboard_get", "computer.clipboard_set"}
-BROWSER_CONTROL_METHODS = {"browser.connect_cdp", "browser.launch_persistent", "browser.new_page", "browser.navigate", "browser.click", "browser.type", "browser.select", "browser.close"}
+BROWSER_CONTROL_METHODS = {"browser.connect_cdp", "browser.launch_persistent", "browser.new_page", "browser.navigate", "browser.click", "browser.type", "browser.select", "browser.semantic_click", "browser.semantic_type", "browser.close"}
 BROWSER_TRANSFER_METHODS = {"browser.upload", "browser.download"}
 GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.commit", "git.pull"}
 NETWORK_METHODS = {"browser.navigate", "browser.new_page", "git.pull", "git.push"}

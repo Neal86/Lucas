@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from . import browser, computer, files, git_tools, processes, shell
+from . import browser, browser_semantic, computer, files, git_tools, processes, shell
 from .config import resolve_in_workspace, validate_workspace
 from .path_guard import validate_command_paths, validate_launch_target
 from .security import LocalSecurityPolicy
@@ -147,6 +147,10 @@ class Executor:
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
             "browser.launch_persistent": browser.launch_persistent,
+            "browser.resolve": browser_semantic.resolve_target,
+            "browser.observe": browser_semantic.observe,
+            "browser.semantic_click": browser_semantic.semantic_click,
+            "browser.semantic_type": browser_semantic.semantic_type,
             "browser.pages": browser.pages,
             "browser.new_page": browser.new_page,
             "browser.navigate": browser.navigate,
