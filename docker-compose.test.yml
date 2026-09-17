@@ -22,7 +22,7 @@ services:
       GWC_DATA_DIR: /data
       GWC_PUBLIC_BASE_URL: ${LUCAS_TEST_BASE_URL:-https://lucas-test.185.211.4.132.sslip.io}
       GWC_SUPER_ADMIN_EMAIL: ${GWC_SUPER_ADMIN_EMAIL:-}
-      GWC_JWT_SECRET: ${GWC_JWT_SECRET:-lucas-test-only-change-me}
+      GWC_JWT_SECRET: ${GWC_JWT_SECRET:?GWC_JWT_SECRET is required for Lucas-Test}
       GWC_JWT_TTL_SECONDS: ${GWC_JWT_TTL_SECONDS:-3600}
       GWC_GOOGLE_CLIENT_ID: ""
       GWC_GOOGLE_CLIENT_SECRET: ""
