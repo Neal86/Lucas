@@ -31,7 +31,7 @@ def score_page(title: str, url: str, query: str = "", title_contains: str = "", 
     return score
 
 
-async def resolve_target(session_id: str | None = None, query: str = "", title_contains: str = "", url_contains: str = "", prefer_page_index: int | None = None) -> dict:
+async def resolve_target(session_id: str | None = None, query: str = "", title_contains: str = "", url_contains: str = "", browser_name: str | None = None, profile: str | None = None, prefer_page_index: int | None = None) -> dict:
     """Resolve the most likely connected browser tab from semantic hints."""
     session_ids = [session_id] if session_id else list(browser._SESSIONS)
     candidates: list[dict[str, Any]] = []
@@ -40,12 +40,16 @@ async def resolve_target(session_id: str | None = None, query: str = "", title_c
         for index, page in enumerate(session.context.pages):
             title = await page.title()
             score = score_page(title, page.url, query, title_contains, url_contains)
+            if browser_name and _norm(session.browser_name) == _norm(browser_name):
+                score += 30
+            if profile and _norm(session.profile) == _norm(profile):
+                score += 30
             if prefer_page_index is not None and index == prefer_page_index:
                 score += 8
-            candidates.append({"session_id": sid, "page_index": index, "url": page.url, "title": title, "score": score})
+            candidates.append({"session_id": sid, "page_index": index, "url": page.url, "title": title, "browser_name": session.browser_name, "profile": session.profile, "score": score})
     candidates.sort(key=lambda item: item["score"], reverse=True)
     if not candidates:
-        return {"resolved": False, "reason": "No connected browser sessions. Use browser.discover, then connect_cdp or launch_persistent.", "candidates": []}
+        return {"resolved": False, "reason": "No connected browser sessions. Use browser.discover, then connect_cdp or launch_persistent.", "discovered_browsers": browser.discover_browsers(), "candidates": []}
     best = candidates[0]
     return {"resolved": True, **best, "candidates": candidates[:10]}
 
