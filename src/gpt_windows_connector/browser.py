@@ -182,10 +182,31 @@ async def download(session_id: str, selector: str, save_path: str, page_index: i
     return {"path": str(destination), "suggested_filename": item.suggested_filename}
 
 
-async def screenshot(session_id: str, page_index: int = 0, full_page: bool = False) -> dict:
+async def screenshot(session_id: str, page_index: int = 0, full_page: bool = False, timeout_ms: int = 8000) -> dict:
     import base64
-    data = await _page(session_id, page_index).screenshot(full_page=full_page)
-    return {"mime_type": "image/png", "base64": base64.b64encode(data).decode("ascii")}
+    page = _page(session_id, page_index)
+    timeout_ms = max(1000, min(int(timeout_ms or 8000), 10000))
+    try:
+        data = await page.screenshot(full_page=full_page, timeout=timeout_ms)
+        return {"mime_type": "image/png", "base64": base64.b64encode(data).decode("ascii"), "fallback": False}
+    except Exception as exc:
+        # Some pages can stall while Playwright waits for web fonts during screenshot.
+        # Do not let a visual fallback block the whole browser workflow.
+        try:
+            data = await page.locator("body").screenshot(timeout=min(timeout_ms, 4000))
+            return {
+                "mime_type": "image/png",
+                "base64": base64.b64encode(data).decode("ascii"),
+                "fallback": True,
+                "warning": f"Page screenshot fallback used: {type(exc).__name__}",
+            }
+        except Exception:
+            return {
+                "mime_type": None,
+                "base64": None,
+                "fallback": True,
+                "warning": f"Screenshot unavailable: {type(exc).__name__}. Use observe/inspect instead.",
+            }
 
 
 async def close(session_id: str) -> dict:

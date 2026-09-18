@@ -739,7 +739,7 @@ async def _eva_browser_session(node_id: str, workspace: str, task_title: str | N
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    """Preferred tool for ALL normal browser and web-page work. Start with ensure_cdp to get/reuse a session, then resolve/observe and semantic_click/semantic_type. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on ALI is hard-isolated to the dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
+    """Preferred tool for ALL normal browser and web-page work. For reading or listing page state/content, use ensure_cdp -> pages/resolve -> observe/inspect. Do NOT use screenshot as the first step for reading pages; screenshot is visual fallback only. For interaction, use semantic_click/semantic_type before selector actions. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on ALI is hard-isolated to the dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
     allowed = {"discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
