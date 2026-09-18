@@ -716,14 +716,51 @@ async def git_tool(node_id: str, workspace: str, action: str, params: dict | Non
     return await _node_rpc(node_id, workspace, f"git.{action}", params, task_title=task_title)
 
 
+_EVA_BROWSER_SESSIONS: dict[str, str] = {}
+
+
+async def _eva_browser_session(node_id: str, workspace: str, task_title: str | None = None) -> str:
+    cached = _EVA_BROWSER_SESSIONS.get(node_id)
+    if cached:
+        return cached
+    result = await _node_rpc(
+        node_id,
+        workspace,
+        "browser.ensure_cdp",
+        {"endpoint": EVA_BROWSER_ENDPOINT, "browser_name": "chrome", "profile": EVA_BROWSER_PROFILE},
+        task_title=task_title,
+    )
+    if not isinstance(result, dict) or not result.get("session_id"):
+        raise RuntimeError("Could not establish the dedicated Eva browser session")
+    session_id = str(result["session_id"])
+    _EVA_BROWSER_SESSIONS[node_id] = session_id
+    return session_id
+
+
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    """Preferred tool for ALL normal browser and web-page work. Start with ensure_cdp to get/reuse a session, then resolve/observe and semantic_click/semantic_type. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. On the ALI node, ensure_cdp defaults to the Eva Chrome browser at 127.0.0.1:9222. Only fall back to computer_tool for OS/browser-chrome UI that CDP cannot access."""
+    """Preferred tool for ALL normal browser and web-page work. Start with ensure_cdp to get/reuse a session, then resolve/observe and semantic_click/semantic_type. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on ALI is hard-isolated to the dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
     allowed = {"discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
-    if action in {"connect_cdp", "ensure_cdp"}:
+    eva_isolated = _is_eva_on_ali(node_id)
+    if eva_isolated:
+        if action == "launch_persistent":
+            raise PermissionError("Eva on ALI is locked to the dedicated Eva browser and cannot launch another browser profile.")
+        if action == "close":
+            raise PermissionError("Eva on ALI cannot close the dedicated browser session.")
+        if action == "discover":
+            session_id = await _eva_browser_session(node_id, workspace, task_title)
+            return [{"name": "chrome", "profile": EVA_BROWSER_PROFILE, "endpoint": EVA_BROWSER_ENDPOINT, "session_id": session_id, "dedicated": True}]
+        if action in {"connect_cdp", "ensure_cdp"}:
+            payload = {"endpoint": EVA_BROWSER_ENDPOINT, "browser_name": "chrome", "profile": EVA_BROWSER_PROFILE}
+            result = await _node_rpc(node_id, workspace, "browser.ensure_cdp", payload, task_title=task_title)
+            if isinstance(result, dict) and result.get("session_id"):
+                _EVA_BROWSER_SESSIONS[node_id] = str(result["session_id"])
+            return result
+        payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title)
+    elif action in {"connect_cdp", "ensure_cdp"}:
         node = registry.nodes.get(node_id)
         if node and str(node.name or "").strip().lower() == "ali":
             payload.setdefault("endpoint", "http://127.0.0.1:9222")
