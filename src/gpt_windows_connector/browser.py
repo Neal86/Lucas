@@ -59,14 +59,41 @@ def discover_browsers() -> list[dict]:
 
 
 async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
-    async with _LOCK:
-        pw = await async_playwright().start()
-        browser = await pw.chromium.connect_over_cdp(endpoint)
+    # Do not hold the global session lock while starting Playwright or opening CDP.
+    # A stalled browser must not block every other browser request on the Node.
+    pw = None
+    browser = None
+    try:
+        pw = await asyncio.wait_for(async_playwright().start(), timeout=8.0)
+        browser = await asyncio.wait_for(
+            pw.chromium.connect_over_cdp(endpoint, timeout=7000),
+            timeout=10.0,
+        )
         contexts = browser.contexts
-        context = contexts[0] if contexts else await browser.new_context()
+        context = contexts[0] if contexts else await asyncio.wait_for(browser.new_context(), timeout=5.0)
         session_id = uuid.uuid4().hex
-        _SESSIONS[session_id] = BrowserSession(context=context, browser=browser, playwright=pw, browser_name=browser_name, profile=profile, endpoint=endpoint)
+        async with _LOCK:
+            _SESSIONS[session_id] = BrowserSession(
+                context=context,
+                browser=browser,
+                playwright=pw,
+                browser_name=browser_name,
+                profile=profile,
+                endpoint=endpoint,
+            )
         return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint, "browser_name": browser_name, "profile": profile, "reused": False}
+    except Exception:
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        if pw is not None:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+        raise
 
 
 async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
