@@ -143,6 +143,36 @@ def _user():
     return current_user(required=True)
 
 
+EVA_ALI_CLIENT_ID = os.getenv("LUCAS_EVA_CLIENT_ID", "lucas_RadfVO6VaiwUY5bEzzq6piO9NApZRJLb").strip()
+EVA_ALI_NODE_ID = os.getenv("LUCAS_EVA_NODE_ID", "ali-bc0358dd0a5d").strip()
+EVA_BROWSER_ENDPOINT = os.getenv("LUCAS_EVA_BROWSER_ENDPOINT", "http://127.0.0.1:9222").strip()
+EVA_BROWSER_PROFILE = os.getenv("LUCAS_EVA_BROWSER_PROFILE", "eva").strip()
+
+
+def _is_eva_on_ali(node_id: str) -> bool:
+    source = current_request_source()
+    return bool(EVA_ALI_CLIENT_ID and EVA_ALI_NODE_ID and str(node_id or "") == EVA_ALI_NODE_ID and str(source.get("client_id") or "") == EVA_ALI_CLIENT_ID)
+
+
+def _enforce_eva_browser_isolation(node_id: str, method: str, payload: dict) -> None:
+    """Eva on ALI may access browser/desktop content only through the dedicated Eva CDP browser."""
+    if not _is_eva_on_ali(node_id):
+        return
+    if method.startswith("browser."):
+        if method in {"browser.connect_cdp", "browser.ensure_cdp"}:
+            payload["endpoint"] = EVA_BROWSER_ENDPOINT
+            payload["browser_name"] = "chrome"
+            payload["profile"] = EVA_BROWSER_PROFILE
+        return
+    if method.startswith("computer."):
+        raise PermissionError("Eva on ALI is browser-isolated. Use browser_tool with the dedicated Eva browser; computer_tool is blocked on this node.")
+    if method == "shell.run":
+        command = str(payload.get("command") or "").lower()
+        browser_markers = ("chrome", "msedge", "9222", "browser", "win32_process", "get-ciminstance", "get-process", "get-nettcpconnection", "uiautomation", "windowtitle")
+        if any(marker in command for marker in browser_markers):
+            raise PermissionError("Eva on ALI may not inspect or control browsers through shell commands. Use browser_tool; it is locked to the dedicated Eva browser.")
+
+
 def _actor(user, *, task_title: str | None = None, audit_request_id: str | None = None) -> dict:
     source = current_request_source()
     return {
@@ -381,6 +411,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     operation_count = len(sub_operations) if sub_operations else _operation_count(method, payload)
     shell_type = str(payload.get("shell_type") or "powershell").lower().strip()
     trace_shell = method == "shell.run" and shell_type in {"powershell", "pwsh"} and "Set-PSDebug" not in original_command
+    _enforce_eva_browser_isolation(node_id, method, payload)
     if trace_shell:
         payload["command"] = _instrument_powershell(original_command)
     # A shell may execute a dynamic number of actions. Require at least one unit up front;
