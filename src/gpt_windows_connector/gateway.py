@@ -147,6 +147,8 @@ EVA_ALI_CLIENT_ID = os.getenv("LUCAS_EVA_CLIENT_ID", "lucas_RadfVO6VaiwUY5bEzzq6
 EVA_ALI_NODE_ID = os.getenv("LUCAS_EVA_NODE_ID", "ali-bc0358dd0a5d").strip()
 EVA_BROWSER_ENDPOINT = os.getenv("LUCAS_EVA_BROWSER_ENDPOINT", "http://127.0.0.1:9222").strip()
 EVA_BROWSER_PROFILE = os.getenv("LUCAS_EVA_BROWSER_PROFILE", "eva").strip()
+EVA_BROWSER_USER_DATA_DIR = os.getenv("LUCAS_EVA_BROWSER_USER_DATA_DIR", r"C:\\Users\\mrwan\\.lucas\\browser-profiles\\eva").strip()
+EVA_BROWSER_EXECUTABLE = os.getenv("LUCAS_EVA_BROWSER_EXECUTABLE", r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe").strip()
 
 
 def _is_eva_on_ali(node_id: str) -> bool:
@@ -720,14 +722,17 @@ _EVA_BROWSER_SESSIONS: dict[str, str] = {}
 
 
 async def _eva_browser_session(node_id: str, workspace: str, task_title: str | None = None) -> str:
-    cached = _EVA_BROWSER_SESSIONS.get(node_id)
-    if cached:
-        return cached
     result = await _node_rpc(
         node_id,
         workspace,
-        "browser.ensure_cdp",
-        {"endpoint": EVA_BROWSER_ENDPOINT, "browser_name": "chrome", "profile": EVA_BROWSER_PROFILE},
+        "browser.ensure_profile",
+        {
+            "user_data_dir": EVA_BROWSER_USER_DATA_DIR,
+            "executable_path": EVA_BROWSER_EXECUTABLE,
+            "headless": False,
+            "browser_name": "chrome",
+            "profile": EVA_BROWSER_PROFILE,
+        },
         task_title=task_title,
     )
     if not isinstance(result, dict) or not result.get("session_id"):
@@ -740,7 +745,7 @@ async def _eva_browser_session(node_id: str, workspace: str, task_title: str | N
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
     """Preferred tool for ALL normal browser and web-page work. For reading or listing page state/content, use ensure_cdp -> pages/resolve -> observe/inspect. Do NOT use screenshot as the first step for reading pages; screenshot is visual fallback only. For interaction, use semantic_click/semantic_type before selector actions. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on ALI is hard-isolated to the dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
-    allowed = {"discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
+    allowed = {"discover", "connect_cdp", "ensure_cdp", "ensure_profile", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
@@ -753,11 +758,24 @@ async def browser_tool(node_id: str, workspace: str, action: str, params: dict |
         if action == "discover":
             session_id = await _eva_browser_session(node_id, workspace, task_title)
             return [{"name": "chrome", "profile": EVA_BROWSER_PROFILE, "endpoint": EVA_BROWSER_ENDPOINT, "session_id": session_id, "dedicated": True}]
-        if action in {"connect_cdp", "ensure_cdp"}:
-            payload = {"endpoint": EVA_BROWSER_ENDPOINT, "browser_name": "chrome", "profile": EVA_BROWSER_PROFILE}
-            result = await _node_rpc(node_id, workspace, "browser.ensure_cdp", payload, task_title=task_title)
+        if action in {"connect_cdp", "ensure_cdp", "ensure_profile"}:
+            result = await _node_rpc(
+                node_id,
+                workspace,
+                "browser.ensure_profile",
+                {
+                    "user_data_dir": EVA_BROWSER_USER_DATA_DIR,
+                    "executable_path": EVA_BROWSER_EXECUTABLE,
+                    "headless": False,
+                    "browser_name": "chrome",
+                    "profile": EVA_BROWSER_PROFILE,
+                },
+                task_title=task_title,
+            )
             if isinstance(result, dict) and result.get("session_id"):
                 _EVA_BROWSER_SESSIONS[node_id] = str(result["session_id"])
+                result["compat_action"] = action
+                result["dedicated"] = True
             return result
         payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title)
     elif action in {"connect_cdp", "ensure_cdp"}:

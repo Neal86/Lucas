@@ -236,7 +236,57 @@ async def launch_persistent(user_data_dir: str, executable_path: str | None = No
         )
         session_id = uuid.uuid4().hex
         _SESSIONS[session_id] = BrowserSession(context=context, playwright=pw, browser_name=browser_name, profile=profile, user_data_dir=resolved_data_dir)
-        return {"session_id": session_id, "pages": len(context.pages), "browser_name": browser_name, "profile": profile}
+        return {"session_id": session_id, "pages": len(context.pages), "browser_name": browser_name, "profile": profile, "user_data_dir": resolved_data_dir, "reused": False}
+
+
+async def ensure_profile(user_data_dir: str, executable_path: str | None = None, headless: bool = False, profile: str | None = None, browser_name: str | None = None) -> dict:
+    """Reuse or launch a persistent browser profile managed by Lucas."""
+    resolved_data_dir = str(Path(user_data_dir).expanduser().resolve())
+    async with _LOCK:
+        for session_id, session in list(_SESSIONS.items()):
+            if str(session.user_data_dir or "").lower() != resolved_data_dir.lower():
+                continue
+            if browser_name and session.browser_name and session.browser_name.lower() != browser_name.lower():
+                continue
+            if profile and session.profile and session.profile.lower() != profile.lower():
+                continue
+            try:
+                pages = len(session.context.pages)
+            except Exception:
+                continue
+            return {
+                "session_id": session_id,
+                "pages": pages,
+                "browser_name": session.browser_name or browser_name,
+                "profile": session.profile or profile,
+                "user_data_dir": resolved_data_dir,
+                "reused": True,
+            }
+    try:
+        return await launch_persistent(
+            user_data_dir=resolved_data_dir,
+            executable_path=executable_path,
+            headless=headless,
+            profile=profile,
+            browser_name=browser_name,
+        )
+    except Exception as first_error:
+        marker = resolved_data_dir.lower()
+        for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                cmd = " ".join(proc.info.get("cmdline") or []).lower()
+                if marker in cmd:
+                    proc.terminate()
+            except Exception:
+                pass
+        await asyncio.sleep(1.0)
+        return await launch_persistent(
+            user_data_dir=resolved_data_dir,
+            executable_path=executable_path,
+            headless=headless,
+            profile=profile,
+            browser_name=browser_name,
+        )
 
 
 def _session(session_id: str) -> BrowserSession:
