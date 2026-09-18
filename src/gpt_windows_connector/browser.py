@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import subprocess
+import time
+import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+import psutil
 
 
 @dataclass
@@ -58,9 +63,88 @@ def discover_browsers() -> list[dict]:
     return out
 
 
-async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
-    # Do not hold the global session lock while starting Playwright or opening CDP.
-    # A stalled browser must not block every other browser request on the Node.
+def _local_cdp_port(endpoint: str) -> int | None:
+    text = str(endpoint or "").strip().lower()
+    if not (text.startswith("http://127.0.0.1:") or text.startswith("http://localhost:")):
+        return None
+    try:
+        return int(text.rsplit(":", 1)[1].split("/", 1)[0])
+    except Exception:
+        return None
+
+
+def _dedicated_profile_dir(profile: str | None) -> Path | None:
+    if not profile:
+        return None
+    return (Path.home() / ".lucas" / "browser-profiles" / profile).resolve()
+
+
+def _chrome_executable(browser_name: str | None = None) -> Path | None:
+    wanted = (browser_name or "chrome").lower()
+    for item in discover_browsers():
+        if str(item.get("name") or "").lower() == wanted:
+            p = Path(str(item.get("executable") or ""))
+            if p.exists():
+                return p
+    return None
+
+
+def _wait_cdp_http(endpoint: str, timeout: float = 10.0) -> bool:
+    deadline = time.time() + timeout
+    url = endpoint.rstrip("/") + "/json/version"
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1.5) as response:
+                payload = json.loads(response.read().decode("utf-8", "replace"))
+            if payload.get("webSocketDebuggerUrl"):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return False
+
+
+def _restart_dedicated_browser(endpoint: str, browser_name: str | None, profile: str | None) -> bool:
+    port = _local_cdp_port(endpoint)
+    profile_dir = _dedicated_profile_dir(profile)
+    executable = _chrome_executable(browser_name)
+    if port is None or profile_dir is None or executable is None:
+        return False
+    marker = str(profile_dir).lower()
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or []).lower()
+            if marker in cmd:
+                proc.terminate()
+        except Exception:
+            pass
+    time.sleep(1.0)
+    for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+        try:
+            cmd = " ".join(proc.info.get("cmdline") or []).lower()
+            if marker in cmd and proc.is_running():
+                proc.kill()
+        except Exception:
+            pass
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.Popen(
+        [
+            str(executable),
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "https://www.google.com",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+    return _wait_cdp_http(endpoint, timeout=10.0)
+
+
+async def _connect_cdp_once(endpoint: str, browser_name: str | None, profile: str | None) -> dict:
     pw = None
     browser = None
     try:
@@ -94,6 +178,22 @@ async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str
             except Exception:
                 pass
         raise
+
+
+async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
+    # First try the existing dedicated browser. If its DevTools socket is stale,
+    # restart only that isolated profile and retry once.
+    try:
+        return await _connect_cdp_once(endpoint, browser_name, profile)
+    except Exception as first_error:
+        if not profile:
+            raise
+        restarted = await asyncio.to_thread(_restart_dedicated_browser, endpoint, browser_name, profile)
+        if not restarted:
+            raise first_error
+        result = await _connect_cdp_once(endpoint, browser_name, profile)
+        result["restarted_browser"] = True
+        return result
 
 
 async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
