@@ -14,6 +14,10 @@ class BrowserSession:
     context: BrowserContext
     browser: Browser | None = None
     playwright: object | None = None
+    browser_name: str | None = None
+    profile: str | None = None
+    user_data_dir: str | None = None
+    endpoint: str | None = None
 
 
 _SESSIONS: dict[str, BrowserSession] = {}
@@ -54,29 +58,32 @@ def discover_browsers() -> list[dict]:
     return out
 
 
-async def connect_cdp(endpoint: str = "http://127.0.0.1:9222") -> dict:
+async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None) -> dict:
     async with _LOCK:
         pw = await async_playwright().start()
         browser = await pw.chromium.connect_over_cdp(endpoint)
         contexts = browser.contexts
         context = contexts[0] if contexts else await browser.new_context()
         session_id = uuid.uuid4().hex
-        _SESSIONS[session_id] = BrowserSession(context=context, browser=browser, playwright=pw)
-        return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint}
+        _SESSIONS[session_id] = BrowserSession(context=context, browser=browser, playwright=pw, browser_name=browser_name, endpoint=endpoint)
+        return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint, "browser_name": browser_name}
 
 
-async def launch_persistent(user_data_dir: str, executable_path: str | None = None, headless: bool = False) -> dict:
+async def launch_persistent(user_data_dir: str, executable_path: str | None = None, headless: bool = False, profile: str | None = None, browser_name: str | None = None) -> dict:
     async with _LOCK:
         pw = await async_playwright().start()
+        resolved_data_dir = str(Path(user_data_dir).expanduser().resolve())
+        args = [f"--profile-directory={profile}"] if profile else None
         context = await pw.chromium.launch_persistent_context(
-            user_data_dir=str(Path(user_data_dir).expanduser().resolve()),
+            user_data_dir=resolved_data_dir,
             executable_path=executable_path,
             headless=headless,
             accept_downloads=True,
+            args=args,
         )
         session_id = uuid.uuid4().hex
-        _SESSIONS[session_id] = BrowserSession(context=context, playwright=pw)
-        return {"session_id": session_id, "pages": len(context.pages)}
+        _SESSIONS[session_id] = BrowserSession(context=context, playwright=pw, browser_name=browser_name, profile=profile, user_data_dir=resolved_data_dir)
+        return {"session_id": session_id, "pages": len(context.pages), "browser_name": browser_name, "profile": profile}
 
 
 def _session(session_id: str) -> BrowserSession:
@@ -98,7 +105,7 @@ def _page(session_id: str, page_index: int = 0) -> Page:
 async def pages(session_id: str) -> list[dict]:
     result = []
     for index, page in enumerate(_session(session_id).context.pages):
-        result.append({"index": index, "url": page.url, "title": await page.title()})
+        result.append({"index": index, "url": page.url, "title": await page.title(), "browser_name": _session(session_id).browser_name, "profile": _session(session_id).profile})
     return result
 
 
