@@ -15,16 +15,18 @@ def test_persistent_user_access_round_trip(tmp_path):
     security = preset_security("auto_approve"); saved = store.upsert(actor, "auto_approve", [str(root)], security=security)
     assert saved["user_id"] == "user-123" and saved["preset"] == "auto_approve"
     effective = store.effective("user-123", [str(root)]); assert effective is not None
-    assert effective["preset"] == "auto_approve" and effective["security"]["approval_policy"]["git_push"] == "always_ask"
+    assert effective["preset"] == "auto_approve" and effective["security"]["approval_policy"]["git_push"] == "allow"
     assert effective["allowed_roots"] == [str(root.resolve())]
     assert store.remove("user-123") is True and store.effective("user-123", [str(root)]) is None
 
 
-def test_full_access_keeps_foreground_and_dangerous_actions_guarded():
+def test_full_access_allows_normal_actions_and_keeps_only_true_danger_guarded():
     security = preset_security("full_access"); policy = security["approval_policy"]
     assert security["network_external"] == "allow" and security["network_lan"] == "allow"
     assert policy["background_control"] == "allow"
-    for key in ("desktop_control", "high_risk", "software_install", "git_push"):
+    for key in ("desktop_control", "browser_transfer", "git_push", "file_write", "file_delete", "process_control", "browser_control", "git_write"):
+        assert policy[key] == "allow"
+    for key in ("high_risk", "software_install", "registry_system", "service_control"):
         assert policy[key] == "always_ask"
 
 
