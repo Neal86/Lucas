@@ -117,7 +117,7 @@ def _token_digest(token: str) -> str:
 bindings = UserNodeBindingStore(db_path)
 
 
-from .gateway_registry import NodeConnection, NodeRegistry
+from .gateway_registry import DISCONNECT_GRACE_SECONDS, NodeConnection, NodeRegistry
 
 registry = NodeRegistry(bindings)
 
