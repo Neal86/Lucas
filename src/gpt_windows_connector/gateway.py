@@ -573,7 +573,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. For browser tasks, prefer browser_tool action resolve -> observe -> semantic_click/semantic_type. Fall back to selector click/type only when needed, then computer.ui_click/ui_set_text, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. BROWSER-FIRST ROUTING IS MANDATORY: whenever the user asks to use a browser, website, web app, browser tab, Chrome, Edge, ALI browser, or Eva browser, start with browser_tool, normally action ensure_cdp -> resolve -> observe -> semantic_click/semantic_type. Do not start a normal web-page task with computer_tool. For the ALI node, the default browser target is the Eva Chrome profile exposed over CDP at http://127.0.0.1:9222. Fall back to selector click/type only when semantic actions fail, then computer.ui_click/ui_set_text only for browser chrome or OS-native UI that CDP cannot access, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -662,16 +662,25 @@ async def git_tool(node_id: str, workspace: str, action: str, params: dict | Non
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    allowed = {"discover", "connect_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
+    """Preferred tool for ALL normal browser and web-page work. Start with ensure_cdp to get/reuse a session, then resolve/observe and semantic_click/semantic_type. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. On the ALI node, ensure_cdp defaults to the Eva Chrome browser at 127.0.0.1:9222. Only fall back to computer_tool for OS/browser-chrome UI that CDP cannot access."""
+    allowed = {"discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
+    payload = dict(params or {})
+    if action in {"connect_cdp", "ensure_cdp"}:
+        node = registry.nodes.get(node_id)
+        if node and str(node.name or "").strip().lower() == "ali":
+            payload.setdefault("endpoint", "http://127.0.0.1:9222")
+            payload.setdefault("browser_name", "chrome")
+            payload.setdefault("profile", "eva")
     if action not in {"discover", "pages", "resolve", "observe", "inspect", "screenshot"}:
         await _desktop_lock(node_id, workspace)
-    return await _node_rpc(node_id, workspace, f"browser.{action}", params, task_title=task_title)
+    return await _node_rpc(node_id, workspace, f"browser.{action}", payload, task_title=task_title)
 
 
 @mcp.tool()
 async def computer_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
+    """Desktop/OS fallback tool, NOT the default for websites. Do not use this for normal web-page navigation, reading, clicking, typing, forms, or tabs when browser_tool is available. Use it only for native Windows UI, browser chrome, file pickers, permission dialogs, CAPTCHAs requiring visible interaction, or when browser_tool/CDP has actually failed."""
     allowed = {"info", "processes", "launch", "windows", "activate", "screenshot", "click", "move", "drag", "type", "hotkey", "press", "scroll", "clipboard_get", "clipboard_set", "ui_elements", "ui_click", "ui_set_text"}
     if action not in allowed:
         raise ValueError(f"Unsupported computer action: {action}")

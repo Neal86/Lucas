@@ -58,15 +58,33 @@ def discover_browsers() -> list[dict]:
     return out
 
 
-async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None) -> dict:
+async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
     async with _LOCK:
         pw = await async_playwright().start()
         browser = await pw.chromium.connect_over_cdp(endpoint)
         contexts = browser.contexts
         context = contexts[0] if contexts else await browser.new_context()
         session_id = uuid.uuid4().hex
-        _SESSIONS[session_id] = BrowserSession(context=context, browser=browser, playwright=pw, browser_name=browser_name, endpoint=endpoint)
-        return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint, "browser_name": browser_name}
+        _SESSIONS[session_id] = BrowserSession(context=context, browser=browser, playwright=pw, browser_name=browser_name, profile=profile, endpoint=endpoint)
+        return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint, "browser_name": browser_name, "profile": profile, "reused": False}
+
+
+async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
+    """Reuse an existing CDP session for the target browser, or connect once if needed."""
+    async with _LOCK:
+        for session_id, session in _SESSIONS.items():
+            if session.endpoint != endpoint:
+                continue
+            if browser_name and session.browser_name and session.browser_name.lower() != browser_name.lower():
+                continue
+            if profile and session.profile and session.profile.lower() != profile.lower():
+                continue
+            try:
+                pages = len(session.context.pages)
+            except Exception:
+                continue
+            return {"session_id": session_id, "pages": pages, "endpoint": endpoint, "browser_name": session.browser_name or browser_name, "profile": session.profile or profile, "reused": True}
+    return await connect_cdp(endpoint=endpoint, browser_name=browser_name, profile=profile)
 
 
 async def launch_persistent(user_data_dir: str, executable_path: str | None = None, headless: bool = False, profile: str | None = None, browser_name: str | None = None) -> dict:

@@ -146,6 +146,7 @@ class Executor:
 
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
+            "browser.ensure_cdp": browser.ensure_cdp,
             "browser.launch_persistent": browser.launch_persistent,
             "browser.resolve": browser_semantic.resolve_target,
             "browser.observe": browser_semantic.observe,
