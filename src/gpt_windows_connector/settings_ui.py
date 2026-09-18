@@ -122,7 +122,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     security = dict(existing.get("security") or {}) if isinstance(existing.get("security"),dict) else {}
     approval = dict(security.get("approval_policy") or {}) if isinstance(security.get("approval_policy"),dict) else {}
 
-    foreground_confirmation = tk.BooleanVar(value=bool(security.get("foreground_confirmation",True)))
+    legacy_foreground = str(security.get("foreground_control_confirmation") or "").lower()
+    foreground_confirmation = tk.BooleanVar(value=bool(security.get("foreground_confirmation", legacy_foreground not in {"allow","off","false","0"})))
     remember_approvals = tk.BooleanVar(value=bool(security.get("remember_approvals",True)))
     block_silent_network = tk.BooleanVar(value=bool(security.get("block_silent_network",True)))
     show_rule_summary = tk.BooleanVar(value=bool(security.get("show_rule_summary",True)))
