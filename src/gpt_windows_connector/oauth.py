@@ -141,7 +141,8 @@ class OAuthProvider:
         return t
 
     def tokens(self,u: User,cid: str,scope: str,want_refresh: bool):
-        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600),"token_type":"Bearer","expires_in":3600,"scope":scope}
+        client=self.client(cid); client_name=str(client["client_name"] or "MCP Client") if client else "MCP Client"
+        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600,extra_claims={"client_id":cid,"client_name":client_name,"source":"mcp"}),"token_type":"Bearer","expires_in":3600,"scope":scope}
         if want_refresh: out["refresh_token"]=self.refresh(cid,u.id,scope)
         return out
 

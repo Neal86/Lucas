@@ -20,6 +20,7 @@ from argon2.exceptions import VerifyMismatchError
 
 
 _current_user: contextvars.ContextVar["User | None"] = contextvars.ContextVar("gwc_current_user", default=None)
+_current_request_source: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar("gwc_current_request_source", default={})
 _passwords = PasswordHasher()
 
 
@@ -218,15 +219,26 @@ class AuthStore:
             raise PermissionError("Account is disabled")
         return user
 
-    def issue_token(self, user: User, ttl_seconds: int | None = None) -> str:
+    def issue_token(self, user: User, ttl_seconds: int | None = None, extra_claims: dict[str, Any] | None = None) -> str:
         now = int(time.time())
         ttl = self.jwt_ttl_seconds if ttl_seconds is None else max(60, min(int(ttl_seconds), self.jwt_ttl_seconds))
-        payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector"}
+        payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector", "sid": uuid.uuid4().hex}
+        if extra_claims:
+            for key in ("client_id", "client_name", "source"):
+                value = extra_claims.get(key)
+                if value:
+                    payload[key] = str(value)[:300]
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
 
-    def verify_token(self, token: str) -> User:
+    def token_claims(self, token: str) -> dict[str, Any]:
         try:
-            payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"], issuer="gpt-windows-connector")
+            return dict(jwt.decode(token, self.jwt_secret, algorithms=["HS256"], issuer="gpt-windows-connector"))
+        except Exception as exc:
+            raise PermissionError("Invalid or expired access token") from exc
+
+    def verify_token(self, token: str) -> User:
+        payload = self.token_claims(token)
+        try:
             return self.get_user(str(payload["sub"]))
         except Exception as exc:
             raise PermissionError("Invalid or expired access token") from exc
@@ -279,6 +291,18 @@ def current_user(required: bool = True) -> User | None:
     if required and user is None:
         raise PermissionError("Authentication required")
     return user
+
+
+def set_current_request_source(source: dict[str, Any] | None):
+    return _current_request_source.set(dict(source or {}))
+
+
+def reset_current_request_source(token) -> None:
+    _current_request_source.reset(token)
+
+
+def current_request_source() -> dict[str, Any]:
+    return dict(_current_request_source.get() or {})
 
 
 def google_authorize_url(client_id: str, redirect_uri: str, state: str) -> str:

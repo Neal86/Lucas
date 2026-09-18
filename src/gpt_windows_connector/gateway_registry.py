@@ -209,9 +209,11 @@ class NodeRegistry:
         payloads[request_id] = payload
         workspace = str(params.get("workspace") or "")
         focus = _focus_candidate(method, params)
+        actor_info = actor or {"user_id": user_id}
         log.info(
-            "RPC dispatch request_id=%s user_id=%s node_id=%s method=%s workspace=%s focus_candidate=%s",
-            request_id, user_id, node_id, method, workspace or "-", focus,
+            "RPC dispatch request_id=%s audit_request_id=%s user_id=%s node_id=%s method=%s workspace=%s focus_candidate=%s client_name=%s client_id=%s session_id=%s task_title=%s",
+            request_id, actor_info.get("audit_request_id") or "-", user_id, node_id, method, workspace or "-", focus,
+            actor_info.get("client_name") or "-", actor_info.get("client_id") or "-", actor_info.get("session_id") or "-", actor_info.get("task_title") or "-",
         )
         started = time.monotonic()
         try:

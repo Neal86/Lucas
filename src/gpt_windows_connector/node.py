@@ -362,12 +362,23 @@ async def _serve_connection(
 
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
             wall_started=time.time(); status="success"; error_type=None
+            audit_context = {
+                "source": str(actor.get("source") or "unknown"),
+                "client_id": str(actor.get("client_id") or ""),
+                "client_name": str(actor.get("client_name") or ""),
+                "session_id": str(actor.get("session_id") or ""),
+                "task_title": str(actor.get("task_title") or ""),
+                "audit_request_id": str(actor.get("audit_request_id") or request_id or ""),
+                "gateway_request_id": str(request_id or ""),
+                "requested_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(wall_started)),
+            }
+            log.info("Execution request method=%s request_id=%s audit_request_id=%s source=%s client_name=%s client_id=%s session_id=%s task_title=%s workspace=%s", method, request_id, audit_context["audit_request_id"], audit_context["source"], audit_context["client_name"] or "-", audit_context["client_id"] or "-", audit_context["session_id"] or "-", audit_context["task_title"] or "-", str(params.get("workspace") or "-"))
             try:
                 access = await asyncio.to_thread(effective_access, actor)
                 if not access:
                     raise PermissionError("This Lucas user has not been approved on the Windows Node")
                 user_id, active_executor = await asyncio.to_thread(prepare_executor, access)
-                result = await active_executor.call(method, params)
+                result = await active_executor.call(method, params, audit_context=audit_context)
                 if user_id and user_id not in session_grants:
                     local_access.touch(user_id)
                 response = {"type": "response", "id": request_id, "ok": True, "result": result}
@@ -380,7 +391,8 @@ async def _serve_connection(
             wall_ended=time.time()
             try:
                 workspace=str(params.get("workspace") or "")
-                local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type} if error_type else {},context_key=workspace or "default")
+                details = {**audit_context, **({"error_type": error_type} if error_type else {})}
+                local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details=details,context_key=workspace or "default",task_title=audit_context.get("task_title") or None)
             except Exception:
                 log.exception("Could not record local Task Run")
             await deliver_response(response)

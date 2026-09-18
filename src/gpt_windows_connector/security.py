@@ -222,10 +222,20 @@ class LocalSecurityPolicy:
             command = re.sub(r"\s+", " ", command)[:240]
         return f"{category}|{method}|{command or summary}"
 
-    def _prompt(self, category: str, method: str, summary: str) -> bool:
+    def _prompt(self, category: str, method: str, summary: str, audit_context: dict[str, Any] | None = None) -> bool:
         rules = str(self.security.get("rules_text") or "").strip()
+        context = dict(audit_context or {})
         title = "Lucas 前台控制确认" if category == "desktop_control" else "Lucas 安全确认"
         text = f"Lucas 请求在此电脑执行操作：\n\n{summary}\n\n方法：{method}\n风险类别：{category}"
+        source_lines = []
+        if context.get("client_name"): source_lines.append(f"来源 AI：{context.get('client_name')}")
+        if context.get("client_id"): source_lines.append(f"Client ID：{context.get('client_id')}")
+        if context.get("task_title"): source_lines.append(f"任务：{context.get('task_title')}")
+        if context.get("session_id"): source_lines.append(f"Session：{context.get('session_id')}")
+        if context.get("audit_request_id"): source_lines.append(f"Request ID：{context.get('audit_request_id')}")
+        if context.get("requested_at"): source_lines.append(f"请求时间：{context.get('requested_at')}")
+        if source_lines:
+            text += "\n\n请求来源：\n" + "\n".join(source_lines)
         if category == "desktop_control":
             text += "\n\n此操作可能激活窗口、移动鼠标或向当前前台窗口发送键盘输入。"
         if self.security.get("show_rule_summary", True) and rules:
@@ -237,7 +247,7 @@ class LocalSecurityPolicy:
         except Exception:
             return False
 
-    def _enforce_decision(self, decision: str, category: str, method: str, params: dict[str, Any], summary: str) -> None:
+    def _enforce_decision(self, decision: str, category: str, method: str, params: dict[str, Any], summary: str, audit_context: dict[str, Any] | None = None) -> None:
         decision = str(decision or "ask").lower()
         if decision == "allow":
             return
@@ -249,16 +259,16 @@ class LocalSecurityPolicy:
         with self._approval_lock:
             if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
                 return
-            if not self._prompt(category, method, summary):
+            if not self._prompt(category, method, summary, audit_context):
                 raise PermissionError(f"Denied locally: {summary}")
             if decision != "always_ask" and self.security.get("remember_approvals", True):
                 self._approved.add(key)
 
-    def authorize(self, method: str, params: dict[str, Any]) -> None:
+    def authorize(self, method: str, params: dict[str, Any], audit_context: dict[str, Any] | None = None) -> None:
         network = self._network_decision(method, params)
         if network:
             decision, summary = network
-            self._enforce_decision(decision, "network", method, params, summary)
+            self._enforce_decision(decision, "network", method, params, summary, audit_context)
         category = self._category(method, params)
         decision = str(self.security.get("approval_policy", {}).get(category, "ask"))
         summary_map = {
@@ -280,4 +290,4 @@ class LocalSecurityPolicy:
             "git_push": "向 Git 远端推送内容",
             "high_risk": "执行其他高风险系统操作",
         }
-        self._enforce_decision(decision, category, method, params, summary_map.get(category, method))
+        self._enforce_decision(decision, category, method, params, summary_map.get(category, method), audit_context)

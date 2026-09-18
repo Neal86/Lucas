@@ -55,10 +55,10 @@ class Executor:
             "directories": directories[:1000],
         }
 
-    def _prepare_call(self, method: str, params: dict) -> tuple[dict, Path | None]:
+    def _prepare_call(self, method: str, params: dict, audit_context: dict | None = None) -> tuple[dict, Path | None]:
         # Security/path validation may touch cloud or network drives. This whole
         # preflight runs in a worker thread so it can never starve WebSocket pings.
-        self.security.authorize(method, dict(params or {}))
+        self.security.authorize(method, dict(params or {}), audit_context=audit_context)
         p = dict(params or {})
         workspace = self.workspace(p.pop("workspace")) if "workspace" in p else None
         if method in {"shell.run", "process.start"}:
@@ -76,8 +76,8 @@ class Executor:
             )
         return p, workspace
 
-    async def call(self, method: str, params: dict) -> object:
-        p, workspace = await asyncio.to_thread(self._prepare_call, method, params)
+    async def call(self, method: str, params: dict, audit_context: dict | None = None) -> object:
+        p, workspace = await asyncio.to_thread(self._prepare_call, method, params, audit_context)
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
             "workspace.browse": lambda: self.browse_workspaces(**p),

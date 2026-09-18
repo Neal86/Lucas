@@ -31,9 +31,12 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from .auth import (
     AuthStore,
     current_user,
+    current_request_source,
     google_authorize_url,
     google_exchange_code,
+    reset_current_request_source,
     reset_current_user,
+    set_current_request_source,
     set_current_user,
 )
 from .config import GatewaySettings
@@ -85,7 +88,8 @@ class AuthMiddleware:
         if not token:
             token = request.cookies.get("gwc_access_token")
         try:
-            user = auth.verify_token(token or "")
+            claims = auth.token_claims(token or "")
+            user = auth.get_user(str(claims["sub"]))
         except Exception:
             headers = {}
             if path.startswith("/mcp"):
@@ -95,9 +99,16 @@ class AuthMiddleware:
         if path.startswith("/mcp"):
             auth.record_request(user.id)
         ctx = set_current_user(user)
+        source_ctx = set_current_request_source({
+            "source": str(claims.get("source") or ("mcp" if path.startswith("/mcp") else "web")),
+            "client_id": str(claims.get("client_id") or ""),
+            "client_name": str(claims.get("client_name") or ("Unknown MCP client" if path.startswith("/mcp") else "Lucas Web")),
+            "session_id": str(claims.get("sid") or ""),
+        })
         try:
             await self.app(scope, receive, send)
         finally:
+            reset_current_request_source(source_ctx)
             reset_current_user(ctx)
 
 
@@ -132,8 +143,19 @@ def _user():
     return current_user(required=True)
 
 
-def _actor(user) -> dict:
-    return {"user_id": user.id, "email": user.email, "name": user.name or ""}
+def _actor(user, *, task_title: str | None = None, audit_request_id: str | None = None) -> dict:
+    source = current_request_source()
+    return {
+        "user_id": user.id,
+        "email": user.email,
+        "name": user.name or "",
+        "source": str(source.get("source") or "unknown"),
+        "client_id": str(source.get("client_id") or ""),
+        "client_name": str(source.get("client_name") or ""),
+        "session_id": str(source.get("session_id") or ""),
+        "task_title": str(task_title or "")[:180],
+        "audit_request_id": str(audit_request_id or ""),
+    }
 
 
 _SHELL_STRUCTURAL = re.compile(
@@ -374,6 +396,9 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
         payload["workspace"] = workspace
     wall_started = time.time()
     started = time.monotonic()
+    audit_request_id = uuid.uuid4().hex
+    actor = _actor(user, task_title=task_title, audit_request_id=audit_request_id)
+    audit_context = {k: v for k, v in actor.items() if k not in {"user_id", "email", "name"} and v}
     try:
         rpc_timeout = 180.0
         if method == "shell.run":
@@ -381,7 +406,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
                 rpc_timeout = max(180.0, min(float(payload.get("timeout") or 120) + 60.0, 3660.0))
             except (TypeError, ValueError):
                 rpc_timeout = 180.0
-        result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
+        result = await registry.rpc(node_id, user.id, method, payload, actor=actor, timeout=rpc_timeout)
         if trace_shell and isinstance(result, dict):
             clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""), original_command)
             result["stdout"] = clean_stdout
@@ -391,13 +416,13 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration, operation_count)
-        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__, **audit_context})
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__,"sub_operations":sub_operations,**audit_context},operation_count=operation_count,context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration, operation_count)
-    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count, **audit_context})
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={"sub_operations":sub_operations,**audit_context},operation_count=operation_count,context_key=run_context,task_title=task_title)
     return result
 
 
