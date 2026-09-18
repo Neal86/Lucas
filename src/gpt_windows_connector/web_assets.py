@@ -9,6 +9,7 @@ from .web_document import WEB_BODY_PREFIX, WEB_HEAD
 from .web_i18n_runtime import I18N_SCRIPT
 from .web_referral_runtime import REFERRAL_SCRIPT
 from .web_landing import LANDING_HTML
+from .web_onboarding_runtime import ONBOARDING_SCRIPT
 from .web_styles import WEB_STYLE
 
 DASHBOARD_HTML = (
@@ -22,5 +23,6 @@ DASHBOARD_HTML = (
     + BILLING_SCRIPT
     + REFERRAL_SCRIPT
     + CORE_SCRIPT
+    + ONBOARDING_SCRIPT
     + ADMIN_SCRIPT
 )
