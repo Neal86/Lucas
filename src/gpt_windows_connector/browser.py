@@ -72,7 +72,7 @@ async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str
 async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
     """Reuse an existing CDP session for the target browser, or connect once if needed."""
     async with _LOCK:
-        for session_id, session in _SESSIONS.items():
+        for session_id, session in list(_SESSIONS.items()):
             if session.endpoint != endpoint:
                 continue
             if browser_name and session.browser_name and session.browser_name.lower() != browser_name.lower():
@@ -84,6 +84,8 @@ async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str 
             except Exception:
                 continue
             return {"session_id": session_id, "pages": pages, "endpoint": endpoint, "browser_name": session.browser_name or browser_name, "profile": session.profile or profile, "reused": True}
+    # Important: connect_cdp acquires _LOCK itself. Call it only after releasing
+    # the ensure_cdp lookup lock, otherwise a fresh Node session deadlocks.
     return await connect_cdp(endpoint=endpoint, browser_name=browser_name, profile=profile)
 
 
