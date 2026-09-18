@@ -127,20 +127,26 @@ def _restart_dedicated_browser(endpoint: str, browser_name: str | None, profile:
         except Exception:
             pass
     profile_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.Popen(
+    args = " ".join(
         [
-            str(executable),
             "--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={port}",
-            f"--user-data-dir={profile_dir}",
+            f'--user-data-dir="{profile_dir}"',
             "--no-first-run",
             "--no-default-browser-check",
             "https://www.google.com",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        ]
     )
+    if os.name == "nt":
+        # ShellExecute is more reliable for restarting an interactive browser
+        # from the tray/background Node than CreateProcess/Popen.
+        os.startfile(str(executable), "open", args, None, 1)
+    else:
+        subprocess.Popen(
+            [str(executable), *args.split()],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     return _wait_cdp_http(endpoint, timeout=10.0)
 
 
