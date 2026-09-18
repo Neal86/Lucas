@@ -32,6 +32,7 @@ DEFAULT_SECURITY: dict[str, Any] = {
         "git_push": "always_ask",
         "high_risk": "always_ask",
     },
+    "foreground_confirmation": True,
     "remember_approvals": True,
     "network_external": "ask",
     "network_lan": "allow",
@@ -86,7 +87,7 @@ NETWORK_COMMAND_PATTERNS = [
 def _merge_security(raw: Any) -> dict[str, Any]:
     merged: dict[str, Any] = {**DEFAULT_SECURITY, "approval_policy": dict(DEFAULT_SECURITY["approval_policy"])}
     if isinstance(raw, dict):
-        for key in ("remember_approvals", "network_external", "network_lan", "allowed_domains", "block_silent_network", "rules_text", "show_rule_summary"):
+        for key in ("foreground_confirmation", "remember_approvals", "network_external", "network_lan", "allowed_domains", "block_silent_network", "rules_text", "show_rule_summary"):
             if key in raw:
                 merged[key] = raw[key]
         policy = raw.get("approval_policy")
@@ -265,12 +266,11 @@ class LocalSecurityPolicy:
                 self._approved.add(key)
 
     def authorize(self, method: str, params: dict[str, Any], audit_context: dict[str, Any] | None = None) -> None:
-        network = self._network_decision(method, params)
-        if network:
-            decision, summary = network
-            self._enforce_decision(decision, "network", method, params, summary, audit_context)
         category = self._category(method, params)
-        decision = str(self.security.get("approval_policy", {}).get(category, "ask"))
+        category_decision = str(self.security.get("approval_policy", {}).get(category, "ask"))
+        if category == "desktop_control":
+            category_decision = "always_ask" if bool(self.security.get("foreground_confirmation", True)) else "allow"
+        network = self._network_decision(method, params)
         summary_map = {
             "system_info": "读取系统或项目状态",
             "shell": "运行命令或程序",
@@ -290,4 +290,13 @@ class LocalSecurityPolicy:
             "git_push": "向 Git 远端推送内容",
             "high_risk": "执行其他高风险系统操作",
         }
-        self._enforce_decision(decision, category, method, params, summary_map.get(category, method), audit_context)
+        decision = category_decision
+        summary = summary_map.get(category, method)
+        if network:
+            network_decision, network_summary = network
+            rank = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
+            if rank.get(str(network_decision).lower(), 1) > rank.get(str(decision).lower(), 1):
+                decision = str(network_decision)
+            if str(network_decision).lower() != "allow":
+                summary = f"{summary}；{network_summary}"
+        self._enforce_decision(decision, category, method, params, summary, audit_context)

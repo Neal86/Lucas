@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 _DECISION_RANK = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
-_SAFETY_GATES = {"desktop_control", "foreground_control", "browser_transfer", "git_push", "software_install", "registry_system", "high_risk", "service_control"}
+_SAFETY_GATES = {"software_install", "registry_system", "high_risk", "service_control"}
 
 def _stricter_decision(a: object, b: object, default: str = "ask") -> str:
     left=str(a or default).lower(); right=str(b or default).lower(); left=left if left in _DECISION_RANK else default; right=right if right in _DECISION_RANK else default
@@ -24,7 +24,7 @@ def intersect_security(node_security: dict[str, Any] | None, user_security: dict
     effective_policy=_apply_safety_floor({key:_stricter_decision(node_policy.get(key),user_policy.get(key),DEFAULT_SECURITY["approval_policy"].get(key,"ask")) for key in set(node_policy)|set(user_policy)})
     node_domains=[str(v).strip().lower() for v in node.get("allowed_domains") or [] if str(v).strip()]; user_domains=[str(v).strip().lower() for v in user.get("allowed_domains") or [] if str(v).strip()]
     effective_domains=[v for v in user_domains if v in set(node_domains)] if node_domains and user_domains else node_domains or user_domains
-    return {**node,"approval_policy":effective_policy,"remember_approvals":bool(node.get("remember_approvals",True)) and bool(user.get("remember_approvals",True)),"network_external":_stricter_decision(node.get("network_external"),user.get("network_external")),"network_lan":_stricter_decision(node.get("network_lan"),user.get("network_lan")),"allowed_domains":effective_domains,"block_silent_network":bool(node.get("block_silent_network",True)) or bool(user.get("block_silent_network",True)),"show_rule_summary":bool(node.get("show_rule_summary",True)) or bool(user.get("show_rule_summary",True)),"rules_text":str(node.get("rules_text") or DEFAULT_SECURITY["rules_text"])}
+    return {**node,"approval_policy":effective_policy,"foreground_confirmation":bool(node.get("foreground_confirmation",True)),"remember_approvals":bool(node.get("remember_approvals",True)) and bool(user.get("remember_approvals",True)),"network_external":_stricter_decision(node.get("network_external"),user.get("network_external")),"network_lan":_stricter_decision(node.get("network_lan"),user.get("network_lan")),"allowed_domains":effective_domains,"block_silent_network":bool(node.get("block_silent_network",True)) or bool(user.get("block_silent_network",True)),"show_rule_summary":bool(node.get("show_rule_summary",True)) or bool(user.get("show_rule_summary",True)),"rules_text":str(node.get("rules_text") or DEFAULT_SECURITY["rules_text"])}
 
 ACCESS_PRESETS={"request_approval","auto_approve","full_access","custom"}
 

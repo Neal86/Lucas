@@ -49,7 +49,7 @@ APPROVAL_DEFAULTS = {
     "clipboard":"ask","browser_control":"ask","browser_transfer":"always_ask","git_write":"ask",
     "git_push":"always_ask","software_install":"always_ask","registry_system":"always_ask","high_risk":"always_ask",
 }
-_SAFETY_GATES = {"desktop_control","browser_transfer","git_push","software_install","registry_system","high_risk","service_control"}
+_SAFETY_GATES = {"software_install","registry_system","high_risk","service_control"}
 PRESETS = {
     "请求批准（Recommended）": {"approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
     "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
@@ -58,7 +58,7 @@ PRESETS = {
 PRESET_DESCRIPTIONS = {
     "请求批准（Recommended）":"编辑外部文件和使用互联网时询问；前台控制始终单独确认。",
     "帮我批准":"普通操作自动批准；危险操作和前台控制仍单独确认。",
-    "完全访问权限":"普通操作完全开放；危险操作和前台控制仍保留本机确认。",
+    "完全访问权限":"普通操作完全开放；仅真正高风险操作强制确认。前台抢焦点是否确认由 Foreground Control Confirmation 开关控制。",
     "自定义":"使用下方逐项设置。",
 }
 

@@ -122,6 +122,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     security = dict(existing.get("security") or {}) if isinstance(existing.get("security"),dict) else {}
     approval = dict(security.get("approval_policy") or {}) if isinstance(security.get("approval_policy"),dict) else {}
 
+    foreground_confirmation = tk.BooleanVar(value=bool(security.get("foreground_confirmation",True)))
     remember_approvals = tk.BooleanVar(value=bool(security.get("remember_approvals",True)))
     block_silent_network = tk.BooleanVar(value=bool(security.get("block_silent_network",True)))
     show_rule_summary = tk.BooleanVar(value=bool(security.get("show_rule_summary",True)))
@@ -332,7 +333,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
     for var in [network_external,network_lan,allowed_domains,block_silent_network,*approval_vars.values()]: var.trace_add("write",sync_preset_from_fields)
     def preset_control(p):
         f=tk.Frame(p,bg=C["card"]); combo(f,preset_display,["请求批准（Recommended）","帮我批准","完全访问权限","自定义"],24).pack(anchor="e"); tk.Label(f,textvariable=preset_desc,font=(FONT,8),fg=C["muted"],bg=C["card"],wraplength=290,justify="right").pack(anchor="e",pady=(4,0)); return f
-    row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
+    row(c,"快捷设置","选择预设后会立即同步下方审批策略与网络策略；手动修改任一项后自动变为“自定义”。",preset_control); divider(c); row(c,"Foreground Control Confirmation","只控制真正会激活窗口、移动鼠标或向前台窗口发送键盘输入的操作。关闭后 Full Access 下这些前台操作直接执行。",lambda p: switch(p,foreground_confirmation)); divider(c); row(c,"权限来源","所有安全权限仅可在本机修改；网页只能查看。",lambda p: tk.Label(p,text="仅本机",font=(FONT,9,"bold"),fg=C["blue"],bg=C["card"]))
     section(body,"默认审批策略"); c=card(body)
     prs=PERMISSION_ROWS
     for i,(k,h,d) in enumerate(prs):
@@ -702,7 +703,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not node_name.get().strip() or not node_id.get().strip(): raise ValueError("电脑名称和 Node ID 不能为空。")
         if not rv or any(not Path(v).is_dir() for v in rv): raise ValueError("Allowed Folders 中的每个目录都必须真实存在。")
         domains=[v.strip().lower() for v in allowed_domains.get().replace(";",",").split(",") if v.strip()]
-        updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_initial,"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
+        updated=_load_config_file() or dict(existing); updated.pop("pairing_code",None); updated.pop("permission_level",None); updated.update({"gateway_ws_url":gv.rstrip("/"),"node_name":str(os.environ.get("COMPUTERNAME") or socket.gethostname()),"node_id":node_id.get().strip(),"connection_code":connection_code.get().strip(),"allowed_roots":rv,"security":{"approval_policy":{k:v.get() for k,v in approval_vars.items()},"foreground_confirmation":foreground_confirmation.get(),"remember_approvals":remember_approvals.get(),"network_external":network_external.get(),"network_lan":network_lan.get(),"allowed_domains":domains,"block_silent_network":block_silent_network.get(),"rules_text":rules_initial,"show_rule_summary":show_rule_summary.get()}}); updated.setdefault("launch_at_startup",True); updated.setdefault("connection_enabled",True)
         return updated
 
     def apply_auto_save():
@@ -734,9 +735,9 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         if not messagebox.askyesno("Lucas","恢复推荐的安全设置？Allowed Folders 不会被删除。"): return
         preset_display.set("请求批准（Recommended）")
         for k,v in APPROVAL_DEFAULTS.items(): approval_vars[k].set(v)
-        remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); schedule_auto_save(delay=0)
+        foreground_confirmation.set(True); remember_approvals.set(True); network_external.set("ask"); network_lan.set("allow"); allowed_domains.set(""); block_silent_network.set(True); show_rule_summary.set(True); schedule_auto_save(delay=0)
 
-    for var in [remember_approvals,block_silent_network,show_rule_summary,network_external,network_lan,allowed_domains,*approval_vars.values()]:
+    for var in [foreground_confirmation,remember_approvals,block_silent_network,show_rule_summary,network_external,network_lan,allowed_domains,*approval_vars.values()]:
         var.trace_add("write",schedule_auto_save)
     gateway.trace_add("write",lambda *_: schedule_auto_save(delay=700))
 
