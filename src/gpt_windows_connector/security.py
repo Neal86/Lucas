@@ -87,6 +87,9 @@ NETWORK_COMMAND_PATTERNS = [
 def _merge_security(raw: Any) -> dict[str, Any]:
     merged: dict[str, Any] = {**DEFAULT_SECURITY, "approval_policy": dict(DEFAULT_SECURITY["approval_policy"])}
     if isinstance(raw, dict):
+        if "foreground_confirmation" not in raw and "foreground_control_confirmation" in raw:
+            legacy = str(raw.get("foreground_control_confirmation") or "").lower()
+            merged["foreground_confirmation"] = legacy not in {"allow", "off", "false", "0"}
         for key in ("foreground_confirmation", "remember_approvals", "network_external", "network_lan", "allowed_domains", "block_silent_network", "rules_text", "show_rule_summary"):
             if key in raw:
                 merged[key] = raw[key]
