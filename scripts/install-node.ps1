@@ -448,25 +448,15 @@ if (-not $TrayStarted) {
   Start-Sleep -Seconds 2
 }
 
-# Fresh installs open Settings. During an in-app update the existing Settings
-# window stays alive to show progress, then restarts itself when the user returns.
+# Fresh installs open Settings once. In-app updates never open a new Settings
+# process automatically: the existing window may remain alive, and the user can
+# always reopen Settings from the tray or shortcut. This prevents update loops
+# from accumulating duplicate Settings windows.
 if (-not $UpdateFromApp) {
   Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
   Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
 } else {
-  # The updater must survive even if the old Settings process closes unexpectedly.
-  # If it is gone, reopen Settings explicitly from the newly verified runtime. If
-  # it survived, leave it in place so its in-app progress/Return flow remains intact.
-  $SettingsAlive = $false
-  if ($KeepProcessId -gt 0) {
-    try { $SettingsAlive = $null -ne (Get-Process -Id $KeepProcessId -ErrorAction Stop) } catch { $SettingsAlive = $false }
-  }
-  if (-not $SettingsAlive) {
-    Write-Host "[Lucas] Previous Settings closed during update; reopening the verified new version..." -ForegroundColor Yellow
-    Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
-  } else {
-    Write-Host "[Lucas] App update finished; current Settings remains open." -ForegroundColor Green
-  }
+  Write-Host "[Lucas] App update finished; Settings will not be reopened automatically." -ForegroundColor Green
 }
 Write-LucasProgress 100 "complete"
 

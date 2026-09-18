@@ -84,3 +84,22 @@ def acquire_node_mutex(log) -> object | None:
     except Exception:
         log.exception("Could not create node single-instance mutex")
         return object()
+
+
+def acquire_settings_mutex(log) -> object | None:
+    """Allow at most one Lucas Settings window per Windows session."""
+    if sys.platform != "win32":
+        return object()
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.CreateMutexW(None, False, "Local\\LucasSettingsSingleInstance")
+        if not handle:
+            return None
+        if kernel32.GetLastError() == 183:
+            kernel32.CloseHandle(handle)
+            return None
+        return handle
+    except Exception:
+        log.exception("Could not create Settings single-instance mutex")
+        return object()

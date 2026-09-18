@@ -37,7 +37,7 @@ log = logging.getLogger("lucas.node")
 from .node_reconnect import (
     RUNTIME_ID, completed_responses, inflight_request_ids, request_tasks,
     deliver_response, flush_completed_responses, disconnect_reason, is_gateway_restart_error,
-    set_active_sender, clear_active_sender, NodeSessionDisconnected, acquire_node_mutex,
+    set_active_sender, clear_active_sender, NodeSessionDisconnected, acquire_node_mutex, acquire_settings_mutex,
 )
 
 _disconnect_reason = disconnect_reason
@@ -575,6 +575,10 @@ def main() -> None:
         _save_config(config)
     _ensure_connection_code(config)
     if args.configure:
+        settings_mutex = acquire_settings_mutex(log)
+        if settings_mutex is None:
+            log.info("Lucas Settings is already open; exiting duplicate Settings process")
+            return
         updated = _configure_gui(config)
         if updated is not None:
             log.info("Saved local Lucas security settings")
