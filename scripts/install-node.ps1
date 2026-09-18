@@ -107,7 +107,7 @@ $ExistingConfigRaw = $null
 $ConfigBackupFile = "$ConfigFile.pre-update"
 if (Test-Path $ConfigFile) {
   try {
-    $ExistingConfigRaw = Get-Content -Raw -Path $ConfigFile
+    $ExistingConfigRaw = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile
     $ExistingConfig = $ExistingConfigRaw | ConvertFrom-Json -ErrorAction Stop
     Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
   } catch {
@@ -122,7 +122,7 @@ $ExistingAccessRaw = $null
 $AccessBackupFile = "$AccessFile.pre-update"
 if (Test-Path $AccessFile) {
   try {
-    $ExistingAccessRaw = Get-Content -Raw -Path $AccessFile
+    $ExistingAccessRaw = Get-Content -Raw -Encoding UTF8 -Path $AccessFile
     $ExistingAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
     Copy-Item -Force -Path $AccessFile -Destination $AccessBackupFile
   } catch {
