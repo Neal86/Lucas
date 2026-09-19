@@ -21,6 +21,16 @@ def test_updater_preserves_user_permissions_and_folder_scopes():
     assert "node-access.json changed during update" in script
 
 
+def test_updater_auto_repairs_known_legacy_utf8_rules_text_damage():
+    script = Path("scripts/install-node.ps1").read_text(encoding="utf-8")
+    assert "Read-LucasJsonWithLegacyRepair" in script
+    assert "rules_text" in script
+    assert ".corrupt-" in script
+    assert "did not match the supported legacy rules_text corruption pattern" in script
+    assert "Get-Content -Raw -Encoding UTF8 -Path $ConfigFile" in script
+    assert "Get-Content -Raw -Encoding UTF8 -Path $AccessFile" in script
+
+
 def test_installer_uses_lucas_icon_for_windows_shortcuts():
     script = Path("scripts/install-node.ps1").read_text(encoding="utf-8")
     assert '$ShortcutIconFile = Join-Path $InstallDir ("lucas-shortcut-{0}.ico" -f $InstalledVersion)' in script

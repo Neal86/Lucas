@@ -18,6 +18,39 @@ function Write-LucasProgress {
   if ($UpdateFromApp) { Write-Output ("LUCAS_PROGRESS|{0}|{1}" -f $Percent, $Stage) }
 }
 
+function Read-LucasJsonWithLegacyRepair {
+  param(
+    [string]$Path,
+    [string]$Label
+  )
+
+  $Raw = Get-Content -Raw -Encoding UTF8 -LiteralPath $Path
+  try {
+    $Object = $Raw | ConvertFrom-Json -ErrorAction Stop
+    return [pscustomobject]@{ Raw = $Raw; Object = $Object; Repaired = $false; CorruptBackup = "" }
+  } catch {
+    # Lucas 1.7.45 and older could read UTF-8 JSON through the Windows PowerShell
+    # default code page, corrupting the localized rules_text value and sometimes
+    # leaving an unterminated JSON string. Only repair that known legacy field;
+    # never guess at identities, permissions, roots, tokens or other settings.
+    $CorruptBackup = "$Path.corrupt-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+    Copy-Item -Force -LiteralPath $Path -Destination $CorruptBackup
+    $Pattern = '(?s)"rules_text"\s*:\s*".*?,\s*(?="show_rule_summary"\s*:)'
+    $RepairedRaw = [regex]::Replace($Raw, $Pattern, '"rules_text": "Lucas local security policy.",', 1)
+    if ($RepairedRaw -eq $Raw) {
+      throw "$Label could not be parsed and did not match the supported legacy rules_text corruption pattern. Backup: $CorruptBackup. $($_.Exception.Message)"
+    }
+    try {
+      $Object = $RepairedRaw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+      throw "$Label auto-repair failed. Original preserved at $CorruptBackup. $($_.Exception.Message)"
+    }
+    [System.IO.File]::WriteAllText($Path, $RepairedRaw, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "[Lucas] Auto-repaired legacy $Label encoding damage. Original backup: $CorruptBackup" -ForegroundColor Yellow
+    return [pscustomobject]@{ Raw = $RepairedRaw; Object = $Object; Repaired = $true; CorruptBackup = $CorruptBackup }
+  }
+}
+
 function Test-Python311 {
   param([string]$Command, [string[]]$Arguments)
   try {
@@ -107,11 +140,12 @@ $ExistingConfigRaw = $null
 $ConfigBackupFile = "$ConfigFile.pre-update"
 if (Test-Path $ConfigFile) {
   try {
-    $ExistingConfigRaw = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile
-    $ExistingConfig = $ExistingConfigRaw | ConvertFrom-Json -ErrorAction Stop
+    $ConfigRead = Read-LucasJsonWithLegacyRepair -Path $ConfigFile -Label "Lucas configuration"
+    $ExistingConfigRaw = [string]$ConfigRead.Raw
+    $ExistingConfig = $ConfigRead.Object
     Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
   } catch {
-    throw "Existing Lucas configuration could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
+    throw "Existing Lucas configuration could not be read or safely auto-repaired. Update aborted without changing identity or permissions: $($_.Exception.Message)"
   }
 }
 
@@ -122,11 +156,12 @@ $ExistingAccessRaw = $null
 $AccessBackupFile = "$AccessFile.pre-update"
 if (Test-Path $AccessFile) {
   try {
-    $ExistingAccessRaw = Get-Content -Raw -Encoding UTF8 -Path $AccessFile
-    $ExistingAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+    $AccessRead = Read-LucasJsonWithLegacyRepair -Path $AccessFile -Label "Lucas user permissions"
+    $ExistingAccessRaw = [string]$AccessRead.Raw
+    $AccessRead.Object | Out-Null
     Copy-Item -Force -Path $AccessFile -Destination $AccessBackupFile
   } catch {
-    throw "Existing Lucas user permissions could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
+    throw "Existing Lucas user permissions could not be read or safely auto-repaired. Update aborted without changing identity or permissions: $($_.Exception.Message)"
   }
 }
 
@@ -248,7 +283,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
 if ($null -ne $ExistingConfigRaw) {
   Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
   try {
-    $RestoredConfigRaw = Get-Content -Raw -Path $ConfigFile
+    $RestoredConfigRaw = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile
     $RestoredConfigRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
     if ($RestoredConfigRaw -ne $ExistingConfigRaw) { throw "node-config.json changed during update" }
   } catch {
@@ -258,7 +293,7 @@ if ($null -ne $ExistingConfigRaw) {
 if ($null -ne $ExistingAccessRaw) {
   Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile
   try {
-    $RestoredAccessRaw = Get-Content -Raw -Path $AccessFile
+    $RestoredAccessRaw = Get-Content -Raw -Encoding UTF8 -Path $AccessFile
     $RestoredAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
     if ($RestoredAccessRaw -ne $ExistingAccessRaw) { throw "node-access.json changed during update" }
   } catch {
@@ -339,7 +374,7 @@ if ($ExistingConfig -and $ExistingConfigRaw) {
     # and older tray builds treated that valid JSON as unreadable and rewrote it.
     Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
   }
-  $Config = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
+  $Config = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
 } else {
   $Config = [ordered]@{
     gateway_ws_url = $GatewayUrl.TrimEnd('/')
