@@ -48,6 +48,7 @@ from .registration_security import RegistrationSecurity, email_verification_enab
 from .task_runs import TaskRunStore
 from .gateway_readiness import readiness_checks, critical_ready
 from .gateway_referral import claim_referral_cookie
+from .eva_browser_policy import EvaBrowserTarget, resolve_eva_browser_target
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
@@ -143,36 +144,35 @@ def _user():
     return current_user(required=True)
 
 
-EVA_ALI_CLIENT_ID = os.getenv("LUCAS_EVA_CLIENT_ID", "lucas_RadfVO6VaiwUY5bEzzq6piO9NApZRJLb").strip()
-EVA_ALI_NODE_ID = os.getenv("LUCAS_EVA_NODE_ID", "ali-bc0358dd0a5d").strip()
-EVA_BROWSER_ENDPOINT = os.getenv("LUCAS_EVA_BROWSER_ENDPOINT", "http://127.0.0.1:9222").strip()
-EVA_BROWSER_PROFILE = os.getenv("LUCAS_EVA_BROWSER_PROFILE", "eva").strip()
-EVA_BROWSER_USER_DATA_DIR = os.getenv("LUCAS_EVA_BROWSER_USER_DATA_DIR", r"C:\\Users\\mrwan\\.lucas\\browser-profiles\\eva").strip()
-EVA_BROWSER_EXECUTABLE = os.getenv("LUCAS_EVA_BROWSER_EXECUTABLE", r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe").strip()
-
-
-def _is_eva_on_ali(node_id: str) -> bool:
+def _eva_browser_target(node_id: str) -> EvaBrowserTarget | None:
     source = current_request_source()
-    return bool(EVA_ALI_CLIENT_ID and EVA_ALI_NODE_ID and str(node_id or "") == EVA_ALI_NODE_ID and str(source.get("client_id") or "") == EVA_ALI_CLIENT_ID)
+    return resolve_eva_browser_target(node_id, str(source.get("client_id") or ""))
 
 
 def _enforce_eva_browser_isolation(node_id: str, method: str, payload: dict) -> None:
-    """Eva on ALI may access browser/desktop content only through the dedicated Eva CDP browser."""
-    if not _is_eva_on_ali(node_id):
+    """Eva may access browser/desktop content only through that node's dedicated Eva CDP browser."""
+    target = _eva_browser_target(node_id)
+    if target is None:
         return
     if method.startswith("browser."):
         if method in {"browser.connect_cdp", "browser.ensure_cdp"}:
-            payload["endpoint"] = EVA_BROWSER_ENDPOINT
+            payload["endpoint"] = target.endpoint
             payload["browser_name"] = "chrome"
-            payload["profile"] = EVA_BROWSER_PROFILE
+            payload["profile"] = target.profile
         return
     if method.startswith("computer."):
-        raise PermissionError("Eva on ALI is browser-isolated. Use browser_tool with the dedicated Eva browser; computer_tool is blocked on this node.")
+        raise PermissionError(
+            f"Eva on {target.label} is browser-isolated. Use browser_tool with the dedicated Eva browser; "
+            "computer_tool is blocked on this node."
+        )
     if method == "shell.run":
         command = str(payload.get("command") or "").lower()
         browser_markers = ("chrome", "msedge", "9222", "browser", "win32_process", "get-ciminstance", "get-process", "get-nettcpconnection", "uiautomation", "windowtitle")
         if any(marker in command for marker in browser_markers):
-            raise PermissionError("Eva on ALI may not inspect or control browsers through shell commands. Use browser_tool; it is locked to the dedicated Eva browser.")
+            raise PermissionError(
+                f"Eva on {target.label} may not inspect or control browsers through shell commands. "
+                "Use browser_tool; it is locked to the dedicated Eva browser."
+            )
 
 
 def _actor(user, *, task_title: str | None = None, audit_request_id: str | None = None) -> dict:
@@ -631,7 +631,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. BROWSER-FIRST ROUTING IS MANDATORY: whenever the user asks to use a browser, website, web app, browser tab, Chrome, Edge, ALI browser, or Eva browser, start with browser_tool, normally action ensure_cdp -> resolve -> observe -> semantic_click/semantic_type. Do not start a normal web-page task with computer_tool. For the ALI node, the default browser target is the Eva Chrome profile exposed over CDP at http://127.0.0.1:9222. Fall back to selector click/type only when semantic actions fail, then computer.ui_click/ui_set_text only for browser chrome or OS-native UI that CDP cannot access, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. BROWSER-FIRST ROUTING IS MANDATORY: whenever the user asks to use a browser, website, web app, browser tab, Chrome, Edge, Home browser, ALI browser, or Eva browser, start with browser_tool, normally action ensure_cdp -> resolve -> observe -> semantic_click/semantic_type. Do not start a normal web-page task with computer_tool. When the user says Home, use node N20630; when the user says ALI, use node ali-bc0358dd0a5d. For Eva on either Home or ALI, browser_tool is hard-isolated to that node's dedicated Eva Chrome profile at http://127.0.0.1:9222; computer_tool and shell-based browser control are blocked for those Eva sessions. Fall back to selector click/type only when semantic actions fail, then computer.ui_click/ui_set_text only for browser chrome or OS-native UI that CDP cannot access, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -721,22 +721,30 @@ async def git_tool(node_id: str, workspace: str, action: str, params: dict | Non
 _EVA_BROWSER_SESSIONS: dict[str, str] = {}
 
 
-async def _eva_browser_session(node_id: str, workspace: str, task_title: str | None = None) -> str:
+async def _eva_browser_session(
+    node_id: str,
+    workspace: str,
+    task_title: str | None = None,
+    target: EvaBrowserTarget | None = None,
+) -> str:
+    target = target or _eva_browser_target(node_id)
+    if target is None:
+        raise RuntimeError("No dedicated Eva browser target is configured for this node")
     result = await _node_rpc(
         node_id,
         workspace,
         "browser.ensure_profile",
         {
-            "user_data_dir": EVA_BROWSER_USER_DATA_DIR,
-            "executable_path": EVA_BROWSER_EXECUTABLE,
+            "user_data_dir": target.user_data_dir,
+            "executable_path": target.executable_path,
             "headless": False,
             "browser_name": "chrome",
-            "profile": EVA_BROWSER_PROFILE,
+            "profile": target.profile,
         },
         task_title=task_title,
     )
     if not isinstance(result, dict) or not result.get("session_id"):
-        raise RuntimeError("Could not establish the dedicated Eva browser session")
+        raise RuntimeError(f"Could not establish the dedicated Eva browser session on {target.label}")
     session_id = str(result["session_id"])
     _EVA_BROWSER_SESSIONS[node_id] = session_id
     return session_id
@@ -744,31 +752,31 @@ async def _eva_browser_session(node_id: str, workspace: str, task_title: str | N
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    """Preferred tool for ALL normal browser and web-page work. For reading or listing page state/content, use ensure_cdp -> pages/resolve -> observe/inspect. Do NOT use screenshot as the first step for reading pages; screenshot is visual fallback only. For interaction, use semantic_click/semantic_type before selector actions. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on ALI is hard-isolated to the dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
+    """Preferred tool for ALL normal browser and web-page work. For reading or listing page state/content, use ensure_cdp -> pages/resolve -> observe/inspect. Do NOT use screenshot as the first step for reading pages; screenshot is visual fallback only. For interaction, use semantic_click/semantic_type before selector actions. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on configured Home/ALI nodes is hard-isolated to that node's dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
     allowed = {"discover", "connect_cdp", "ensure_cdp", "ensure_profile", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
-    eva_isolated = _is_eva_on_ali(node_id)
-    if eva_isolated:
+    target = _eva_browser_target(node_id)
+    if target is not None:
         if action == "launch_persistent":
-            raise PermissionError("Eva on ALI is locked to the dedicated Eva browser and cannot launch another browser profile.")
+            raise PermissionError(f"Eva on {target.label} is locked to the dedicated Eva browser and cannot launch another browser profile.")
         if action == "close":
-            raise PermissionError("Eva on ALI cannot close the dedicated browser session.")
+            raise PermissionError(f"Eva on {target.label} cannot close the dedicated browser session.")
         if action == "discover":
-            session_id = await _eva_browser_session(node_id, workspace, task_title)
-            return [{"name": "chrome", "profile": EVA_BROWSER_PROFILE, "endpoint": EVA_BROWSER_ENDPOINT, "session_id": session_id, "dedicated": True}]
+            session_id = await _eva_browser_session(node_id, workspace, task_title, target)
+            return [{"name": "chrome", "profile": target.profile, "endpoint": target.endpoint, "session_id": session_id, "dedicated": True, "target": target.label}]
         if action in {"connect_cdp", "ensure_cdp", "ensure_profile"}:
             result = await _node_rpc(
                 node_id,
                 workspace,
                 "browser.ensure_profile",
                 {
-                    "user_data_dir": EVA_BROWSER_USER_DATA_DIR,
-                    "executable_path": EVA_BROWSER_EXECUTABLE,
+                    "user_data_dir": target.user_data_dir,
+                    "executable_path": target.executable_path,
                     "headless": False,
                     "browser_name": "chrome",
-                    "profile": EVA_BROWSER_PROFILE,
+                    "profile": target.profile,
                 },
                 task_title=task_title,
             )
@@ -776,8 +784,9 @@ async def browser_tool(node_id: str, workspace: str, action: str, params: dict |
                 _EVA_BROWSER_SESSIONS[node_id] = str(result["session_id"])
                 result["compat_action"] = action
                 result["dedicated"] = True
+                result["target"] = target.label
             return result
-        payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title)
+        payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title, target)
     elif action in {"connect_cdp", "ensure_cdp"}:
         node = registry.nodes.get(node_id)
         if node and str(node.name or "").strip().lower() == "ali":
