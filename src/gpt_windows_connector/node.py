@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 
 import websockets
 
-from .access_control import LocalAccessStore, intersect_security, normalize_preset, preset_security
+from .access_control import LocalAccessStore, normalize_preset, preset_security, resolve_effective_security
 from .config import NodeSettings
 from .executor import Executor
 from .settings_ui import configure_gui as _configure_gui
@@ -356,8 +356,9 @@ async def _serve_connection(
             roots = tuple(Path(str(item)).resolve() for item in access.get("allowed_roots") or [])
             user_config = _load_config()
             node_security = user_config.get("security") if isinstance(user_config.get("security"), dict) else {}
-            account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(str(access.get("preset") or "request_approval"))
-            user_config["security"] = intersect_security(dict(node_security), dict(account_security))
+            preset = normalize_preset(str(access.get("preset") or "request_approval"))
+            account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(preset)
+            user_config["security"] = resolve_effective_security(dict(node_security), dict(account_security), preset)
             return user_id, Executor(roots, user_config)
 
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:

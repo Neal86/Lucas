@@ -3,4 +3,4 @@
 Remote, model-independent MCP execution layer for Windows projects.
 """
 
-__version__ = "1.7.65"
+__version__ = "1.7.66"

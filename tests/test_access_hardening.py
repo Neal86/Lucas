@@ -1,13 +1,31 @@
 import json
 
-from gpt_windows_connector.access_control import intersect_security
+from gpt_windows_connector.access_control import intersect_security, preset_security, resolve_effective_security
 from gpt_windows_connector import node
 
 
-def test_user_full_access_cannot_override_node_ask():
-    node = {"approval_policy": {"file_delete": "ask"}, "network_external": "block", "network_lan": "allow", "block_silent_network": True}
-    user = {"approval_policy": {"file_delete": "allow"}, "network_external": "allow", "network_lan": "allow", "block_silent_network": False}
-    effective = intersect_security(node, user)
+def test_full_access_skips_routine_node_asks_but_keeps_hard_blocks_and_safety_gates():
+    node_security = {
+        "approval_policy": {"file_write": "ask", "file_delete": "block", "desktop_control": "ask"},
+        "foreground_confirmation": True,
+        "network_external": "ask",
+        "network_lan": "allow",
+        "block_silent_network": True,
+    }
+    effective = resolve_effective_security(node_security, preset_security("full_access"), "full_access")
+    assert effective["approval_policy"]["file_write"] == "allow"
+    assert effective["approval_policy"]["file_delete"] == "block"
+    assert effective["approval_policy"]["service_control"] == "always_ask"
+    assert effective["approval_policy"]["software_install"] == "always_ask"
+    assert effective["network_external"] == "allow"
+    assert effective["block_silent_network"] is False
+    assert effective["foreground_confirmation"] is True
+
+
+def test_non_full_access_still_uses_stricter_node_policy():
+    node_security = {"approval_policy": {"file_delete": "ask"}, "network_external": "block", "network_lan": "allow", "block_silent_network": True}
+    user_security = {"approval_policy": {"file_delete": "allow"}, "network_external": "allow", "network_lan": "allow", "block_silent_network": False}
+    effective = intersect_security(node_security, user_security)
     assert effective["approval_policy"]["file_delete"] == "ask"
     assert effective["network_external"] == "block"
     assert effective["block_silent_network"] is True

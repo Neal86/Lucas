@@ -26,6 +26,43 @@ def intersect_security(node_security: dict[str, Any] | None, user_security: dict
     effective_domains=[v for v in user_domains if v in set(node_domains)] if node_domains and user_domains else node_domains or user_domains
     return {**node,"approval_policy":effective_policy,"foreground_confirmation":bool(node.get("foreground_confirmation",True)),"remember_approvals":bool(node.get("remember_approvals",True)) and bool(user.get("remember_approvals",True)),"network_external":_stricter_decision(node.get("network_external"),user.get("network_external")),"network_lan":_stricter_decision(node.get("network_lan"),user.get("network_lan")),"allowed_domains":effective_domains,"block_silent_network":bool(node.get("block_silent_network",True)) or bool(user.get("block_silent_network",True)),"show_rule_summary":bool(node.get("show_rule_summary",True)) or bool(user.get("show_rule_summary",True)),"rules_text":str(node.get("rules_text") or DEFAULT_SECURITY["rules_text"])}
 
+
+def resolve_effective_security(node_security: dict[str, Any] | None, user_security: dict[str, Any] | None, preset: str) -> dict[str, Any]:
+    """Resolve per-user security while keeping hard local blocks and true safety gates.
+
+    Full Access means routine/background actions do not prompt. Machine-wide explicit
+    blocks, foreground confirmation, domain restrictions, and true-danger safety
+    gates remain authoritative.
+    """
+    from .security import DEFAULT_SECURITY
+    preset = normalize_preset(preset)
+    if preset != "full_access":
+        return intersect_security(node_security, user_security)
+
+    node = {**DEFAULT_SECURITY, **(node_security or {})}
+    node_policy = {**DEFAULT_SECURITY["approval_policy"], **dict(node.get("approval_policy") or {})}
+    full = preset_security("full_access")
+    full_policy = dict(full.get("approval_policy") or {})
+    effective_policy: dict[str, Any] = {}
+    for key in set(node_policy) | set(full_policy):
+        node_decision = str(node_policy.get(key) or "ask").lower()
+        effective_policy[key] = "block" if node_decision == "block" else str(full_policy.get(key) or "allow")
+    effective_policy = _apply_safety_floor(effective_policy)
+
+    node_external = str(node.get("network_external") or "ask").lower()
+    node_lan = str(node.get("network_lan") or "allow").lower()
+    return {
+        **node,
+        "approval_policy": effective_policy,
+        "foreground_confirmation": bool(node.get("foreground_confirmation", True)),
+        "remember_approvals": bool(node.get("remember_approvals", True)),
+        "network_external": "block" if node_external == "block" else "allow",
+        "network_lan": "block" if node_lan == "block" else "allow",
+        "allowed_domains": [str(v).strip().lower() for v in node.get("allowed_domains") or [] if str(v).strip()],
+        "block_silent_network": False,
+        "rules_text": str(node.get("rules_text") or DEFAULT_SECURITY["rules_text"]),
+    }
+
 ACCESS_PRESETS={"request_approval","auto_approve","full_access","custom"}
 
 def preset_security(preset: str) -> dict[str, Any]:
