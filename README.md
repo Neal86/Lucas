@@ -52,6 +52,8 @@ Shell and desktop actions still execute with the Windows account's OS permission
 
 ## Development
 
+> Development and AI-assisted changes must follow [PROJECT_RULES.md](PROJECT_RULES.md). In particular: present the change plan and file list before editing, and isolate new features in new modules/files whenever practical.
+
 Python 3.11+:
 
 ```bash
