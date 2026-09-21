@@ -19,13 +19,13 @@ LANDING_HEADER_STYLE = r'''<style>
 .landing-signin{color:#dfe4f3;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);border-radius:10px;padding:10px 15px;cursor:pointer}
 .mobile-menu{display:none}
 @media(max-width:800px){
-  .landing-nav{height:66px!important;padding:0 16px!important;display:grid!important;grid-template-columns:44px 1fr auto;align-items:center}
+  .landing-nav{position:fixed!important;top:0!important;left:0!important;right:0!important;inset-inline:0!important;height:66px!important;width:100vw!important;max-width:100vw!important;padding:0 16px!important;display:grid!important;grid-template-columns:42px 1fr auto;align-items:center;background:#05070d!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform:translateZ(0);-webkit-transform:translateZ(0);will-change:transform}
   .landing-nav>.landing-logo{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}
   .landing-nav>.landing-logo img{width:132px!important;max-width:132px!important;height:auto!important}
   .landing-nav>.landing-links{display:none!important}
   .landing-nav>.landing-signin{display:inline-flex!important;grid-column:3;align-items:center;justify-content:center;justify-self:end;position:relative;z-index:4;min-width:78px;height:42px;padding:0 12px;border-radius:11px;background:linear-gradient(110deg,#6473f4,#5969e9);color:#fff;border:0;font-size:13px;font-weight:700}
   .mobile-menu{display:block;grid-column:1;position:relative;z-index:3;margin:0;padding:0}
-  .mobile-menu summary{list-style:none;width:44px;height:44px;border:0;border-radius:0;background:transparent;display:grid;place-items:center;cursor:pointer;color:#eef2ff;font-size:0}
+  .mobile-menu summary{list-style:none;width:42px;height:42px;border:0;border-radius:0;background:transparent;display:grid;place-items:center;cursor:pointer;color:#eef2ff;font-size:0}
   .mobile-menu summary::-webkit-details-marker{display:none}
   .mobile-menu summary:before{content:'☰';font-size:26px;line-height:1;font-weight:500}
   .mobile-menu[open] summary:before{content:'×';font-size:27px;font-weight:300}
