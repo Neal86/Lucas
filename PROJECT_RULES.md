@@ -108,6 +108,9 @@ When a feature changes product behavior, architecture, permissions, setup flow, 
 
 - Validate the target branch/application before deployment.
 - Prefer staging verification before production for meaningful changes.
+- Before every Production web release, run `scripts/smoke_web_pages.py <staging-base-url>` against the deployed Staging build.
+- Every route in `web_smoke_routes.py` must pass. Any 5xx, failed required status, or unreachable route blocks Production deployment.
+- After Production deployment, run the same smoke gate against Production and treat any failure as a release incident requiring immediate repair or rollback.
 - Verify the actual deployed commit/container, not merely that a deploy command was accepted.
 - Verify the real runtime endpoint/behavior after deployment.
 - Do not treat queued, timed-out, or in-progress deployment calls as success.
