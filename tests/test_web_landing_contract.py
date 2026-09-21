@@ -28,8 +28,15 @@ def test_mobile_signin_remains_visible_and_independent():
 
 def test_mobile_menu_is_large_and_borderless():
     assert ".mobile-menu summary{" in LANDING_HEADER_STYLE
-    assert "width:44px;height:44px;border:0" in LANDING_HEADER_STYLE
+    assert "width:42px;height:42px;border:0" in LANDING_HEADER_STYLE
     assert "font-size:26px" in LANDING_HEADER_STYLE
+
+
+def test_mobile_header_is_pinned_to_viewport():
+    assert "position:fixed!important;top:0!important;left:0!important;right:0!important" in LANDING_HEADER_STYLE
+    assert "width:100vw!important;max-width:100vw!important" in LANDING_HEADER_STYLE
+    assert "transform:translateZ(0)" in LANDING_HEADER_STYLE
+    assert "backdrop-filter:none!important" in LANDING_HEADER_STYLE
 
 
 def test_fixed_mobile_header_does_not_cover_hero():

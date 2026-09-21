@@ -30,6 +30,7 @@ from .web_assets import DASHBOARD_HTML
 from .web_document import TRACKING_HEAD
 from .web_i18n_runtime import I18N_SCRIPT
 from .web_landing import LANDING_HTML
+from .web_cache_policy import html_no_cache_headers
 
 
 def _auth_user(request: Request):
@@ -155,7 +156,7 @@ async def home(request: Request):
         html = html.replace('Sign in <span>→</span>', 'Dashboard <span>→</span>', 1)
     except Exception:
         pass
-    return HTMLResponse(html)
+    return HTMLResponse(html, headers=html_no_cache_headers())
 
 
 async def dashboard(_: Request):
