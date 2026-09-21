@@ -29,6 +29,7 @@ BRAND_ASSET_DIR = Path(__file__).with_name("assets")
 from .web_assets import DASHBOARD_HTML
 from .web_document import TRACKING_HEAD
 from .web_i18n_runtime import I18N_SCRIPT
+from .web_landing import LANDING_HTML
 
 
 def _auth_user(request: Request):
@@ -90,14 +91,7 @@ def _ensure_dashboard_metadata_schema(db: sqlite3.Connection) -> None:
 
 
 def _landing_html() -> str:
-    css_marker = '/* Lucas public landing */'
-    css_start = DASHBOARD_HTML.index(css_marker)
-    css_end = DASHBOARD_HTML.index('</style>', css_start)
-    landing_css = DASHBOARD_HTML[css_start:css_end]
-    section_start = DASHBOARD_HTML.index('<section id="landing" class="landing">')
-    section_end = DASHBOARD_HTML.index('\n<div id="auth"', section_start)
-    landing = DASHBOARD_HTML[section_start:section_end]
-    landing = landing.replace('onclick="openAuth()"', 'onclick="location.href=\'/dashboard\'"')
+    landing = LANDING_HTML.replace('onclick="openAuth()"', 'onclick="location.href=\'/dashboard\'"')
     seo_copy = """<section aria-label="About Lucas MCP" style="max-width:980px;margin:0 auto;padding:40px 28px 90px;color:#9aa4bd;font:15px/1.8 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif"><h2 style="color:#f5f7ff;font-size:28px;margin:0 0 12px">Lucas MCP computer connector</h2><p>Lucas MCP is a secure bridge between MCP-compatible AI assistants and your computer. Connect ChatGPT, Claude, Gemini and other AI tools to work with files, projects, browsers, terminals and desktop applications while local permissions remain under your control.</p><p>Lucas is designed for model-agnostic computer automation and remote access, with activity visibility and local permission boundaries instead of unrestricted cloud-side control.</p><p><a href="/features">Explore Lucas MCP features</a> · <a href="/how-it-works">How Lucas MCP works</a> · <a href="/security">Security</a> · <a href="/download">Download Lucas Node</a> · <a href="/pricing">Pricing</a></p></section>"""
     return f"""<!doctype html>
 <html lang="en">
@@ -126,7 +120,6 @@ def _landing_html() -> str:
 {TRACKING_HEAD}
 <style>
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth;background:#05070d}}body{{margin:0;background:#05070d}}button{{font:inherit}}
-{landing_css}
 </style>
 </head>
 <body>{landing}{seo_copy}{I18N_SCRIPT}<script>if(WEB_LANG==='zh')localizeWeb(document.body)</script><footer style="max-width:980px;margin:0 auto;padding:0 28px 42px;color:#7f8aa1;font:13px Inter,system-ui,sans-serif"><a style="color:inherit;margin-right:18px" href="/privacy">Privacy</a><a style="color:inherit;margin-right:18px" href="/terms">Terms</a><a style="color:inherit;margin-right:18px" href="/refunds">Refunds</a><a style="color:inherit" href="/contact">Contact</a></footer></body>
