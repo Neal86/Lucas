@@ -133,13 +133,9 @@ def _dashboard_html() -> str:
     html = html.replace("__TURNSTILE_SITE_KEY__", turnstile_site_key).replace("__TURNSTILE_CLASS__", "" if turnstile_site_key else "hidden")
     if not turnstile_site_key:
         html = html.replace('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>', '')
-    css_marker = '/* Lucas public landing */'
-    css_start = html.index(css_marker)
-    css_end = html.index('</style>', css_start)
-    html = html[:css_start] + html[css_end:]
-    section_start = html.index('<section id="landing" class="landing">')
-    section_end = html.index('\n<div id="auth"', section_start)
-    html = html[:section_start] + html[section_end + 1:]
+    # Landing is a standalone module. Remove the exact component instead of
+    # slicing the dashboard by whitespace/DOM formatting markers.
+    html = html.replace(LANDING_HTML, "", 1)
     html = html.replace('<head>', '<head>\n<meta name="robots" content="noindex,nofollow,noarchive" />', 1)
     account_marker = '<div id="account" class="view hidden">'
     if account_marker in html and 'id="billing" class="view hidden"' not in html:
