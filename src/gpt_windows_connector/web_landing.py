@@ -26,9 +26,9 @@ LANDING_HTML = '''<section id="landing" class="landing">
       .landing-nav>.landing-logo img{width:132px!important;max-width:132px!important;height:auto!important}
       .landing-nav>.landing-links,.landing-nav>.landing-signin{display:none!important}
       .mobile-menu{display:block;grid-column:1;position:relative;z-index:3;margin:0;padding:0}
-      .mobile-menu summary{list-style:none;width:42px;height:42px;border:1px solid rgba(255,255,255,.12);border-radius:11px;background:rgba(255,255,255,.035);display:grid;place-items:center;cursor:pointer;color:#eef2ff;font-size:0}
+      .mobile-menu summary{list-style:none;width:44px;height:44px;border:0;border-radius:0;background:transparent;display:grid;place-items:center;cursor:pointer;color:#eef2ff;font-size:0}
       .mobile-menu summary::-webkit-details-marker{display:none}
-      .mobile-menu summary:before{content:'☰';font-size:21px;line-height:1}
+      .mobile-menu summary:before{content:'☰';font-size:26px;line-height:1;font-weight:500}
       .mobile-menu[open] summary:before{content:'×';font-size:27px;font-weight:300}
       .mobile-menu-panel{position:fixed;top:66px;left:12px;right:12px;padding:12px;background:rgba(10,13,22,.97);border:1px solid rgba(255,255,255,.11);border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.48);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);display:flex;flex-direction:column;gap:4px}
       .mobile-menu-panel a,.mobile-menu-panel button{width:100%;min-height:48px;padding:12px 14px;border-radius:10px;text-align:left;color:#dfe4f3;text-decoration:none;font:600 15px/1.2 Inter,ui-sans-serif,system-ui;background:transparent;border:0}
