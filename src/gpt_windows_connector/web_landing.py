@@ -4,7 +4,7 @@ LANDING_HTML = '''<section id="landing" class="landing">
   <style>
     /* Landing conversion refresh */
     .landing-nav{
-      position:sticky!important;top:0;z-index:40!important;
+      position:fixed!important;top:0;left:0;right:0;z-index:1000!important;
       max-width:none!important;width:100%;
       padding-left:max(28px,calc((100vw - 1240px)/2 + 28px))!important;
       padding-right:max(28px,calc((100vw - 1240px)/2 + 28px))!important;
