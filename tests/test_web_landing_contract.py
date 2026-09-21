@@ -41,3 +41,12 @@ def test_landing_is_composed_from_modules():
     assert LANDING_HEADER_STYLE in LANDING_HTML
     assert LANDING_BODY_STYLE in LANDING_HTML
     assert "Start for free" in LANDING_HTML
+
+
+def test_public_home_does_not_slice_landing_out_of_dashboard():
+    from pathlib import Path
+    from gpt_windows_connector import webapp
+
+    source = Path(webapp.__file__).read_text(encoding="utf-8")
+    assert "landing = LANDING_HTML" in source
+    assert "DASHBOARD_HTML.index('\\n<div id=\"auth\"'" not in source
