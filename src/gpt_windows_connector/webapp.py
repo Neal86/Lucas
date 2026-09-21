@@ -28,6 +28,7 @@ BRAND_ASSET_DIR = Path(__file__).with_name("assets")
 
 from .web_assets import DASHBOARD_HTML
 from .web_document import TRACKING_HEAD
+from .web_i18n_runtime import I18N_SCRIPT
 
 
 def _auth_user(request: Request):
@@ -128,9 +129,7 @@ def _landing_html() -> str:
 {landing_css}
 </style>
 </head>
-<body>{landing}<script>
-if((navigator.language||'en').toLowerCase().startsWith('zh')){{document.documentElement.lang='zh-CN';const Z={{'Capabilities':'功能','Security':'安全','How it works':'工作原理','Sign in':'登录','Dashboard':'控制台','Connect your computer':'连接电脑','See how it works ↓':'查看工作原理 ↓','Model agnostic':'不限模型','Cross-platform':'跨平台','Token-free execution':'无额外执行 Token','WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正执行工作。','Terminal & Code':'终端与代码','Files & Projects':'文件与项目','Browser':'浏览器','Computer Use':'电脑操作','Remote Access':'远程访问','A DIFFERENT ARCHITECTURE':'不同的架构','Token-free':'无额外 Token','execution.':'执行。','CONTROL WITHOUT COMPROMISE':'安全控制，不做妥协','Your computer.':'你的电脑。','Your boundaries.':'你的边界。','Project-scoped access':'项目范围访问','Local permission control':'本地权限控制','OAuth-secured MCP':'OAuth 安全 MCP','Activity visibility':'操作记录可见','THREE STEPS':'三个步骤','From AI to action.':'从 AI 到实际执行。','Connect a computer':'连接电脑','Add Lucas MCP':'添加 Lucas MCP','Start working':'开始工作','THE BRIDGE IS READY':'连接已经准备好','Any AI.':'任何 AI。','Any computer.':'任何电脑。','Get started with Lucas':'开始使用 Lucas'}};const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);const a=[];while(w.nextNode())a.push(w.currentNode);for(const n of a){{const t=n.nodeValue.trim();if(Z[t])n.nodeValue=n.nodeValue.replace(t,Z[t])}}}}
-</script>{seo_copy}<footer style="max-width:980px;margin:0 auto;padding:0 28px 42px;color:#7f8aa1;font:13px Inter,system-ui,sans-serif"><a style="color:inherit;margin-right:18px" href="/privacy">Privacy</a><a style="color:inherit;margin-right:18px" href="/terms">Terms</a><a style="color:inherit;margin-right:18px" href="/refunds">Refunds</a><a style="color:inherit" href="/contact">Contact</a></footer></body>
+<body>{landing}{seo_copy}{I18N_SCRIPT}<script>if(WEB_LANG==='zh')localizeWeb(document.body)</script><footer style="max-width:980px;margin:0 auto;padding:0 28px 42px;color:#7f8aa1;font:13px Inter,system-ui,sans-serif"><a style="color:inherit;margin-right:18px" href="/privacy">Privacy</a><a style="color:inherit;margin-right:18px" href="/terms">Terms</a><a style="color:inherit;margin-right:18px" href="/refunds">Refunds</a><a style="color:inherit" href="/contact">Contact</a></footer></body>
 </html>"""
 
 
