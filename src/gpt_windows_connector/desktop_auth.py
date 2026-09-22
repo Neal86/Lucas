@@ -17,8 +17,7 @@ class DesktopAuthApi:
         self.send_verification_email = send_verification_email
         self.email_verification_enabled = email_verification_enabled
 
-    @staticmethod
-    def _ip(request: Request) -> str:
+    def _ip(self, request: Request) -> str:
         return self.gateway._client_ip(request)
 
     def _token_response(self, user) -> JSONResponse:

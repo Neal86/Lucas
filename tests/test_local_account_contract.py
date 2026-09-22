@@ -8,6 +8,8 @@ def test_local_account_ui_is_isolated_and_syncs_only_plugin_metadata():
 
     assert "protect_text(token)" in account
     assert '"/api/plugins"' in account
+    assert '"/auth/desktop/login"' in account
+    assert "verify_login" in account
     assert "Allowed Folders" in ui
     assert "build_account_page" in settings
     assert 'pages["账号与插件"]' in settings
