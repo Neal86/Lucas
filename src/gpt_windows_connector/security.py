@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+from .approval_details import describe_approval
+
 
 DEFAULT_SECURITY: dict[str, Any] = {
     "approval_policy": {
@@ -70,7 +72,6 @@ HIGH_RISK_PATTERNS = [
     r"\bmanage-bde\b", r"\bnet\s+user\b", r"\bnet\s+localgroup\b", r"\bsc(?:\.exe)?\s+(?:delete|config)\b",
     r"\bSet-MpPreference\b", r"\bAdd-MpPreference\b", r"\bDisable-WindowsOptionalFeature\b",
     r"\bRemove-WindowsCapability\b", r"\bStop-Computer\b", r"\bRestart-Computer\b",
-    r"Remove-Item[^\n]*(?:-Recurse|-Force)[^\n]*(?:Windows|Program Files|System32|Users\\)",
 ]
 SERVICE_PATTERNS = [
     r"\b(?:Start|Stop|Restart|Set)-Service\b", r"\bsc(?:\.exe)?\s+(?:start|stop|pause|continue)\b",
@@ -109,6 +110,21 @@ def _command_text(method: str, params: dict[str, Any]) -> str:
 
 def _matches(patterns: list[str], text: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _dangerous_recursive_delete(command: str) -> bool:
+    if not re.search(r"\bRemove-Item\b", command, flags=re.IGNORECASE):
+        return False
+    if not re.search(r"-(?:Recurse|Force)\b", command, flags=re.IGNORECASE):
+        return False
+    sensitive_patterns = (
+        r"(?i)(?:[A-Z]:\\)?(?:Windows|Program Files(?: \(x86\))?|ProgramData)(?:\\|[\"'\s;]|$)",
+        r"(?i)[A-Z]:\\Users(?:\\)?(?=[\"'\s;]|$)",
+        r"(?i)[A-Z]:\\Users\\\*(?=[\"'\s;]|$)",
+        r"(?i)[A-Z]:\\Users\\[^\\\s\"']+(?=[\"'\s;]|$)",
+        r"(?i)\$env:(?:USERPROFILE|SystemRoot|windir)(?:\\)?(?=[\"'\s;]|$)",
+    )
+    return any(re.search(pattern, command) for pattern in sensitive_patterns)
 
 
 def _extract_url(method: str, params: dict[str, Any]) -> str | None:
@@ -195,7 +211,7 @@ class LocalSecurityPolicy:
             return "software_install"
         if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
             return "registry_system"
-        if command and _matches(HIGH_RISK_PATTERNS, command):
+        if command and (_matches(HIGH_RISK_PATTERNS, command) or _dangerous_recursive_delete(command)):
             return "high_risk"
         if command and _matches(SERVICE_PATTERNS, command):
             return "service_control"
@@ -226,11 +242,22 @@ class LocalSecurityPolicy:
             command = re.sub(r"\s+", " ", command)[:240]
         return f"{category}|{method}|{command or summary}"
 
-    def _prompt(self, category: str, method: str, summary: str, audit_context: dict[str, Any] | None = None) -> bool:
+    def _prompt(self, category: str, method: str, params: dict[str, Any], summary: str, audit_context: dict[str, Any] | None = None) -> bool:
         rules = str(self.security.get("rules_text") or "").strip()
         context = dict(audit_context or {})
+        details = describe_approval(category, method, params, context)
         title = "Lucas 前台控制确认" if category == "desktop_control" else "Lucas 安全确认"
-        text = f"Lucas 请求在此电脑执行操作：\n\n{summary}\n\n方法：{method}\n风险类别：{category}"
+        text = (
+            "Lucas 请求在此电脑执行操作：\n\n"
+            f"操作：{details['operation']}\n"
+            f"目的：{details['purpose']}\n"
+            f"需要确认的原因：{details['risk_reason']}"
+        )
+        if details.get("workspace"):
+            text += f"\n位置：{details['workspace']}"
+        if details.get("command_preview"):
+            text += f"\n\n将执行的命令（敏感信息已隐藏）：\n{details['command_preview']}"
+        text += f"\n\n技术信息：{method} · {category}"
         source_lines = []
         if context.get("client_name"): source_lines.append(f"来源 AI：{context.get('client_name')}")
         if context.get("client_id"): source_lines.append(f"Client ID：{context.get('client_id')}")
@@ -263,7 +290,7 @@ class LocalSecurityPolicy:
         with self._approval_lock:
             if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
                 return
-            if not self._prompt(category, method, summary, audit_context):
+            if not self._prompt(category, method, params, summary, audit_context):
                 raise PermissionError(f"Denied locally: {summary}")
             if decision != "always_ask" and self.security.get("remember_approvals", True):
                 self._approved.add(key)
@@ -291,7 +318,7 @@ class LocalSecurityPolicy:
             "browser_transfer": "浏览器上传或下载文件",
             "git_write": "修改本地 Git 仓库",
             "git_push": "向 Git 远端推送内容",
-            "high_risk": "执行其他高风险系统操作",
+            "high_risk": "需要额外确认的系统级操作",
         }
         decision = category_decision
         summary = summary_map.get(category, method)
