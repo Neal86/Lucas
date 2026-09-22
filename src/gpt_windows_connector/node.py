@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 import websockets
 
 from .access_control import LocalAccessStore, normalize_preset, preset_security, resolve_effective_security
+from .approval_details import safe_command_preview
 from .config import NodeSettings
 from .executor import Executor
 from .settings_ui import configure_gui as _configure_gui
@@ -372,8 +373,9 @@ async def _serve_connection(
                 "audit_request_id": str(actor.get("audit_request_id") or request_id or ""),
                 "gateway_request_id": str(request_id or ""),
                 "requested_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(wall_started)),
+                "command_preview": safe_command_preview(method, params),
             }
-            log.info("Execution request method=%s request_id=%s audit_request_id=%s source=%s client_name=%s client_id=%s session_id=%s task_title=%s workspace=%s", method, request_id, audit_context["audit_request_id"], audit_context["source"], audit_context["client_name"] or "-", audit_context["client_id"] or "-", audit_context["session_id"] or "-", audit_context["task_title"] or "-", str(params.get("workspace") or "-"))
+            log.info("Execution request method=%s request_id=%s audit_request_id=%s source=%s client_name=%s client_id=%s session_id=%s task_title=%s workspace=%s command_preview=%s", method, request_id, audit_context["audit_request_id"], audit_context["source"], audit_context["client_name"] or "-", audit_context["client_id"] or "-", audit_context["session_id"] or "-", audit_context["task_title"] or "-", str(params.get("workspace") or "-"), audit_context["command_preview"] or "-")
             try:
                 access = await asyncio.to_thread(effective_access, actor)
                 if not access:
