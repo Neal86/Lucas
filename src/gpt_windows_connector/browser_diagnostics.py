@@ -65,7 +65,7 @@ def attach_page(page) -> None:
         except Exception:
             pass
 
-    async def on_response(response) -> None:
+    def on_response(response) -> None:
         try:
             if int(response.status or 0) >= 400:
                 buf.http_errors.append({
@@ -84,7 +84,7 @@ def attach_page(page) -> None:
     page.on("pageerror", on_page_error)
     page.on("requestfailed", on_request_failed)
     page.on("response", on_response)
-    page.on("close", lambda: on_close())
+    page.on("close", lambda *_: on_close())
 
 
 def attach_context(context) -> None:
