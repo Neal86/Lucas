@@ -63,12 +63,16 @@ def test_referrals_have_no_global_reward_cap(tmp_path):
     code = service.code_for("referrer")
     referral_count = 25
     for index in range(referral_count):
-        assert service.claim(f"friend-{index}", code)
+        friend_id = f"friend-{index}"
+        assert service.claim(friend_id, code)
+        assert service.qualify_paid_user(friend_id, f"evt-paid-{index}")
     summary = service.summary("referrer")
     assert summary["total_referrals"] == referral_count
+    assert summary["paid_referrals"] == referral_count
     assert summary["signup_earned_requests"] == referral_count * REFERRAL_SIGNUP_REWARD_REQUESTS
+    assert summary["paid_earned_requests"] == referral_count * REFERRAL_PAID_REWARD_REQUESTS
     with sqlite3.connect(path) as db:
         bonus = db.execute(
             "SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'"
         ).fetchone()[0]
-    assert bonus == referral_count * 300
+    assert bonus == referral_count * (300 + 3000)
