@@ -22,7 +22,7 @@ def _db(tmp_path: Path) -> Path:
     return path
 
 
-def test_referral_awards_3000_once(tmp_path):
+def test_referral_rewards_are_300_and_3000_once(tmp_path):
     path = _db(tmp_path)
     service = ReferralService(path, "https://lucasmcp.com")
     code = service.code_for("referrer")
@@ -30,7 +30,7 @@ def test_referral_awards_3000_once(tmp_path):
     with sqlite3.connect(path) as db:
         referrer_signup = db.execute("SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'").fetchone()[0]
         friend_signup = db.execute("SELECT bonus_requests FROM subscriptions WHERE user_id='friend'").fetchone()[0]
-    assert referrer_signup == friend_signup == REFERRAL_SIGNUP_REWARD_REQUESTS == 1000
+    assert referrer_signup == friend_signup == REFERRAL_SIGNUP_REWARD_REQUESTS == 300
     assert not service.claim("friend", code)
     assert service.qualify_paid_user("friend", "evt_first_paid")
     assert not service.qualify_paid_user("friend", "evt_second_paid")
@@ -38,7 +38,7 @@ def test_referral_awards_3000_once(tmp_path):
         bonus = db.execute(
             "SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'"
         ).fetchone()[0]
-    assert bonus == REFERRAL_SIGNUP_REWARD_REQUESTS + REFERRAL_PAID_REWARD_REQUESTS == 11000
+    assert bonus == REFERRAL_SIGNUP_REWARD_REQUESTS + REFERRAL_PAID_REWARD_REQUESTS == 3300
 
 
 def test_self_referral_is_rejected(tmp_path):
@@ -53,5 +53,22 @@ def test_referral_summary_has_share_link(tmp_path):
     service = ReferralService(path, "https://lucasmcp.com")
     summary = service.summary("referrer")
     assert summary["url"].startswith("https://lucasmcp.com/r/")
-    assert summary["signup_reward_requests"] == 1000
-    assert summary["paid_reward_requests"] == 10000
+    assert summary["signup_reward_requests"] == 300
+    assert summary["paid_reward_requests"] == 3000
+
+
+def test_referrals_have_no_global_reward_cap(tmp_path):
+    path = _db(tmp_path)
+    service = ReferralService(path, "https://lucasmcp.com")
+    code = service.code_for("referrer")
+    referral_count = 25
+    for index in range(referral_count):
+        assert service.claim(f"friend-{index}", code)
+    summary = service.summary("referrer")
+    assert summary["total_referrals"] == referral_count
+    assert summary["signup_earned_requests"] == referral_count * REFERRAL_SIGNUP_REWARD_REQUESTS
+    with sqlite3.connect(path) as db:
+        bonus = db.execute(
+            "SELECT bonus_requests FROM subscriptions WHERE user_id='referrer'"
+        ).fetchone()[0]
+    assert bonus == referral_count * 300
