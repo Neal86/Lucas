@@ -5,7 +5,7 @@ import contextlib
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, JSONResponse
+from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import gateway, webapp
@@ -13,31 +13,7 @@ from .registration_security import email_verification_enabled, send_verification
 from .desktop_auth import DesktopAuthApi
 
 
-WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"
-BLUE_LOGO_URL = "/assets/lucas-logo-horizontal-blue.png?v=source-20260901b"
 html = webapp.DASHBOARD_HTML
-
-html = html.replace(
-    '.landing-links a,.landing-footer{color:#8e98ae}',
-    '.landing-links a{color:#dfe4f3}.landing-footer{color:#8e98ae}',
-)
-
-html = html.replace(
-    '<nav class="landing-nav"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-    f'<nav class="landing-nav"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
-)
-html = html.replace(
-    '<footer class="landing-footer"><div class="landing-logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-    f'<footer class="landing-footer"><div class="landing-logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
-)
-html = html.replace(
-    '<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-    f'<div id="app" class="shell hidden"><aside class="side"><div class="logo"><img src="{WHITE_LOGO_URL}" alt="Lucas" /></div>',
-)
-html = html.replace(
-    '<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="/assets/lucas-logo-horizontal.png" alt="Lucas" /></div>',
-    f'<div id="auth" class="auth hidden"><div class="auth-card"><div class="brand"><img src="{BLUE_LOGO_URL}" alt="Lucas" /></div>',
-)
 
 # Login UI: password visibility, remembered-device choice, and email verification.
 html = html.replace(
@@ -68,7 +44,6 @@ html = html.replace(
     '.auth-card .brand img{display:block;width:300px!important;height:120px!important;object-fit:contain!important;object-position:center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '.side .logo{height:96px!important;min-height:96px!important;padding:10px 14px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:hidden!important}'
     '.side .logo img{display:block!important;width:205px!important;height:76px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important;margin:0!important}'
-    '.landing-logo img{display:block!important;width:220px!important;height:52px!important;object-fit:contain!important;object-position:left center!important;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}'
     '.password-wrap{position:relative}.password-wrap .input{padding-right:46px}.password-eye{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;background:transparent;cursor:pointer;border-radius:7px;font-size:17px;line-height:1}.password-eye:hover{background:#f2f4f7}.remember-row{display:flex;align-items:center;gap:8px;margin:2px 0 14px;color:#475467;cursor:pointer}.remember-row input{width:16px;height:16px}.login-code-wrap{position:relative}.login-code-wrap .input{padding-right:132px}.login-code-resend{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--accent);font-weight:700;padding:7px 8px;cursor:pointer;white-space:nowrap}.login-code-resend:hover:not(:disabled){text-decoration:underline}.login-code-resend:disabled{color:#98a2b3;cursor:not-allowed;text-decoration:none}'
     '</style></head>',
 )
@@ -106,22 +81,6 @@ boot();
 )
 
 webapp.DASHBOARD_HTML = html
-
-
-async def white_logo_asset(request):
-    return FileResponse(
-        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-white.png",
-        media_type="image/png",
-        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
-    )
-
-
-async def blue_logo_asset(request):
-    return FileResponse(
-        webapp.BRAND_ASSET_DIR / "lucas-logo-horizontal-blue.png",
-        media_type="image/png",
-        headers={"Cache-Control": "no-store, max-age=0"},
-    )
 
 
 def _login_ip(request: Request) -> str:
@@ -225,8 +184,6 @@ for path, handler, methods in (
     ("/auth/login", secure_auth_login, ["POST"]),
     ("/auth/login/resend", secure_auth_login_resend, ["POST"]),
     ("/auth/login/verify", secure_auth_login_verify, ["POST"]),
-    ("/assets/lucas-logo-horizontal-white.png", white_logo_asset, ["GET"]),
-    ("/assets/lucas-logo-horizontal-blue.png", blue_logo_asset, ["GET"]),
 ):
     webapp.routes[:] = [r for r in webapp.routes if getattr(r, "path", None) != path]
     webapp.routes.insert(0, Route(path, handler, methods=methods))

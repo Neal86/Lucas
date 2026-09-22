@@ -47,6 +47,14 @@ Only add substantial new logic to an existing file when the behavior is genuinel
 - Shared logic belongs in clear shared/common/utils modules only when it is truly shared.
 - Do not create a generic shared helper prematurely for logic used by only one feature.
 
+### Public landing visual source of truth — MUST
+
+- Public Landing branding constants belong in `web_landing_brand.py`.
+- Landing header markup belongs in `web_landing_header.py`; Landing header/menu CSS belongs in `web_landing_header_styles.py`.
+- `server.py` must never patch `.landing-*` CSS, Landing logo markup, Landing menu colors, or Landing layout at runtime.
+- Shared Landing logo artwork must be referenced through the Landing brand constant, not duplicated as hard-coded asset URLs across modules.
+- Any intentional Landing logo or navigation visual change must update the dedicated Landing brand regression contract in the same change.
+
 ## 4. Refactor large files instead of stacking patches
 
 When a file has accumulated multiple unrelated responsibilities, prefer extracting modules before adding another large patch.
