@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
+from .referrals import REFERRAL_PAID_REWARD_REQUESTS, REFERRAL_SIGNUP_REWARD_REQUESTS
+
 
 def referral_html(summary: dict) -> str:
     code = escape(str(summary.get("code") or ""))
@@ -9,7 +11,7 @@ def referral_html(summary: dict) -> str:
     paid = int(summary.get("paid_referrals") or 0)
     pending = int(summary.get("pending_referrals") or 0)
     earned = int(summary.get("earned_requests") or 0)
-    reward = int(summary.get("reward_requests") or 3000)
+    reward = int(summary.get("reward_requests") or REFERRAL_PAID_REWARD_REQUESTS)
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>Refer & Earn · Lucas</title>
@@ -24,15 +26,17 @@ button,a.btn{{background:#5b7cff;color:#fff;border:0;border-radius:10px;padding:
 .row{{display:flex;gap:10px;align-items:center}} .row input{{flex:1}} @media(max-width:700px){{.grid{{grid-template-columns:1fr}}.row{{display:block}}.row button{{margin-top:10px;width:100%}}}}
 </style></head><body><main class="wrap">
 <a class="btn" href="/dashboard">← Dashboard</a>
-<div class="card"><h1>Refer & Earn</h1><p class="muted">Invite a friend to Lucas. When they become a paying customer, you earn <b>{reward:,} bonus Requests</b>.</p>
+<div class="card"><h1>Refer & Earn</h1><p class="muted">Invite a friend to Lucas. When they become a paying customer, you earn <b>{reward:,} bonus OPs</b>.</p>
 <div class="row"><input id="refUrl" readonly value="{url}"><button onclick="copyRef()">Copy invite link</button></div>
 <p class="muted">Referral code: <b>{code}</b>. Rewards are issued once per referred user after their first successful paid invoice.</p></div>
 <div class="grid">
 <div class="card"><div class="muted">Paid referrals</div><div class="metric">{paid}</div></div>
 <div class="card"><div class="muted">Pending referrals</div><div class="metric">{pending}</div></div>
-<div class="card"><div class="muted">Requests earned</div><div class="metric">{earned:,}</div></div>
+<div class="card"><div class="muted">OPs earned</div><div class="metric">{earned:,}</div></div>
 </div></main><script>async function copyRef(){{const e=document.getElementById('refUrl');try{{await navigator.clipboard.writeText(e.value);event.target.textContent='Copied'}}catch{{e.select();document.execCommand('copy')}}}}</script></body></html>"""
 
 
 def dashboard_referral_html() -> str:
-    return """<div id="referral" class="view hidden"><div class="top"><div><h2>Refer & Earn</h2><p class="muted">Invite friends to Lucas and earn bonus Requests.</p></div></div><div id="referralError" class="error hidden"></div><div class="card" style="margin-bottom:16px"><h3 style="margin-bottom:6px">Invite a friend</h3><p class="muted" style="margin-top:0">When your friend registers, you both get <b>1,000 bonus Requests</b>. When they make their first successful payment, you get another <b>10,000 bonus Requests</b>.</p><div class="row"><input id="referralUrl" class="input" readonly><button class="btn primary" onclick="copyReferralLink()">Copy invite link</button></div><p class="muted" style="margin-bottom:0">Referral code: <b id="referralCode">—</b></p></div><div class="grid"><div class="card"><div class="muted">Registered referrals</div><div id="referralTotal" class="metric">—</div></div><div class="card"><div class="muted">Paid referrals</div><div id="referralPaid" class="metric">—</div></div><div class="card"><div class="muted">Requests earned</div><div id="referralEarned" class="metric">—</div></div></div><div class="card" style="margin-top:16px"><h3>How rewards work</h3><div class="grid"><div><div class="muted">Friend registers</div><div class="metric" style="font-size:22px">+1,000 each</div></div><div><div class="muted">Friend becomes paid</div><div class="metric" style="font-size:22px">+10,000 to you</div></div><div><div class="muted">Limits</div><div style="margin-top:8px">One registration reward and one paid reward per referred account. Self-referrals are blocked.</div></div></div></div></div>"""
+    signup = f"{REFERRAL_SIGNUP_REWARD_REQUESTS:,}"
+    paid = f"{REFERRAL_PAID_REWARD_REQUESTS:,}"
+    return f"""<div id="referral" class="view hidden"><div class="top"><div><h2>Refer & Earn</h2><p class="muted">Invite friends to Lucas and earn bonus OPs.</p></div></div><div id="referralError" class="error hidden"></div><div class="card" style="margin-bottom:16px"><h3 style="margin-bottom:6px">Invite a friend</h3><p class="muted" style="margin-top:0"><span>Registration reward</span>: <b>{signup} OPs each</b>. <span>First paid reward</span>: <b>{paid} OPs to you</b>.</p><div class="row"><input id="referralUrl" class="input" readonly><button class="btn primary" onclick="copyReferralLink()">Copy invite link</button></div><p class="muted" style="margin-bottom:0">Referral code: <b id="referralCode">—</b></p></div><div class="grid"><div class="card"><div class="muted">Registered referrals</div><div id="referralTotal" class="metric">—</div></div><div class="card"><div class="muted">Paid referrals</div><div id="referralPaid" class="metric">—</div></div><div class="card"><div class="muted">OPs earned</div><div id="referralEarned" class="metric">—</div></div></div><div class="card" style="margin-top:16px"><h3>How rewards work</h3><div class="grid"><div><div class="muted">Friend registers</div><div class="metric" style="font-size:22px">+{signup} each</div></div><div><div class="muted">Friend becomes paid</div><div class="metric" style="font-size:22px">+{paid} to you</div></div><div><div class="muted">No referral cap</div><div style="margin-top:8px">No limit on total referrals or total referral rewards. Each referred account can grant one registration reward and one paid reward. Self-referrals are blocked.</div></div></div></div></div>"""
