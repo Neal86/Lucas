@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from gpt_windows_connector import webapp
+from gpt_windows_connector import web_landing_brand
 from gpt_windows_connector.web_landing_brand import LANDING_LOGO_URL, LANDING_NAV_TEXT_COLOR
 from gpt_windows_connector.web_landing_header import LANDING_HEADER_HTML
 from gpt_windows_connector.web_landing_header_styles import LANDING_HEADER_STYLE
