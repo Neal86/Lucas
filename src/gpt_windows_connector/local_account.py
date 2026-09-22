@@ -73,33 +73,67 @@ class LocalAccountClient:
             "last_sync_at": state.get("last_sync_at"),
         }
 
-    def login(self, email: str, password: str, timeout: float = 20.0) -> dict[str, Any]:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(
-                self.base_url + "/auth/login",
-                json={"email": str(email or "").strip(), "password": str(password or "")},
-            )
-        if response.status_code >= 400:
-            try:
-                message = str(response.json().get("error") or "Sign in failed")
-            except Exception:
-                message = "Sign in failed"
-            raise PermissionError(message)
-        payload = response.json()
+    def _store_login_payload(self, payload: dict[str, Any], fallback_email: str = "") -> dict[str, Any]:
         token = str(payload.get("access_token") or "")
         user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
-        if not token:
-            raise PermissionError("Lucas did not return an account token")
+        if not token or token == "cookie":
+            raise PermissionError("Lucas did not return a desktop account token")
         state = {
             "access_token_dpapi": protect_text(token),
             "user_id": str(user.get("id") or ""),
-            "email": str(user.get("email") or email or ""),
+            "email": str(user.get("email") or fallback_email or ""),
             "name": str(user.get("name") or ""),
             "provider": str(user.get("provider") or ""),
             "last_sync_at": None,
         }
         self._write_state(state)
         return self.status()
+
+    @staticmethod
+    def _error(response, fallback: str) -> str:
+        try:
+            return str(response.json().get("error") or fallback)
+        except Exception:
+            return fallback
+
+    def login(self, email: str, password: str, timeout: float = 20.0) -> dict[str, Any]:
+        email = str(email or "").strip()
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                self.base_url + "/auth/desktop/login",
+                json={"email": email, "password": str(password or "")},
+            )
+        if response.status_code >= 400:
+            raise PermissionError(self._error(response, "Sign in failed"))
+        payload = response.json()
+        if bool(payload.get("verification_required")):
+            return {
+                "verification_required": True,
+                "challenge_id": str(payload.get("challenge_id") or ""),
+                "email": str(payload.get("email") or email),
+            }
+        return self._store_login_payload(payload, email)
+
+    def verify_login(self, challenge_id: str, code: str, timeout: float = 20.0) -> dict[str, Any]:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                self.base_url + "/auth/desktop/login/verify",
+                json={"challenge_id": str(challenge_id or "").strip(), "code": str(code or "").strip()},
+            )
+        if response.status_code >= 400:
+            raise PermissionError(self._error(response, "Verification failed"))
+        return self._store_login_payload(response.json())
+
+    def resend_login(self, challenge_id: str, timeout: float = 20.0) -> dict[str, Any]:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(
+                self.base_url + "/auth/desktop/login/resend",
+                json={"challenge_id": str(challenge_id or "").strip()},
+            )
+        if response.status_code >= 400:
+            raise PermissionError(self._error(response, "Could not resend verification code"))
+        payload = response.json()
+        return dict(payload) if isinstance(payload, dict) else {"ok": True}
 
     def logout(self) -> None:
         try:
