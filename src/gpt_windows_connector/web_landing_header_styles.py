@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .web_landing_brand import LANDING_NAV_TEXT_COLOR
+
 LANDING_HEADER_STYLE = r'''<style>
 .landing-nav{
   position:fixed!important;top:0;left:0;right:0;z-index:1000!important;
@@ -12,9 +14,10 @@ LANDING_HEADER_STYLE = r'''<style>
   backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
   box-shadow:0 1px 0 rgba(255,255,255,.06)
 }
-.landing-logo{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:760;letter-spacing:-.02em}
+.landing-nav>.landing-logo{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:760;letter-spacing:-.02em}
+.landing-nav>.landing-logo img{display:block;width:220px;height:52px;object-fit:contain;object-position:left center;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}
 .landing-links{display:flex;gap:34px}
-.landing-links a{color:#8e98ae;font-size:13px;text-decoration:none;transition:.2s}
+.landing-links a{color:__LANDING_NAV_TEXT_COLOR__;font-size:13px;text-decoration:none;transition:.2s}
 .landing-links a:hover{color:#fff}
 .landing-signin{color:#dfe4f3;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);border-radius:10px;padding:10px 15px;cursor:pointer}
 .mobile-menu{display:none}
@@ -37,4 +40,4 @@ LANDING_HEADER_STYLE = r'''<style>
 @media(max-width:390px){
   .landing-nav>.landing-logo img{width:118px!important;max-width:118px!important}
 }
-</style>'''
+</style>'''.replace("__LANDING_NAV_TEXT_COLOR__", LANDING_NAV_TEXT_COLOR)
