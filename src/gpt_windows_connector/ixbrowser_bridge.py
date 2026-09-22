@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
+from pathlib import PureWindowsPath
 from typing import Any
 
 from . import browser
@@ -145,7 +145,7 @@ def open_profile(
             "profile_id": int(profile_id),
             "debugging_address": str(data.get("debugging_address") or ""),
             "endpoint": endpoint,
-            "webdriver": Path(webdriver).name if webdriver else None,
+            "webdriver": PureWindowsPath(webdriver).name if webdriver else None,
             "background_protocol": True,
         }
     finally:
