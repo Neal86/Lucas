@@ -16,7 +16,8 @@ def test_dashboard_referral_contract():
     assert 'id="referral"' in html
     assert '300 OPs each' in html
     assert '3,000 OPs to you' in html
-    assert 'No referral cap.' in html
+    assert 'No referral cap' in html
+    assert 'No limit on total referrals or total referral rewards.' in html
     assert '/api/referrals/summary' in DASHBOARD_HTML
     assert "referral:'/refer'" in DASHBOARD_HTML
 
@@ -27,3 +28,4 @@ def test_referral_navigation_and_page_copy_are_localized():
     assert "'Invite a friend':'邀请好友'" in WEB_ZH_JS
     assert "'Registered referrals':'已注册推荐'" in WEB_ZH_JS
     assert "'Paid referrals':'已付费推荐'" in WEB_ZH_JS
+    assert "'No referral cap':'邀请人数无上限'" in WEB_ZH_JS
