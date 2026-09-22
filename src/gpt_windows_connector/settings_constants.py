@@ -5,7 +5,7 @@ from pathlib import Path
 
 SETTINGS_EN = {
     "搜索设置...": "Search settings...", "常规": "General", "安全": "Security", "用户与权限": "Users & Permissions",
-    "文件访问": "File Access", "网络": "Network", "规则": "Rules", "任务记录": "Task History", "日志": "Logs", "系统访问": "System Access",
+    "账号与插件": "Account & Integrations", "文件访问": "File Access", "网络": "Network", "规则": "Rules", "任务记录": "Task History", "日志": "Logs", "系统访问": "System Access",
     "电脑": "Computer", "电脑名称": "Computer name", "Windows 设备名称，只读。网页中的显示名称可单独修改。": "Windows device name, read-only.",
     "设备唯一标识。": "Unique device identifier.", "连接": "Connection", "安全 WebSocket 地址。": "Secure WebSocket address.",
     "连接状态": "Connection status", "实时显示 Lucas Node 与 Gateway 的连接状态。": "Shows the live connection between Lucas Node and the Gateway.",
@@ -40,6 +40,8 @@ STATUS_STALE_SECONDS = 45.0
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 ACCESS_FILE = CONFIG_DIR / "node-access.json"
+ACCOUNT_FILE = CONFIG_DIR / "account.json"
+PLUGIN_CACHE_FILE = CONFIG_DIR / "plugins.json"
 LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
 INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
 

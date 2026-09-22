@@ -86,7 +86,7 @@ def _save_config(config: dict[str, Any]) -> None:
 
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "任务记录", "日志", "系统访问"}
+    allowed = {"常规", "账号与插件", "安全", "用户与权限", "文件访问", "网络", "任务记录", "日志", "系统访问"}
     requested = str(os.environ.get("LUCAS_SETTINGS_PAGE") or "").strip()
     if requested in allowed:
         return requested
