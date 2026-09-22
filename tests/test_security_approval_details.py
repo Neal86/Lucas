@@ -55,7 +55,7 @@ def test_network_check_explains_target_host():
         {},
     )
     assert details["operation"] == "访问或检查网络地址（lucasmcp.com）"
-    assert "请求未携带任务标题" in details["purpose"]
+    assert details["purpose"] == r"在 C:\work 中执行：访问或检查网络地址（lucasmcp.com）"
 
 
 def test_command_preview_redacts_credentials():
@@ -65,12 +65,12 @@ def test_command_preview_redacts_credentials():
             "command": (
                 "curl https://example.com?token=abc123 "
                 "-H 'Authorization: Bearer very-secret-token' "
-                "password=hunter2 8776067448:AAHjWvm36_6qxkPUfKkIw9bxVqOX2kwXGmU"
+                "password=hunter2 1234567890:abcdefghijklmnopqrstuvwxyzABCDE123456"
             )
         },
     )
     assert "abc123" not in preview
     assert "very-secret-token" not in preview
     assert "hunter2" not in preview
-    assert "AAHjWvm36" not in preview
+    assert "abcdefghijklmnopqrstuvwxyz" not in preview
     assert "[REDACTED" in preview

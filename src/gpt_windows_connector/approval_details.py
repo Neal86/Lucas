@@ -136,9 +136,9 @@ def describe_approval(category: str, method: str, params: dict[str, Any], audit_
     if task_title:
         purpose = f"任务：{task_title}"
     elif workspace:
-        purpose = f"在 {workspace} 中执行上述操作；请求未携带任务标题"
+        purpose = f"在 {workspace} 中执行：{operation}"
     else:
-        purpose = "请求未携带任务标题，请根据操作与命令确认是否符合你的预期"
+        purpose = f"执行：{operation}；请求未携带任务标题，请根据命令确认是否符合你的预期"
 
     return {
         "operation": operation,
