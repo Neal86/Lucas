@@ -72,9 +72,9 @@ def _high_risk_operation(command: str) -> tuple[str, str] | None:
         if re.search(r"(?i)[A-Z]:\\Users(?:\\)?(?=[\"'\s;]|$)|[A-Z]:\\Users\\\*(?=[\"'\s;]|$)", command):
             return "递归/强制删除 Windows 用户根目录", "目标是 C:\\Users 根目录或其全部用户目录"
         if re.search(r"(?i)[A-Z]:\\Users\\[^\\\s\"']+(?=[\"'\s;]|$)", command):
-            return "递归/强制删除整个用户配置目录", "目标看起来是完整的 Windows 用户目录")
+            return "递归/强制删除整个用户配置目录", "目标看起来是完整的 Windows 用户目录"
         if re.search(r"(?i)\$env:(?:USERPROFILE|SystemRoot|windir)(?:\\)?(?=[\"'\s;]|$)", command):
-            return "递归/强制删除用户或系统根目录", "目标使用 USERPROFILE/SystemRoot 等敏感系统路径")
+            return "递归/强制删除用户或系统根目录", "目标使用 USERPROFILE/SystemRoot 等敏感系统路径"
     return None
 
 
