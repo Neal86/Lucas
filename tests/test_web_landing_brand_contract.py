@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from gpt_windows_connector import webapp
+from gpt_windows_connector import web_landing_brand
 from gpt_windows_connector.web_landing_brand import LANDING_LOGO_URL, LANDING_NAV_TEXT_COLOR
 from gpt_windows_connector.web_landing_header import LANDING_HEADER_HTML
 from gpt_windows_connector.web_landing_header_styles import LANDING_HEADER_STYLE
@@ -15,7 +15,7 @@ EXPECTED_WHITE_LOGO_SHA256 = "f0e1b4a65c311e388ebc92798187f6de69078935c3b7e2c8e3
 
 
 def test_verified_white_logo_asset_is_unchanged():
-    asset = Path(webapp.__file__).with_name("assets") / "lucas-logo-horizontal-white.png"
+    asset = Path(web_landing_brand.__file__).with_name("assets") / "lucas-logo-horizontal-white.png"
     assert hashlib.sha256(asset.read_bytes()).hexdigest() == EXPECTED_WHITE_LOGO_SHA256
 
 
@@ -40,7 +40,7 @@ def test_landing_header_logo_has_no_cross_module_filter_override():
 
 
 def test_server_does_not_patch_landing_brand_or_navigation():
-    source = Path(webapp.__file__).with_name("server.py").read_text(encoding="utf-8")
+    source = Path(web_landing_brand.__file__).with_name("server.py").read_text(encoding="utf-8")
     forbidden = (
         "WHITE_LOGO_URL",
         "BLUE_LOGO_URL",
