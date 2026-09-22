@@ -145,7 +145,7 @@ if (Test-Path $ConfigFile) {
     $ExistingConfig = $ConfigRead.Object
     Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
   } catch {
-    throw "Existing Lucas configuration could not be read or safely auto-repaired. Update aborted without changing identity or permissions: $($_.Exception.Message)"
+    throw "Existing Lucas configuration could not be read or safely auto-repaired. Update aborted without changing local settings, identity or permissions: $($_.Exception.Message)"
   }
 }
 
@@ -161,7 +161,7 @@ if (Test-Path $AccessFile) {
     $AccessRead.Object | Out-Null
     Copy-Item -Force -Path $AccessFile -Destination $AccessBackupFile
   } catch {
-    throw "Existing Lucas user permissions could not be read or safely auto-repaired. Update aborted without changing identity or permissions: $($_.Exception.Message)"
+    throw "Existing Lucas user permissions could not be read or safely auto-repaired. Update aborted without changing local settings, identity or permissions: $($_.Exception.Message)"
   }
 }
 

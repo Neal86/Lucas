@@ -69,7 +69,7 @@ def preset_security(preset: str) -> dict[str, Any]:
     from .security import DEFAULT_SECURITY
     base={**DEFAULT_SECURITY,"approval_policy":dict(DEFAULT_SECURITY["approval_policy"])}
     if preset=="auto_approve":
-        safe_allow={"system_info","shell","process_control","background_control","screenshots","browser_control","git_write"}
+        safe_allow={"system_info","shell","process_control","background_control","screenshots","browser_control","git_write","git_push"}
         base["approval_policy"]=_apply_safety_floor({**base["approval_policy"],**{k:"allow" for k in safe_allow}}); base["network_external"]="allow"; base["network_lan"]="allow"; base["block_silent_network"]=False
     elif preset=="full_access":
         base["approval_policy"]=_apply_safety_floor({k:"allow" for k in base["approval_policy"]}); base["network_external"]="allow"; base["network_lan"]="allow"; base["block_silent_network"]=False

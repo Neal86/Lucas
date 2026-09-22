@@ -143,6 +143,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         "service_control":tk.StringVar(value=str(approval.get("service_control") or "ask")),
         "process_control":tk.StringVar(value=str(approval.get("process_control") or "ask")),
         "desktop_control":tk.StringVar(value=str(approval.get("desktop_control") or "ask")),
+        "background_control":tk.StringVar(value=str(approval.get("background_control") or "allow")),
         "screenshots":tk.StringVar(value=str(approval.get("screenshots") or "allow")),
         "clipboard":tk.StringVar(value=str(approval.get("clipboard") or "ask")),
         "browser_control":tk.StringVar(value=str(approval.get("browser_control") or "ask")),

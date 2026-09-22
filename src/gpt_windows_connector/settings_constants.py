@@ -54,7 +54,7 @@ APPROVAL_DEFAULTS = {
 _SAFETY_GATES = {"software_install","registry_system","high_risk","service_control"}
 PRESETS = {
     "请求批准（Recommended）": {"approval_policy":APPROVAL_DEFAULTS,"network_external":"ask","network_lan":"allow","block_silent_network":True},
-    "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
+    "帮我批准": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow","browser_transfer":"always_ask"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
     "完全访问权限": {"approval_policy":{**{k:"allow" for k in APPROVAL_DEFAULTS},**{k:"always_ask" for k in _SAFETY_GATES},"background_control":"allow"},"network_external":"allow","network_lan":"allow","block_silent_network":False},
 }
 PRESET_DESCRIPTIONS = {

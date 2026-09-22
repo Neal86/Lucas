@@ -23,11 +23,12 @@ def test_real_input_and_visible_browser_are_focus_controlled():
     assert category("browser.launch_persistent", headless=True) == "browser_control"
 
 
-def test_full_access_never_disables_focus_or_dangerous_confirmations():
-    policy = preset_security("full_access")["approval_policy"]
+def test_full_access_keeps_focus_control_separate_from_true_danger_gates():
+    security = preset_security("full_access")
+    policy = security["approval_policy"]
     assert policy["background_control"] == "allow"
-    assert policy["desktop_control"] == "always_ask"
-    assert policy["git_push"] == "always_ask"
-    assert policy["software_install"] == "always_ask"
-    assert policy["registry_system"] == "always_ask"
-    assert policy["high_risk"] == "always_ask"
+    assert policy["desktop_control"] == "allow"
+    assert policy["git_push"] == "allow"
+    assert security["foreground_confirmation"] is True
+    for key in ("software_install", "registry_system", "high_risk", "service_control"):
+        assert policy[key] == "always_ask"
