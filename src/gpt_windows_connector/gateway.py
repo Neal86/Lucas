@@ -765,13 +765,23 @@ async def plugin_tool(action: str, plugin_id: str | None = None, params: dict | 
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    """Preferred tool for ALL normal browser and web-page work. For reading or listing page state/content, use ensure_cdp -> pages/resolve -> observe/inspect. Do NOT use screenshot as the first step for reading pages; screenshot is visual fallback only. For interaction, use semantic_click/semantic_type before selector actions. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. Eva on configured Home/ALI nodes is hard-isolated to that node's dedicated Eva Chrome instance at 127.0.0.1:9222; other browser sessions and computer_tool are not available to that client."""
-    allowed = {"discover", "connect_cdp", "ensure_cdp", "ensure_profile", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
+    """Primary browser automation tool. Lucas uses Playwright/CDP so normal web work runs in the background without desktop mouse/keyboard input or focus stealing. Use snapshot/observe for semantic reading, semantic_click/semantic_type for interaction, and diagnostics/network when a page misbehaves. ix_status/ix_profiles/ix_attach connect an ixBrowser Local API profile and reuse its existing login, fingerprint, proxy and extensions. When a result has requires_user_action=true, show chat_message to the user and stop browser automation; after the user finishes CAPTCHA, 2FA, passkey, login or identity verification, call resume with resume_token and continue. computer_tool is only for OS-native UI that browser protocol access cannot handle. Eva on configured Home/ALI nodes remains hard-isolated to its dedicated Eva Chrome profile."""
+    allowed = {
+        "discover", "connect_cdp", "ensure_cdp", "ensure_profile", "launch_persistent",
+        "ix_status", "ix_profiles", "ix_attach", "ix_close",
+        "pages", "resolve", "observe", "snapshot", "new_page", "navigate", "inspect",
+        "semantic_click", "semantic_type", "click", "type", "select", "upload", "download",
+        "screenshot", "wait", "reload", "back", "forward", "press", "hover", "scroll",
+        "close_page", "network", "diagnostics", "check_user_action", "request_user_action",
+        "resume", "pending_user_actions", "close",
+    }
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
     target = _eva_browser_target(node_id)
     if target is not None:
+        if action.startswith("ix_"):
+            raise PermissionError(f"Eva on {target.label} is locked to the dedicated Eva browser and cannot attach ixBrowser profiles.")
         if action == "launch_persistent":
             raise PermissionError(f"Eva on {target.label} is locked to the dedicated Eva browser and cannot launch another browser profile.")
         if action == "close":
@@ -799,16 +809,62 @@ async def browser_tool(node_id: str, workspace: str, action: str, params: dict |
                 result["dedicated"] = True
                 result["target"] = target.label
             return result
-        payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title, target)
+        if action not in {"resume", "pending_user_actions"}:
+            payload["session_id"] = await _eva_browser_session(node_id, workspace, task_title, target)
     elif action in {"connect_cdp", "ensure_cdp"}:
         node = registry.nodes.get(node_id)
         if node and str(node.name or "").strip().lower() == "ali":
             payload.setdefault("endpoint", "http://127.0.0.1:9222")
             payload.setdefault("browser_name", "chrome")
             payload.setdefault("profile", "eva")
-    if action not in {"discover", "pages", "resolve", "observe", "inspect", "screenshot"}:
+
+    read_only = {
+        "discover", "ix_status", "ix_profiles", "pages", "resolve", "observe", "snapshot",
+        "inspect", "screenshot", "wait", "network", "diagnostics", "check_user_action",
+        "request_user_action", "resume", "pending_user_actions",
+    }
+    if action not in read_only:
         await _desktop_lock(node_id, workspace)
-    return await _node_rpc(node_id, workspace, f"browser.{action}", payload, task_title=task_title)
+
+    async def detect_handoff(session_id: str, page_index: int = 0) -> dict | None:
+        try:
+            handoff = await _node_rpc(
+                node_id,
+                workspace,
+                "browser.check_user_action",
+                {"session_id": session_id, "page_index": int(page_index), "auto_create": True},
+                task_title=task_title,
+            )
+        except Exception:
+            return None
+        return handoff if isinstance(handoff, dict) and handoff.get("requires_user_action") else None
+
+    try:
+        result = await _node_rpc(node_id, workspace, f"browser.{action}", payload, task_title=task_title)
+    except Exception as exc:
+        session_id = str(payload.get("session_id") or "")
+        if session_id and action in {
+            "navigate", "semantic_click", "semantic_type", "click", "type", "select",
+            "upload", "wait", "reload", "back", "forward", "press", "hover", "scroll",
+        }:
+            handoff = await detect_handoff(session_id, int(payload.get("page_index") or 0))
+            if handoff:
+                handoff["action_error"] = f"{type(exc).__name__}: {exc}"
+                return handoff
+        raise
+
+    if action in {"ix_attach", "new_page", "navigate", "wait", "reload", "back", "forward"}:
+        session_id = ""
+        page_index = int(payload.get("page_index") or 0)
+        if isinstance(result, dict):
+            session_id = str(result.get("session_id") or payload.get("session_id") or "")
+            if "index" in result:
+                page_index = int(result.get("index") or 0)
+        if session_id:
+            handoff = await detect_handoff(session_id, page_index)
+            if handoff:
+                return {"action_result": result, **handoff}
+    return result
 
 
 @mcp.tool()
