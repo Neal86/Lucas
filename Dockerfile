@@ -10,7 +10,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -e ".[dev]"
 RUN python -m compileall -q src \
-    && pytest -q tests/test_dashboard_js_syntax.py tests/test_dashboard_routes.py tests/test_dashboard_script_boundaries.py tests/test_operation_accounting.py tests/test_security_approval_details.py tests/test_web_landing_brand_contract.py tests/test_deployment_healthcheck.py
+    && pytest -q tests/test_dashboard_js_syntax.py tests/test_dashboard_routes.py tests/test_dashboard_script_boundaries.py tests/test_operation_accounting.py tests/test_security_approval_details.py tests/test_web_landing_brand_contract.py tests/test_deployment_healthcheck.py tests/test_ixbrowser_bridge.py tests/test_browser_handoff.py tests/test_browser_background_contract.py
 RUN touch /quality-ok
 
 FROM python:3.12-slim
