@@ -50,8 +50,9 @@ from .gateway_readiness import readiness_checks, critical_ready
 from .gateway_referral import claim_referral_cookie
 from .eva_browser_policy import EvaBrowserTarget, resolve_eva_browser_target
 from .plugin_api import PluginApi
-from .plugin_host import RemoteMcpPluginHost, normalize_plugin_descriptor
+from .plugin_host import RemoteMcpPluginHost
 from .plugin_sync import PluginSyncStore
+from .plugin_tools import PluginToolService
 
 settings = GatewaySettings.from_env()
 db_path = settings.data_dir / "gateway.db"
@@ -64,6 +65,7 @@ task_runs = TaskRunStore(db_path)
 plugin_store = PluginSyncStore(db_path)
 plugin_host = RemoteMcpPluginHost()
 plugin_api = PluginApi(plugin_store, auth.audit)
+plugin_tools = PluginToolService(plugin_store, plugin_host, auth.audit, current_request_source)
 log = logging.getLogger("lucas.gateway")
 
 
@@ -758,62 +760,8 @@ async def _eva_browser_session(
 
 @mcp.tool()
 async def plugin_tool(action: str, plugin_id: str | None = None, params: dict | None = None) -> object:
-    """Manage and use account-synced GPT/MCP-compatible integrations.
-
-    Plugin metadata syncs with the Lucas account. Local OS permissions, browser
-    profiles and Allowed Folders are not synchronized. Remote plugin calls use
-    the plugin's standard MCP endpoint and never copy ChatGPT private tokens.
-    """
-    user = _user()
-    payload = dict(params or {})
-    allowed = {"list", "get", "install", "update", "delete", "list_tools", "call"}
-    if action not in allowed:
-        raise ValueError(f"Unsupported plugin action: {action}")
-    if action == "list":
-        return plugin_store.list(user.id)
-    if action == "install":
-        normalized = normalize_plugin_descriptor(payload)
-        plugin = plugin_store.upsert(user.id, normalized)
-        auth.audit(user.id, "plugin.install", plugin["plugin_id"], {"server_url": plugin["server_url"]})
-        return plugin
-    if not plugin_id:
-        raise ValueError("plugin_id is required")
-    plugin_id = str(plugin_id).strip()
-    if action == "get":
-        return plugin_store.get(user.id, plugin_id)
-    if action == "delete":
-        removed = plugin_store.remove(user.id, plugin_id)
-        if not removed:
-            raise KeyError("Plugin integration not found")
-        auth.audit(user.id, "plugin.delete", plugin_id)
-        return {"ok": True}
-    if action == "update":
-        existing = plugin_store.get(user.id, plugin_id)
-        normalized = normalize_plugin_descriptor({**existing, **payload, "plugin_id": plugin_id})
-        plugin = plugin_store.upsert(user.id, normalized)
-        auth.audit(user.id, "plugin.update", plugin_id)
-        return plugin
-
-    plugin = next((item for item in plugin_store.list(user.id) if item["plugin_id"] == plugin_id), None)
-    if not plugin:
-        raise KeyError("Plugin integration not found")
-    if not plugin.get("enabled", True):
-        raise PermissionError("Plugin integration is disabled")
-    source = current_request_source()
-    agent_id = str(source.get("client_id") or "").strip()
-    agent_permissions = plugin.get("agent_permissions") if isinstance(plugin.get("agent_permissions"), dict) else {}
-    if agent_id and agent_id in agent_permissions and not bool(agent_permissions[agent_id]):
-        raise PermissionError("This AI connection is not allowed to use the plugin")
-
-    if action == "list_tools":
-        return await plugin_host.list_tools(str(plugin["server_url"]))
-    tool_name = str(payload.get("tool_name") or "").strip()
-    if not tool_name:
-        raise ValueError("tool_name is required")
-    arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
-    auth.audit(user.id, "plugin.call", plugin_id, {"tool_name": tool_name, "client_id": agent_id})
-    return await plugin_host.call_tool(str(plugin["server_url"]), tool_name, arguments)
-
+    """Manage and use account-synced GPT/MCP-compatible integrations."""
+    return await plugin_tools.call(_user(), action, plugin_id, params)
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
