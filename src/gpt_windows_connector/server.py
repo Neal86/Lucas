@@ -10,6 +10,7 @@ from starlette.routing import Route
 
 from . import gateway, webapp
 from .registration_security import email_verification_enabled, send_verification_email
+from .desktop_auth import DesktopAuthApi
 
 
 WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"
@@ -215,7 +216,12 @@ async def secure_auth_login_verify(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=401)
 
 
+desktop_auth = DesktopAuthApi(gateway, send_verification_email, email_verification_enabled)
+
 for path, handler, methods in (
+    ("/auth/desktop/login", desktop_auth.login, ["POST"]),
+    ("/auth/desktop/login/verify", desktop_auth.verify, ["POST"]),
+    ("/auth/desktop/login/resend", desktop_auth.resend, ["POST"]),
     ("/auth/login", secure_auth_login, ["POST"]),
     ("/auth/login/resend", secure_auth_login_resend, ["POST"]),
     ("/auth/login/verify", secure_auth_login_verify, ["POST"]),
