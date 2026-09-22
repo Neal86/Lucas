@@ -153,6 +153,39 @@ class LocalAccountClient:
         self._write_state(state)
         return safe_plugins
 
+    def install_plugin(self, name: str, server_url: str, timeout: float = 20.0) -> dict[str, Any]:
+        payload = {"name": str(name or "").strip() or "MCP Integration", "server_url": str(server_url or "").strip()}
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(self.base_url + "/api/plugins", json=payload, headers=self._headers())
+        if response.status_code == 401:
+            self.logout()
+            raise PermissionError("Lucas account session expired")
+        if response.status_code >= 400:
+            try:
+                raise ValueError(str(response.json().get("error") or "Could not add integration"))
+            except (ValueError, TypeError):
+                raise
+            except Exception as exc:
+                raise ValueError("Could not add integration") from exc
+        plugin = response.json().get("plugin") or {}
+        return dict(plugin) if isinstance(plugin, dict) else {}
+
+    def remove_plugin(self, plugin_id: str, timeout: float = 20.0) -> None:
+        plugin_id = str(plugin_id or "").strip()
+        if not plugin_id:
+            raise ValueError("plugin_id is required")
+        with httpx.Client(timeout=timeout) as client:
+            response = client.delete(self.base_url + f"/api/plugins/{plugin_id}", headers=self._headers())
+        if response.status_code == 401:
+            self.logout()
+            raise PermissionError("Lucas account session expired")
+        if response.status_code >= 400:
+            try:
+                message = str(response.json().get("error") or "Could not remove integration")
+            except Exception:
+                message = "Could not remove integration"
+            raise ValueError(message)
+
     def cached_plugins(self) -> list[dict[str, Any]]:
         try:
             data = json.loads(self.plugin_cache_path.read_text(encoding="utf-8"))

@@ -26,6 +26,8 @@ def build_account_page(
     plugin_text = tk.StringVar(value="")
     email_var = tk.StringVar(value="")
     password_var = tk.StringVar(value="")
+    plugin_name_var = tk.StringVar(value="")
+    plugin_url_var = tk.StringVar(value="")
 
     def section(text: str):
         tk.Label(body, text=text, font=(font, 12, "bold"), fg=C["text"], bg=C["window"]).pack(anchor="w", pady=(18, 10))
@@ -83,6 +85,13 @@ def build_account_page(
         plugin_content, textvariable=plugin_text, font=(font, 9), fg=C["text"],
         bg=C["card"], justify="left", anchor="w", wraplength=760,
     ).pack(fill="x", pady=(12, 0))
+    add_form = tk.Frame(plugin_content, bg=C["card"])
+    add_form.pack(fill="x", pady=(14, 0))
+    tk.Label(add_form, text=T("名称", "Name"), font=(font, 9), fg=C["muted"], bg=C["card"]).grid(row=0, column=0, sticky="w")
+    tk.Label(add_form, text="MCP URL", font=(font, 9), fg=C["muted"], bg=C["card"]).grid(row=0, column=1, sticky="w", padx=(10, 0))
+    tk.Entry(add_form, textvariable=plugin_name_var, font=(font, 9), bg=C["control"], relief="flat", bd=0, width=24).grid(row=1, column=0, sticky="ew", ipady=6)
+    tk.Entry(add_form, textvariable=plugin_url_var, font=(font, 9), bg=C["control"], relief="flat", bd=0, width=48).grid(row=1, column=1, sticky="ew", padx=(10, 0), ipady=6)
+    add_form.grid_columnconfigure(1, weight=1)
     plugin_actions = tk.Frame(plugin_content, bg=C["card"])
     plugin_actions.pack(anchor="w", pady=(14, 0))
 
@@ -159,10 +168,26 @@ def build_account_page(
     def sync_now():
         run_async(lambda: client.sync_plugins(device_id))
 
+    def add_plugin():
+        name = plugin_name_var.get().strip()
+        url = plugin_url_var.get().strip()
+        if not url:
+            status_text.set(T("请输入 MCP URL。", "Enter an MCP URL."))
+            return
+        def work():
+            client.install_plugin(name, url)
+            return client.sync_plugins(device_id)
+        def clear(_):
+            plugin_name_var.set("")
+            plugin_url_var.set("")
+        run_async(work, clear)
+
     sign_in_button = button(actions, T("登录", "Sign in"), sign_in, primary=True)
     sign_in_button.pack(side="left")
     sync_button = button(plugin_actions, T("立即同步", "Sync now"), sync_now, primary=True)
     sync_button.pack(side="left")
+    add_button = button(plugin_actions, T("添加插件", "Add integration"), add_plugin)
+    add_button.pack(side="left", padx=(10, 0))
     sign_out_button = button(plugin_actions, T("退出登录", "Sign out"), sign_out)
     sign_out_button.pack(side="left", padx=(10, 0))
 
