@@ -28,6 +28,8 @@ def build_account_page(
     password_var = tk.StringVar(value="")
     plugin_name_var = tk.StringVar(value="")
     plugin_url_var = tk.StringVar(value="")
+    verify_code_var = tk.StringVar(value="")
+    pending_challenge = {"id": "", "email": ""}
 
     def section(text: str):
         tk.Label(body, text=text, font=(font, 12, "bold"), fg=C["text"], bg=C["window"]).pack(anchor="w", pady=(18, 10))
@@ -69,6 +71,14 @@ def build_account_page(
     actions.grid(row=4, column=0, sticky="w", pady=(14, 0))
     form.grid_columnconfigure(0, weight=1)
 
+    verify_form = tk.Frame(account_content, bg=C["card"])
+    verify_label = tk.Label(verify_form, text="", font=(font, 9), fg=C["muted"], bg=C["card"], justify="left")
+    verify_label.pack(anchor="w", pady=(12, 4))
+    verify_entry = tk.Entry(verify_form, textvariable=verify_code_var, font=(font, 11), bg=C["control"], fg=C["text"], relief="flat", bd=0, width=18)
+    verify_entry.pack(anchor="w", ipady=7)
+    verify_actions = tk.Frame(verify_form, bg=C["card"])
+    verify_actions.pack(anchor="w", pady=(12, 0))
+
     section(T("插件同步", "Integration Sync"))
     plugin_card = card()
     plugin_content = tk.Frame(plugin_card, bg=C["card"])
@@ -101,6 +111,8 @@ def build_account_page(
         state = client.status()
         signed_in = bool(state.get("signed_in"))
         if signed_in:
+            pending_challenge["id"] = ""
+            verify_form.pack_forget()
             who = state.get("name") or state.get("email") or state.get("user_id")
             last = state.get("last_sync_at")
             suffix = ""
@@ -115,9 +127,19 @@ def build_account_page(
             status_text.set(T(f"已登录：{who}{suffix}", f"Signed in: {who}{suffix}"))
             form.pack_forget()
         else:
-            status_text.set(T("未登录。登录后可在这台电脑同步你的插件和集成。", "Not signed in. Sign in to sync plugins and integrations on this computer."))
-            if not form.winfo_manager():
-                form.pack(fill="x")
+            if pending_challenge["id"]:
+                form.pack_forget()
+                verify_label.configure(text=T(
+                    f"验证码已发送到 {pending_challenge['email']}。请输入 6 位验证码。",
+                    f"A verification code was sent to {pending_challenge['email']}. Enter the 6-digit code.",
+                ))
+                if not verify_form.winfo_manager():
+                    verify_form.pack(fill="x")
+            else:
+                verify_form.pack_forget()
+                status_text.set(T("未登录。登录后可在这台电脑同步你的插件和集成。", "Not signed in. Sign in to sync plugins and integrations on this computer."))
+                if not form.winfo_manager():
+                    form.pack(fill="x")
         plugins = client.cached_plugins()
         if not plugins:
             plugin_text.set(T("暂无已同步插件。", "No synced integrations yet."))
@@ -159,7 +181,33 @@ def build_account_page(
         if not email or not password:
             status_text.set(T("请输入邮箱和密码。", "Enter your email and password."))
             return
-        run_async(lambda: client.login(email, password), lambda _: password_var.set(""))
+        def signed(result):
+            password_var.set("")
+            if isinstance(result, dict) and result.get("verification_required"):
+                pending_challenge["id"] = str(result.get("challenge_id") or "")
+                pending_challenge["email"] = str(result.get("email") or email)
+                verify_code_var.set("")
+                render()
+                wrapper.after(50, verify_entry.focus_set)
+            else:
+                pending_challenge["id"] = ""
+        run_async(lambda: client.login(email, password), signed)
+
+    def verify_login():
+        challenge = pending_challenge["id"]
+        code = verify_code_var.get().strip()
+        if not challenge or not code:
+            status_text.set(T("请输入验证码。", "Enter the verification code."))
+            return
+        def verified(_):
+            pending_challenge["id"] = ""
+            verify_code_var.set("")
+        run_async(lambda: client.verify_login(challenge, code), verified)
+
+    def resend_login():
+        challenge = pending_challenge["id"]
+        if challenge:
+            run_async(lambda: client.resend_login(challenge))
 
     def sign_out():
         client.logout()
@@ -184,6 +232,10 @@ def build_account_page(
 
     sign_in_button = button(actions, T("登录", "Sign in"), sign_in, primary=True)
     sign_in_button.pack(side="left")
+    verify_button = button(verify_actions, T("验证并登录", "Verify and sign in"), verify_login, primary=True)
+    verify_button.pack(side="left")
+    resend_button = button(verify_actions, T("重新发送", "Resend"), resend_login)
+    resend_button.pack(side="left", padx=(10, 0))
     sync_button = button(plugin_actions, T("立即同步", "Sync now"), sync_now, primary=True)
     sync_button.pack(side="left")
     add_button = button(plugin_actions, T("添加插件", "Add integration"), add_plugin)
