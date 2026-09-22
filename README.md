@@ -31,6 +31,12 @@ What does **not** sync:
 
 Local Lucas account tokens are protected with Windows DPAPI. Synced plugin manifests are sanitized before storage.
 
+## Browser automation
+
+Lucas uses Playwright/CDP for browser work so normal page reading, clicking, typing, navigation and diagnostics can run without desktop mouse/keyboard input or foreground focus. Windows Nodes can also connect an ixBrowser profile through the official ixBrowser Local API and reuse that profile's authenticated session, fingerprint, proxy and extensions.
+
+When a site requires CAPTCHA, 2FA, passkey, login or identity verification, browser automation can return a structured `requires_user_action` handoff to the AI conversation and later resume the same browser session. See [Browser Automation Architecture](docs/BROWSER_AUTOMATION.md).
+
 ## Plans
 
 | Plan | Monthly | Annual | Requests / month | Active Computers | AI accounts |

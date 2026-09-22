@@ -3,7 +3,19 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from . import browser, browser_semantic, computer, files, git_tools, processes, shell
+from . import (
+    browser,
+    browser_advanced,
+    browser_diagnostics,
+    browser_handoff,
+    browser_semantic,
+    computer,
+    files,
+    git_tools,
+    ixbrowser_bridge,
+    processes,
+    shell,
+)
 from .config import resolve_in_workspace, validate_workspace
 from .path_guard import validate_command_paths, validate_launch_target
 from .security import LocalSecurityPolicy
@@ -108,6 +120,10 @@ class Executor:
             "git.push": lambda: git_tools.push(workspace, **p),
             "git.show": lambda: git_tools.show(workspace, **p),
             "browser.discover": lambda: browser.discover_browsers(),
+            "browser.ix_status": lambda: ixbrowser_bridge.api_status(**p),
+            "browser.ix_profiles": lambda: ixbrowser_bridge.list_profiles(**p),
+            "browser.ix_close": lambda: ixbrowser_bridge.close_profile(**p),
+            "browser.pending_user_actions": lambda: browser_handoff.pending(**p),
             "computer.info": lambda: computer.system_info(),
             "computer.processes": lambda: computer.list_processes(**p),
             "computer.launch": lambda: computer.launch_app(**p),
@@ -149,8 +165,10 @@ class Executor:
             "browser.ensure_cdp": browser.ensure_cdp,
             "browser.ensure_profile": browser.ensure_profile,
             "browser.launch_persistent": browser.launch_persistent,
+            "browser.ix_attach": ixbrowser_bridge.attach_profile,
             "browser.resolve": browser_semantic.resolve_target,
             "browser.observe": browser_semantic.observe,
+            "browser.snapshot": browser_advanced.aria_snapshot,
             "browser.semantic_click": browser_semantic.semantic_click,
             "browser.semantic_type": browser_semantic.semantic_type,
             "browser.pages": browser.pages,
@@ -163,6 +181,19 @@ class Executor:
             "browser.upload": browser.upload,
             "browser.download": browser.download,
             "browser.screenshot": browser.screenshot,
+            "browser.wait": browser_advanced.wait_for,
+            "browser.reload": browser_advanced.reload_page,
+            "browser.back": browser_advanced.go_back,
+            "browser.forward": browser_advanced.go_forward,
+            "browser.press": browser_advanced.press_key,
+            "browser.hover": browser_advanced.hover,
+            "browser.scroll": browser_advanced.scroll,
+            "browser.close_page": browser_advanced.close_page,
+            "browser.network": browser_advanced.network_summary,
+            "browser.diagnostics": browser_diagnostics.diagnostics,
+            "browser.check_user_action": browser_handoff.check_user_action,
+            "browser.request_user_action": browser_handoff.request_user_action,
+            "browser.resume": browser_handoff.resume,
             "browser.close": browser.close,
         }
         func = async_methods.get(method)
