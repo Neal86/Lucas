@@ -161,6 +161,8 @@ async def _connect_cdp_once(endpoint: str, browser_name: str | None, profile: st
         )
         contexts = browser.contexts
         context = contexts[0] if contexts else await asyncio.wait_for(browser.new_context(), timeout=5.0)
+        from . import browser_diagnostics
+        browser_diagnostics.attach_context(context)
         session_id = uuid.uuid4().hex
         async with _LOCK:
             _SESSIONS[session_id] = BrowserSession(
@@ -234,6 +236,8 @@ async def launch_persistent(user_data_dir: str, executable_path: str | None = No
             accept_downloads=True,
             args=args,
         )
+        from . import browser_diagnostics
+        browser_diagnostics.attach_context(context)
         session_id = uuid.uuid4().hex
         _SESSIONS[session_id] = BrowserSession(context=context, playwright=pw, browser_name=browser_name, profile=profile, user_data_dir=resolved_data_dir)
         return {"session_id": session_id, "pages": len(context.pages), "browser_name": browser_name, "profile": profile, "user_data_dir": resolved_data_dir, "reused": False}
