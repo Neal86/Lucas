@@ -9,6 +9,9 @@ This repository intentionally keeps high-risk responsibilities isolated so a cha
 - `node.py`: node lifecycle, protocol and dispatch. Local access-request UI lives in `node_approval.py`.
 - `settings_ui.py`: settings window composition. Shared constants/presets live in `settings_constants.py`; reusable file/version/restart helpers live in `settings_helpers.py`. New settings pages should be added as separate modules instead of growing this file.
 - `tray.py`: tray orchestration. New Windows integration helpers should be added in dedicated modules rather than embedded into the tray class.
+- `plugin_sync.py`: account-scoped integration metadata and device/agent sync state. It must never persist plaintext credentials or local security policy.
+- `plugin_host.py`: compatibility layer for standard remote MCP/OpenAI-style plugin descriptors and tool calls.
+- `local_account.py` / `settings_account_ui.py`: local Windows sign-in, DPAPI-backed account session, and integration-sync UI. Local security authority remains outside this sync layer.
 
 ## Change rule
 

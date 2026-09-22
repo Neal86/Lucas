@@ -15,6 +15,22 @@ Lucas is an MCP-native bridge that lets compatible AI assistants work on compute
 
 Previously approved accounts remain connected until their local access is revoked. A computer can authorize multiple Lucas accounts.
 
+## Account-synced integrations
+
+Lucas can sign in from the local Windows Settings app and synchronize GPT/MCP-compatible integration metadata across computers. Standard remote MCP server definitions can be installed once and appear on other signed-in Lucas devices.
+
+What syncs:
+- integration name, MCP endpoint, transport, enabled state and version metadata;
+- per-device installation state;
+- per-AI/agent allow or deny state.
+
+What does **not** sync:
+- Allowed Folders, foreground-control policy, Windows permissions or other local security authority;
+- browser cookies or local application sessions;
+- plaintext access tokens, passwords, API keys or client secrets.
+
+Local Lucas account tokens are protected with Windows DPAPI. Synced plugin manifests are sanitized before storage.
+
 ## Plans
 
 | Plan | Monthly | Annual | Requests / month | Active Computers | AI accounts |
