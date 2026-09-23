@@ -774,10 +774,23 @@ async def browser_tool(node_id: str, workspace: str, action: str, params: dict |
         "screenshot", "wait", "reload", "back", "forward", "press", "hover", "scroll",
         "close_page", "network", "diagnostics", "check_user_action", "request_user_action",
         "resume", "pending_user_actions", "close",
+        "bridge_clients", "bridge_pending", "bridge_extension", "bridge_pair",
+        "profile_list", "profile_resolve", "profile_open", "profile_resume",
+        "profile_action", "profile_release",
     }
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
+    profile_router_actions = {
+        "bridge_clients", "bridge_pending", "bridge_extension", "bridge_pair",
+        "profile_list", "profile_resolve", "profile_open", "profile_resume",
+        "profile_action", "profile_release",
+    }
+    if action in profile_router_actions:
+        if action in {"bridge_pair", "profile_open", "profile_resume", "profile_action", "profile_release"}:
+            await _desktop_lock(node_id, workspace)
+        return await _node_rpc(node_id, workspace, f"browser.{action}", payload, task_title=task_title)
+
     target = _eva_browser_target(node_id)
     if target is not None:
         if action.startswith("ix_"):
