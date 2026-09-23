@@ -52,6 +52,7 @@ READ_METHODS = {
     "computer.ui_elements", "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot", "browser.resolve", "browser.observe",
     "browser.snapshot", "browser.wait", "browser.network", "browser.diagnostics", "browser.check_user_action",
     "browser.request_user_action", "browser.resume", "browser.pending_user_actions", "browser.ix_status", "browser.ix_profiles",
+    "browser.bridge_clients", "browser.bridge_pending", "browser.bridge_extension", "browser.profile_list", "browser.profile_resolve",
 }
 
 FILE_WRITE_METHODS = {"files.write", "files.patch", "files.mkdir", "files.move", "files.copy"}
@@ -69,7 +70,7 @@ BROWSER_CONTROL_METHODS = {
     "browser.ix_attach", "browser.ix_close", "browser.new_page", "browser.navigate", "browser.reload",
     "browser.back", "browser.forward", "browser.click", "browser.type", "browser.select",
     "browser.semantic_click", "browser.semantic_type", "browser.press", "browser.hover", "browser.scroll",
-    "browser.close_page", "browser.close",
+    "browser.close_page", "browser.close", "browser.bridge_pair", "browser.profile_open", "browser.profile_resume", "browser.profile_action", "browser.profile_release",
 }
 BROWSER_TRANSFER_METHODS = {"browser.upload", "browser.download"}
 GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.commit", "git.pull"}
@@ -138,6 +139,9 @@ def _dangerous_recursive_delete(command: str) -> bool:
 def _extract_url(method: str, params: dict[str, Any]) -> str | None:
     if method == "browser.navigate":
         return str(params.get("url") or "").strip() or None
+    if method == "browser.profile_action":
+        nested = params.get("operation_params") if isinstance(params.get("operation_params"), dict) else {}
+        return str(nested.get("url") or "").strip() or None
     text = _command_text(method, params)
     match = re.search(r"https?://[^\s\"']+", text, flags=re.IGNORECASE)
     return match.group(0) if match else None
@@ -190,6 +194,8 @@ class LocalSecurityPolicy:
         return False
 
     def _category(self, method: str, params: dict[str, Any]) -> str:
+        if method == "browser.profile_action" and str(params.get("operation") or "").lower() in {"upload", "download"}:
+            return "browser_transfer"
         if self._requires_foreground(method, params):
             return "desktop_control"
         if method in SCREENSHOT_METHODS:
@@ -229,7 +235,8 @@ class LocalSecurityPolicy:
 
     def _network_decision(self, method: str, params: dict[str, Any]) -> tuple[str, str] | None:
         command = _command_text(method, params)
-        is_network = method in NETWORK_METHODS or (command and _matches(NETWORK_COMMAND_PATTERNS, command))
+        profile_network = method == "browser.profile_action" and str(params.get("operation") or "").lower() in {"navigate", "new_page", "reload", "back", "forward"}
+        is_network = method in NETWORK_METHODS or profile_network or (command and _matches(NETWORK_COMMAND_PATTERNS, command))
         if not is_network:
             return None
         url = _extract_url(method, params)
