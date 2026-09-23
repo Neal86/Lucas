@@ -35,6 +35,7 @@ BRIDGE_OPERATION_MAP = {
     "hover": "page.hover",
     "scroll": "page.scroll",
     "upload": "page.upload",
+    "download": "download.url",
     "network": "page.network",
     "close_page": "tab.close",
 }
@@ -119,6 +120,37 @@ async def pair_bridge(params: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+async def _attach_existing_cdp(profile: dict[str, Any], endpoint: str) -> dict[str, Any]:
+    """Attach only to an already-running CDP target; never spawn/restart another browser."""
+    browser_name = str(profile.get("browser_type") or "chrome")
+    profile_label = str(profile.get("profile_id") or profile.get("profile_name") or "")
+    async with browser._LOCK:
+        for session_id, session in list(browser._SESSIONS.items()):
+            if session.endpoint != endpoint:
+                continue
+            if browser_name and session.browser_name and session.browser_name.lower() != browser_name.lower():
+                continue
+            if profile_label and session.profile and session.profile.lower() != profile_label.lower():
+                continue
+            try:
+                pages = len(session.context.pages)
+            except Exception:
+                continue
+            return {
+                "session_id": session_id,
+                "pages": pages,
+                "endpoint": endpoint,
+                "browser_name": session.browser_name or browser_name,
+                "profile": session.profile or profile_label,
+                "reused": True,
+            }
+    return await browser._connect_cdp_once(
+        endpoint,
+        browser_name,
+        profile_label or None,
+    )
+
+
 def _bridge_for_profile(profile: dict[str, Any]) -> dict[str, Any] | None:
     installation_id = str(profile.get("bridge_installation_id") or "")
     if installation_id:
@@ -197,27 +229,28 @@ async def _connect_profile(
         }
 
     cdp_endpoint = str(profile.get("cdp_endpoint") or "").strip()
+    cdp_error = ""
     if cdp_endpoint:
-        result = await browser.ensure_cdp(
-            endpoint=cdp_endpoint,
-            browser_name=str(profile.get("browser_type") or "chrome"),
-            profile=str(profile.get("profile_id") or profile.get("profile_name") or ""),
-        )
-        session_id = str(result.get("session_id") or "")
-        binding = registry.bind_task(
-            task_key or ("profile:" + str(profile["profile_key"])),
-            str(profile["profile_key"]),
-            actor_key=actor_key,
-            transport="cdp",
-            session_id=session_id,
-        )
-        return {
-            "status": "ready",
-            "transport": "cdp",
-            "profile": profile,
-            "session": result,
-            "binding": binding,
-        }
+        try:
+            result = await _attach_existing_cdp(profile, cdp_endpoint)
+        except Exception as exc:
+            cdp_error = f"{type(exc).__name__}: {exc}"
+        else:
+            session_id = str(result.get("session_id") or "")
+            binding = registry.bind_task(
+                task_key or ("profile:" + str(profile["profile_key"])),
+                str(profile["profile_key"]),
+                actor_key=actor_key,
+                transport="cdp",
+                session_id=session_id,
+            )
+            return {
+                "status": "ready",
+                "transport": "cdp",
+                "profile": profile,
+                "session": result,
+                "binding": binding,
+            }
 
     if str(profile.get("browser_type") or "").lower() == "ixbrowser" and profile.get("profile_id"):
         status = ixbrowser_bridge.api_status()
@@ -262,11 +295,7 @@ async def _connect_profile(
                 }
             if cdp_endpoint:
                 try:
-                    result = await browser.ensure_cdp(
-                        endpoint=cdp_endpoint,
-                        browser_name=str(profile.get("browser_type") or "chrome"),
-                        profile=str(profile.get("profile_id") or profile.get("profile_name") or ""),
-                    )
+                    result = await _attach_existing_cdp(profile, cdp_endpoint)
                 except Exception:
                     continue
                 session_id = str(result.get("session_id") or "")
@@ -302,6 +331,8 @@ async def _connect_profile(
         "instructions": f"Open the {profile_name} profile. Lucas Browser Bridge will reconnect automatically.",
         "chat_message": f"需要你的操作：请打开浏览器 Profile「{profile_name}」。打开后告诉我“好了，继续”，Lucas 会恢复同一个任务。",
         "resume_token": handoff["resume_token"],
+        "cdp_error": cdp_error or None,
+        "launcher": launcher_result,
     }
 
 
@@ -480,6 +511,13 @@ async def profile_action(
             for path in operation_params.get("paths") or []
         ]
         handler = browser.upload
+    elif operation == "download":
+        if workspace is None:
+            raise PermissionError("Browser download requires a project workspace")
+        if not operation_params.get("save_path"):
+            raise ValueError("download requires save_path")
+        operation_params["save_path"] = str(resolve_in_workspace(workspace, str(operation_params["save_path"])))
+        handler = browser.download
     else:
         handler = handlers.get(operation)
     if handler is None:
