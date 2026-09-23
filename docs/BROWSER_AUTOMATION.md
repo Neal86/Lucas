@@ -11,15 +11,42 @@ Lucas exposes one browser automation surface to GPT, Claude, Gemini and other MC
 - Surface CAPTCHA, 2FA, passkey, login and identity-verification blockers back to the AI conversation as structured human handoffs.
 - Resume the same browser session and tab after the user finishes the manual step.
 
+## Profile Router
+
+Named browser work goes through the local Browser Profile Router. Agents can select by:
+
+- `profile_name`
+- `profile_id`
+- `alias`
+- `tag`
+- `group`
+- stable Lucas `profile_key`
+
+A task is bound to one profile after `profile_open`. The binding is stored locally and reused after transport reconnects, so later `profile_action` calls cannot silently drift to another account.
+
+Agent/Profile permissions are also stored locally. An agent may be restricted to one alias, a group such as Marketing, or a set of tags. Remote MCP calls can read these rules but cannot edit the local allow/deny mapping.
+
 ## Browser modes
 
 ### Lucas-managed browser
 
 Use `ensure_cdp` or `ensure_profile` for a dedicated Lucas browser profile. Eva remains isolated to the configured dedicated browser profile on each authorized Node.
 
+### Browser Bridge
+
+Lucas Browser Bridge is a Manifest V3 Chromium extension included with Lucas Node. The Node copies it to:
+
+```text
+%LOCALAPPDATA%\Lucas\browser-bridge-extension
+```
+
+The extension connects only to the local Node at `ws://127.0.0.1:8766/bridge`. It reports a per-profile installation ID, then Lucas pairs that installation with a local Profile record. Once paired, the Router can operate that existing ixBrowser, Chrome, or Edge profile without opening another browser.
+
+Bridge page work runs in background tabs where Chromium permits it. It reuses the profile's existing authenticated state and does not request cookie-reading permission.
+
 ### ixBrowser
 
-Lucas Windows Node includes the official `ixbrowser-local-api` Python client. ixBrowser Local API must be enabled in the ixBrowser desktop application.
+Lucas Windows Node includes the official `ixbrowser-local-api` Python client. ixBrowser Local API must be enabled in the ixBrowser desktop application when that transport is used.
 
 Default Local API endpoint:
 
@@ -97,6 +124,19 @@ Human handoff:
 - `pending_user_actions`
 - `resume`
 
+Profile Router and Bridge:
+
+- `bridge_extension`
+- `bridge_clients`
+- `bridge_pending`
+- `bridge_pair`
+- `profile_list`
+- `profile_resolve`
+- `profile_open`
+- `profile_action`
+- `profile_resume`
+- `profile_release`
+
 ## Background behavior
 
 Playwright/CDP actions interact with the browser protocol. They do not activate the browser window, move the Windows pointer or type through the foreground keyboard.
@@ -136,6 +176,8 @@ Browser-protocol actions are classified as browser control, not foreground deskt
 
 Uploads and downloads keep the existing workspace path restrictions. ixBrowser profile metadata is sanitized, and the integration never exposes profile passwords or 2FA secrets through `browser_tool`.
 
-## Operational requirement
+## Operational requirements
 
-ixBrowser must be running locally and Local API must be enabled before `ix_profiles` or `ix_attach` can succeed. API availability depends on the ixBrowser plan and local ixBrowser settings.
+The Browser Bridge service starts with Lucas Node and listens on localhost only. Install the unpacked Lucas Browser Bridge extension into any browser profile that should be agent-controllable, then pair it once with a local Profile record.
+
+For ixBrowser Local API mode, ixBrowser must be running and Local API must be enabled. When Local API is unavailable, a connected Browser Bridge can still control an already-open ixBrowser profile. If a requested profile is closed and no configured launcher/API is available, Lucas returns a resumable `requires_user_action` response naming the exact Profile that must be opened.
