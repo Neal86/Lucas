@@ -108,3 +108,34 @@ def test_closed_profile_returns_resumable_user_handoff(tmp_path, monkeypatch):
     assert result["action_type"] == "open_browser_profile"
     assert result["resume_token"]
     assert "Jarvis" in result["chat_message"]
+
+
+def test_stale_cdp_endpoint_falls_back_to_handoff_without_spawning_browser(tmp_path, monkeypatch):
+    store = make_registry(tmp_path)
+    store.upsert_profile({
+        "browser_type": "ixbrowser",
+        "profile_name": "Jarvis",
+        "aliases": ["jarvis"],
+        "cdp_endpoint": "http://127.0.0.1:9333",
+    })
+    bridge = FakeBridge()
+    monkeypatch.setattr(browser_router, "registry", store)
+    monkeypatch.setattr(browser_router, "bridge_server", bridge)
+    monkeypatch.setattr(browser_router.ixbrowser_bridge, "api_status", lambda: {"available": False})
+
+    async def fail_existing_cdp(_profile, _endpoint):
+        raise RuntimeError("CDP refused")
+
+    monkeypatch.setattr(browser_router, "_attach_existing_cdp", fail_existing_cdp)
+
+    result = asyncio.run(browser_router.open_profile(
+        {"alias": "jarvis", "task_key": "task-cdp"},
+        {"client_name": "Test Agent"},
+    ))
+
+    assert result["requires_user_action"] is True
+    assert "CDP refused" in result["cdp_error"]
+
+
+def test_bridge_download_uses_chromium_downloads_api_route():
+    assert browser_router.BRIDGE_OPERATION_MAP["download"] == "download.url"
