@@ -177,7 +177,14 @@ class BrowserBridgeServer:
         return sorted(out, key=lambda item: (not item["paired"], item["browser_type"], item["profile_name"]))
 
     def list_pending(self) -> list[dict[str, Any]]:
-        return sorted((dict(v) for v in self.pending.values()), key=lambda item: item.get("connected_at", 0))
+        # The pairing code is deliberately shown only inside the local browser
+        # extension popup. Remote MCP clients may discover a pending bridge, but
+        # cannot read the proof-of-presence code from Lucas itself.
+        values = []
+        for raw in self.pending.values():
+            item = {key: value for key, value in dict(raw).items() if key != "pairing_code"}
+            values.append(item)
+        return sorted(values, key=lambda item: item.get("connected_at", 0))
 
     async def pair(
         self,
@@ -196,7 +203,10 @@ class BrowserBridgeServer:
         if not pending:
             raise KeyError("No pending Browser Bridge with this installation_id")
         expected = str(pending.get("pairing_code") or "")
-        if pairing_code is not None and str(pairing_code).strip() != expected:
+        supplied = str(pairing_code or "").strip()
+        if not supplied:
+            raise PermissionError("Browser Bridge pairing code is required. Read it from the local extension popup.")
+        if not secrets.compare_digest(supplied, expected):
             raise PermissionError("Browser Bridge pairing code does not match")
         client = self.clients.get(installation_id)
         if client is None:
