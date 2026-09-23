@@ -81,7 +81,11 @@
       el.scrollIntoView({ block: "center", inline: "center" });
       el.focus({ preventScroll: true });
       const value = params.clear === false ? String(el.value || "") + String(params.text || "") : String(params.text || "");
-      el.value = value;
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
+        el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+      if (descriptor && descriptor.set) descriptor.set.call(el, value);
+      else el.value = value;
       el.dispatchEvent(new Event("input", { bubbles: true }));
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return { target: params.target || params.selector, characters: String(params.text || "").length, url: location.href };
