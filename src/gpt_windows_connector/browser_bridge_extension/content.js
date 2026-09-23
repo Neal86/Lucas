@@ -93,6 +93,21 @@
       el.dispatchEvent(new Event("change", { bubbles: true }));
       return { target: params.target || params.selector, value: el.value };
     }
+    if (action === "page.upload") {
+      const el = findTarget(params.target || params.selector, true);
+      if (!(el instanceof HTMLInputElement) || el.type !== "file") throw new Error("Matched element is not a file input");
+      const transfer = new DataTransfer();
+      for (const item of params.files || []) {
+        const raw = atob(String(item.base64 || ""));
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
+        transfer.items.add(new File([bytes], item.name || "upload.bin", { type: item.type || "application/octet-stream" }));
+      }
+      el.files = transfer.files;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { target: params.target || params.selector, files: transfer.files.length };
+    }
     if (action === "page.scroll") {
       if (params.target) findTarget(params.target, false).scrollIntoView({ block: "center", inline: "center" });
       else window.scrollBy(Number(params.delta_x || 0), Number(params.delta_y || 700));
