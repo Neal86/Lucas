@@ -89,6 +89,7 @@ function hoverTarget(target){const el=findTarget(target,false);el.scrollIntoView
 function pressTarget(target,key){const el=target?findTarget(target,true):(document.activeElement||document.body);el.focus?.({preventScroll:true});["keydown","keyup"].forEach(type=>el.dispatchEvent(new KeyboardEvent(type,{key:String(key),bubbles:true,cancelable:true})));if(String(key)==="Enter"&&el.form?.requestSubmit)el.form.requestSubmit();return{target:target||null,key:String(key),url:location.href};}
 function uploadFiles(target,files){const el=findTarget(target,true);if(!(el instanceof HTMLInputElement)||el.type!=="file")throw new Error("Matched element is not a file input");const dt=new DataTransfer();for(const item of files||[]){const bytes=Uint8Array.from(atob(item.base64),c=>c.charCodeAt(0));dt.items.add(new File([bytes],item.name||"upload.bin",{type:item.type||"application/octet-stream"}));}el.files=dt.files;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return{target,files:dt.files.length};}
 async function waitCondition(tabId,p){const deadline=Date.now()+Math.min(Math.max(Number(p.timeout_ms||15000),250),120000);while(Date.now()<deadline){const ok=await runInTab(tabId,(selector,text,urlContains)=>{if(selector)return!!document.querySelector(selector);if(text)return String(document.body?.innerText||"").toLowerCase().includes(String(text).toLowerCase());if(urlContains)return location.href.includes(String(urlContains));return document.readyState==="complete"||document.readyState==="interactive";},[p.selector||null,p.text||null,p.url_contains||null]);if(ok)return{waited:true};await new Promise(r=>setTimeout(r,250));}throw new Error("Timeout waiting for page condition");}
+async function pageCommand(tabId,action,p){const response=await chrome.tabs.sendMessage(tabId,{type:"lucas_command",action,params:p||{}});if(!response||!response.ok)throw new Error(response?.error||"Browser Bridge content runtime unavailable");return response.result;}
 async function executeCommand(action,p){
   if(action==="ping")return{ok:true,time:Date.now()};
   if(action==="tabs.list"){const tabs=await chrome.tabs.query({});return tabs.map(t=>({id:t.id,window_id:t.windowId,active:!!t.active,title:t.title||"",url:t.url||"",status:t.status||""}));}
@@ -98,16 +99,7 @@ async function executeCommand(action,p){
   if(action==="tab.navigate"){const t=await chrome.tabs.update(tabId,{url:String(p.url)});return{tab_id:tabId,url:t.url||p.url};}
   if(action==="tab.reload"){await chrome.tabs.reload(tabId);return{tab_id:tabId,reloaded:true};}
   if(action==="tab.back"||action==="tab.forward"){await chrome.scripting.executeScript({target:{tabId},func:action==="tab.back"?()=>history.back():()=>history.forward()});return{tab_id:tabId,action};}
-  if(action==="page.snapshot")return runInTab(tabId,pageSnapshot,[p.limit||400,p.max_chars||50000]);
-  if(action==="page.click")return runInTab(tabId,clickTarget,[p.target||p.selector]);
-  if(action==="page.type")return runInTab(tabId,typeTarget,[p.target||p.selector,p.text||"",p.clear!==false]);
-  if(action==="page.select")return runInTab(tabId,selectTarget,[p.target||p.selector,p.value]);
-  if(action==="page.scroll")return runInTab(tabId,scrollPage,[p.target||null,p.delta_x||0,p.delta_y||700]);
-  if(action==="page.hover")return runInTab(tabId,hoverTarget,[p.target]);
-  if(action==="page.press")return runInTab(tabId,pressTarget,[p.target||null,p.key]);
-  if(action==="page.upload")return runInTab(tabId,uploadFiles,[p.target||p.selector,p.files||[]]);
-  if(action==="page.wait")return waitCondition(tabId,p);
-  if(action==="page.network")return runInTab(tabId,limit=>({url:location.href,resources:performance.getEntriesByType("resource").slice(-Number(limit||100)).map(r=>({name:String(r.name||"").slice(0,2000),initiatorType:r.initiatorType||"",duration:Math.round(Number(r.duration||0)),transferSize:Number(r.transferSize||0)}))}),[p.limit||100]);
+  if(action.startsWith("page."))return pageCommand(tabId,action,p);
   if(action==="download.url"){const id=await chrome.downloads.download({url:String(p.url),filename:p.filename||undefined,saveAs:false});return{download_id:id};}
   throw new Error("Unsupported Bridge action: "+action);
 }
