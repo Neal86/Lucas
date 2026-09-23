@@ -95,12 +95,15 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
     editor.pack(fill="x", padx=18, pady=(0, 10))
     fields = {}
     labels = [
+        ("browser_type", T("浏览器类型", "Browser type")),
         ("profile_name", T("名称", "Name")),
         ("profile_id", "Profile ID"),
         ("aliases", T("别名（逗号分隔）", "Aliases (comma separated)")),
         ("groups", T("分组（逗号分隔）", "Groups (comma separated)")),
         ("tags", T("标签（逗号分隔）", "Tags (comma separated)")),
         ("cdp_endpoint", "CDP endpoint"),
+        ("launcher_executable", T("本地启动程序", "Local launcher executable")),
+        ("launcher_args", T("启动参数（用 | 分隔）", "Launcher args (separate with |)")),
     ]
     for index, (key, label) in enumerate(labels):
         row = index // 2
@@ -129,7 +132,12 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
         item = profile_records[indexes[0]]
         selected_profile_key["value"] = str(item.get("profile_key") or "")
         for key, var in fields.items():
-            value = item.get(key)
+            if key == "launcher_executable":
+                value = (item.get("launcher") or {}).get("executable")
+            elif key == "launcher_args":
+                value = " | ".join(str(v) for v in (item.get("launcher") or {}).get("args") or [])
+            else:
+                value = item.get(key)
             if isinstance(value, list):
                 value = ", ".join(value)
             var.set(str(value or ""))
@@ -137,15 +145,22 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
     profile_list.bind("<<ListboxSelect>>", select_profile)
 
     def save_profile():
+        launcher_executable = fields["launcher_executable"].get().strip()
+        launcher_args = [v.strip() for v in fields["launcher_args"].get().split("|") if v.strip()]
         payload = {
             "profile_key": selected_profile_key["value"],
-            "browser_type": "ixbrowser",
+            "browser_type": fields["browser_type"].get().strip().lower() or "ixbrowser",
             "profile_name": fields["profile_name"].get().strip(),
             "profile_id": fields["profile_id"].get().strip(),
             "aliases": [v.strip() for v in fields["aliases"].get().split(",") if v.strip()],
             "groups": [v.strip() for v in fields["groups"].get().split(",") if v.strip()],
             "tags": [v.strip() for v in fields["tags"].get().split(",") if v.strip()],
             "cdp_endpoint": fields["cdp_endpoint"].get().strip(),
+            "launcher": ({
+                "kind": "command",
+                "executable": launcher_executable,
+                "args": launcher_args,
+            } if launcher_executable else {}),
             "enabled": True,
         }
         result = registry.upsert_profile(payload)
@@ -156,6 +171,7 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
         selected_profile_key["value"] = ""
         for var in fields.values():
             var.set("")
+        fields["browser_type"].set("ixbrowser")
 
     def delete_profile():
         key = selected_profile_key["value"]
