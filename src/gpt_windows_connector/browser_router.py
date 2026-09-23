@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import mimetypes
 import time
@@ -10,6 +11,7 @@ from . import browser, browser_handoff, ixbrowser_bridge
 from .browser_agent_policy import actor_keys, authorize_profile, default_selector, effective_policy
 from .browser_bridge_server import bridge_server
 from .browser_profile_registry import registry
+from .browser_profile_launcher import launch_configured_profile
 from .config import resolve_in_workspace
 
 
@@ -236,6 +238,53 @@ async def _connect_profile(
                 "session": result,
                 "binding": binding,
             }
+
+    launcher_result = launch_configured_profile(profile)
+    if launcher_result.get("started"):
+        for _ in range(40):
+            await asyncio.sleep(0.25)
+            bridge = _bridge_for_profile(profile)
+            if bridge:
+                binding = registry.bind_task(
+                    task_key or ("profile:" + str(profile["profile_key"])),
+                    str(profile["profile_key"]),
+                    actor_key=actor_key,
+                    transport="bridge",
+                    bridge_installation_id=str(bridge["installation_id"]),
+                )
+                return {
+                    "status": "ready",
+                    "transport": "bridge",
+                    "profile": profile,
+                    "bridge": bridge,
+                    "binding": binding,
+                    "launcher": launcher_result,
+                }
+            if cdp_endpoint:
+                try:
+                    result = await browser.ensure_cdp(
+                        endpoint=cdp_endpoint,
+                        browser_name=str(profile.get("browser_type") or "chrome"),
+                        profile=str(profile.get("profile_id") or profile.get("profile_name") or ""),
+                    )
+                except Exception:
+                    continue
+                session_id = str(result.get("session_id") or "")
+                binding = registry.bind_task(
+                    task_key or ("profile:" + str(profile["profile_key"])),
+                    str(profile["profile_key"]),
+                    actor_key=actor_key,
+                    transport="cdp",
+                    session_id=session_id,
+                )
+                return {
+                    "status": "ready",
+                    "transport": "cdp",
+                    "profile": profile,
+                    "session": result,
+                    "binding": binding,
+                    "launcher": launcher_result,
+                }
 
     handoff = registry.create_handoff({
         "kind": "open_profile",
