@@ -20,6 +20,8 @@ from .config import NodeSettings
 from .executor import Executor
 from .settings_ui import configure_gui as _configure_gui
 from .task_runs import TaskRunStore
+from .browser_bridge_server import ensure_started as ensure_browser_bridge_started
+from .browser_bridge_extension_files import prepare_extension as prepare_browser_bridge_extension
 
 APP_NAME = "Lucas"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
@@ -493,6 +495,16 @@ async def _serve_connection(
 
 
 async def run_node() -> None:
+    config = _load_config()
+    try:
+        extension = await asyncio.to_thread(prepare_browser_bridge_extension)
+        log.info("Browser Bridge extension prepared at %s", extension.get("path"))
+    except Exception:
+        log.exception("Could not prepare Browser Bridge extension")
+    try:
+        await ensure_browser_bridge_started(int(config.get("browser_bridge_port") or 8766))
+    except OSError as exc:
+        log.error("Browser Bridge server could not start: %s", exc)
     delay = 1.0
     while True:
         config = _load_config()

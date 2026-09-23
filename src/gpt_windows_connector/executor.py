@@ -8,6 +8,7 @@ from . import (
     browser_advanced,
     browser_diagnostics,
     browser_handoff,
+    browser_router,
     browser_semantic,
     computer,
     files,
@@ -17,6 +18,8 @@ from . import (
     shell,
 )
 from .config import resolve_in_workspace, validate_workspace
+from .browser_bridge_server import bridge_server
+from .browser_bridge_extension_files import prepare_extension as prepare_browser_bridge_extension
 from .path_guard import validate_command_paths, validate_launch_target
 from .security import LocalSecurityPolicy
 
@@ -145,6 +148,27 @@ class Executor:
         }
         if method in sync:
             return await asyncio.to_thread(sync[method])
+
+        if method == "browser.bridge_clients":
+            return bridge_server.list_clients()
+        if method == "browser.bridge_pending":
+            return bridge_server.list_pending()
+        if method == "browser.bridge_extension":
+            return await asyncio.to_thread(prepare_browser_bridge_extension)
+        if method == "browser.profile_list":
+            return browser_router.list_profiles(audit_context, agent=str(p.get("agent") or "") or None)
+        if method == "browser.profile_resolve":
+            return browser_router.resolve_profile(p, audit_context)
+        if method == "browser.profile_release":
+            return browser_router.release_task(str(p.get("task_key") or ""))
+        if method == "browser.bridge_pair":
+            return await browser_router.pair_bridge(p)
+        if method == "browser.profile_open":
+            return await browser_router.open_profile(p, audit_context)
+        if method == "browser.profile_resume":
+            return await browser_router.resume_profile(str(p.get("resume_token") or ""), audit_context)
+        if method == "browser.profile_action":
+            return await browser_router.profile_action(p, audit_context, workspace)
 
         if method == "browser.upload":
             if workspace is None:
