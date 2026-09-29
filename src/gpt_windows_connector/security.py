@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .approval_details import describe_approval
+from .command_risk import is_disk_format_command
 
 
 DEFAULT_SECURITY: dict[str, Any] = {
@@ -225,7 +226,7 @@ class LocalSecurityPolicy:
             return "software_install"
         if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
             return "registry_system"
-        if command and (_matches(HIGH_RISK_PATTERNS, command) or _dangerous_recursive_delete(command)):
+        if command and (_matches(HIGH_RISK_PATTERNS, command) or is_disk_format_command(command) or _dangerous_recursive_delete(command)):
             return "high_risk"
         if command and _matches(SERVICE_PATTERNS, command):
             return "service_control"
