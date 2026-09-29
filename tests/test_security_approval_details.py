@@ -101,3 +101,22 @@ def test_real_format_command_stays_high_risk():
     details = describe_approval(category, "shell.run", {"command": command}, {})
     assert details["operation"] == "格式化磁盘或卷"
 
+def test_format_word_in_prose_or_help_is_not_high_risk():
+    for command in (
+        r"Write-Output 'format report'",
+        r'Write-Output "format C: later"',
+        r"Get-Help format",
+        r"$text = 'format C:'; Write-Output $text",
+    ):
+        assert _policy()._category("shell.run", {"command": command}) == "shell"
+
+
+def test_wrapped_real_format_commands_stay_high_risk():
+    for command in (
+        r"format C: /Q",
+        r"format.com D: /Q",
+        r"cmd /c format E: /Q",
+        r'powershell.exe -NoProfile -Command "format F: /Q"',
+    ):
+        assert _policy()._category("shell.run", {"command": command}) == "high_risk"
+
