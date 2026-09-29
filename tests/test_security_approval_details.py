@@ -74,3 +74,30 @@ def test_command_preview_redacts_credentials():
     assert "hunter2" not in preview
     assert "abcdefghijklmnopqrstuvwxyz" not in preview
     assert "[REDACTED" in preview
+
+def test_powershell_format_list_and_format_table_are_not_disk_format_commands():
+    for command in (
+        r"Get-CimInstance Win32_Process | Select-Object ProcessId,Name | Format-List",
+        r"Get-Process | Format-Table Name,Id",
+    ):
+        category = _policy()._category(
+            "shell.run",
+            {"workspace": r"C:\Users\mrwan", "command": command},
+        )
+        assert category == "shell"
+        details = describe_approval(
+            category,
+            "shell.run",
+            {"workspace": r"C:\Users\mrwan", "command": command},
+            {},
+        )
+        assert details["operation"] == "运行 PowerShell 命令"
+
+
+def test_real_format_command_stays_high_risk():
+    command = r"format C: /Q"
+    category = _policy()._category("shell.run", {"command": command})
+    assert category == "high_risk"
+    details = describe_approval(category, "shell.run", {"command": command}, {})
+    assert details["operation"] == "格式化磁盘或卷"
+
