@@ -59,6 +59,7 @@ When a new account is created through a referral link, both users receive **1,00
 - Browser sessions use HttpOnly authentication cookies.
 - Node transport uses a persistent device credential and WSS.
 - Sensitive fields are redacted from dashboard audit output.
+- Full Access suppresses routine approval prompts; only semantically recognized destructive system operations remain protected by mandatory confirmation.
 - Admin accounts are never created by public “first signup” behavior; production deployments must configure `GWC_SUPER_ADMIN_EMAIL`.
 
 Shell and desktop actions still execute with the Windows account's OS permissions. For higher-risk workloads, use a dedicated Windows account or VM and grant the minimum Lucas permissions required.
