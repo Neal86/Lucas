@@ -54,7 +54,7 @@ def _high_risk_operation(command: str) -> tuple[str, str] | None:
         (r"\bStop-Computer\b", "关闭这台电脑", "命令会关闭 Windows"),
         (r"\bbcdedit\b", "修改 Windows 启动配置", "命令会修改系统启动/引导配置"),
         (r"\bdiskpart\b", "修改磁盘或分区", "命令会调用磁盘分区管理工具"),
-        (r"\bformat(?:\.com)?\b", "格式化磁盘或卷", "格式化可能导致目标卷数据丢失"),
+        (r"(?<![\w-])format(?:\.com)?(?=[\"'\s;&|]|$)", "格式化磁盘或卷", "格式化可能导致目标卷数据丢失"),
         (r"\bmanage-bde\b", "修改 BitLocker 设置", "命令会修改磁盘加密配置"),
         (r"\bnet\s+user\b", "修改 Windows 用户账户", "命令会创建、删除或修改本地用户"),
         (r"\bnet\s+localgroup\b", "修改 Windows 用户组", "命令会修改本地用户组成员或权限"),
