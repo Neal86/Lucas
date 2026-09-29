@@ -4,6 +4,8 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from .command_risk import is_disk_format_command
+
 
 _SECRET_PATTERNS = (
     (re.compile(r"(?i)(authorization\s*:\s*bearer\s+)[^\s;]+"), r"\1[REDACTED]"),
@@ -49,12 +51,13 @@ def _host_from_command(command: str) -> str:
 
 
 def _high_risk_operation(command: str) -> tuple[str, str] | None:
+    if is_disk_format_command(command):
+        return "格式化磁盘或卷", "格式化可能导致目标卷数据丢失"
     checks: tuple[tuple[str, str, str], ...] = (
         (r"\bRestart-Computer\b", "重启这台电脑", "命令会重启 Windows，当前应用和连接会被中断"),
         (r"\bStop-Computer\b", "关闭这台电脑", "命令会关闭 Windows"),
         (r"\bbcdedit\b", "修改 Windows 启动配置", "命令会修改系统启动/引导配置"),
         (r"\bdiskpart\b", "修改磁盘或分区", "命令会调用磁盘分区管理工具"),
-        (r"(?<![\w-])format(?:\.com)?(?=[\"'\s;&|]|$)", "格式化磁盘或卷", "格式化可能导致目标卷数据丢失"),
         (r"\bmanage-bde\b", "修改 BitLocker 设置", "命令会修改磁盘加密配置"),
         (r"\bnet\s+user\b", "修改 Windows 用户账户", "命令会创建、删除或修改本地用户"),
         (r"\bnet\s+localgroup\b", "修改 Windows 用户组", "命令会修改本地用户组成员或权限"),
