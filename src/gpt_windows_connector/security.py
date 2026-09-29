@@ -77,7 +77,7 @@ GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.c
 NETWORK_METHODS = {"browser.navigate", "browser.new_page", "browser.reload", "browser.back", "browser.forward", "git.pull", "git.push"}
 
 HIGH_RISK_PATTERNS = [
-    r"\breg(?:\.exe)?\s+(?:add|delete)\b", r"\bbcdedit\b", r"\bdiskpart\b", r"\bformat(?:\.com)?\b",
+    r"\breg(?:\.exe)?\s+(?:add|delete)\b", r"\bbcdedit\b", r"\bdiskpart\b", r"(?<![\w-])format(?:\.com)?(?=[\"'\s;&|]|$)",
     r"\bmanage-bde\b", r"\bnet\s+user\b", r"\bnet\s+localgroup\b", r"\bsc(?:\.exe)?\s+(?:delete|config)\b",
     r"\bSet-MpPreference\b", r"\bAdd-MpPreference\b", r"\bDisable-WindowsOptionalFeature\b",
     r"\bRemove-WindowsCapability\b", r"\bStop-Computer\b", r"\bRestart-Computer\b",
