@@ -22,7 +22,7 @@ WEB_ZH_JS = r'''{
 'Your computers, AI connections, and recent activity.':'你的电脑、AI 连接和最近活动。','Connect Lucas to your computers. Windows is available now; macOS and Linux support are coming soon.':'将 Lucas 连接到你的电脑。Windows 现已支持，macOS 和 Linux 即将推出。','Full Lucas Node support for Windows computers.':'Windows 电脑已完整支持 Lucas Node。','Lucas Node for macOS is in development.':'macOS 版 Lucas Node 正在开发。','Lucas Node for Linux is in development.':'Linux 版 Lucas Node 正在开发。',
 'Only activity belonging to your account is shown.':'这里只显示属于你账号的活动。','Authentication and connector security information.':'认证与连接安全信息。',
 'Open navigation menu':'打开导航菜单',
-'Let AI Work for You':'让 AI 为你工作','With $0 API Fees.':'$0 API 费用',
+'Let AI Work for You':'让 AI 为你工作','With $0 Token Fees.':'$0 Token 费用',
 'With Lucas, your web-based AI can directly control your computer — without consuming extra tokens or usage credits.':'用 Lucas，让你的网页版 AI 直接操作电脑，无需额外 Token 或额度。',
 'Start for free':'免费开始','See How It Works ↓':'查看工作原理 ↓','◆ Model agnostic':'◆ 不限 AI 模型','◈ Cross-platform':'◈ 跨平台','⚡ Direct execution':'⚡ 直接执行',
 'WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正开始工作。',
