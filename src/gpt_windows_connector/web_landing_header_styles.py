@@ -16,11 +16,14 @@ LANDING_HEADER_STYLE = r'''<style>
 }
 .landing-nav>.landing-logo{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:760;letter-spacing:-.02em}
 .landing-nav>.landing-logo img{display:block;width:220px;height:52px;object-fit:contain;object-position:left center;filter:none!important;opacity:1!important;background:transparent!important;padding:0!important}
-.landing-links{display:flex;gap:34px}
+.landing-links{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:34px}
 .landing-links a{color:__LANDING_NAV_TEXT_COLOR__;font-size:13px;text-decoration:none;transition:.2s}
 .landing-links a:hover{color:#fff}
 .landing-signin{color:#dfe4f3;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.11);border-radius:10px;padding:10px 15px;cursor:pointer}
 .mobile-menu{display:none}
+@media(min-width:801px) and (max-width:1000px){
+  .landing-nav>.landing-logo img{width:160px}
+}
 @media(max-width:800px){
   .landing-nav{position:fixed!important;top:0!important;left:0!important;right:0!important;inset-inline:0!important;height:66px!important;width:100vw!important;max-width:100vw!important;padding:0 16px!important;display:grid!important;grid-template-columns:42px 1fr auto;align-items:center;background:#05070d!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transform:translateZ(0);-webkit-transform:translateZ(0);will-change:transform}
   .landing-nav>.landing-logo{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;justify-content:center;z-index:1;pointer-events:none}

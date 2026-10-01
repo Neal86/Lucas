@@ -50,3 +50,10 @@ def test_server_does_not_patch_landing_brand_or_navigation():
     )
     for token in forbidden:
         assert token not in source
+
+
+def test_desktop_menu_is_centered_independently_of_side_content():
+    assert ".landing-links{position:absolute;left:50%;transform:translateX(-50%);" in LANDING_HEADER_STYLE
+    assert "@media(min-width:801px) and (max-width:1000px)" in LANDING_HEADER_STYLE
+    assert ".landing-nav>.landing-logo img{width:160px}" in LANDING_HEADER_STYLE
+    assert ".landing-nav>.landing-links{display:none!important}" in LANDING_HEADER_STYLE
