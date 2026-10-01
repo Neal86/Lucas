@@ -23,7 +23,7 @@ WEB_ZH_JS = r'''{
 'Only activity belonging to your account is shown.':'这里只显示属于你账号的活动。','Authentication and connector security information.':'认证与连接安全信息。',
 'Open navigation menu':'打开导航菜单',
 'Let AI Work for You':'让 AI 为你工作','With $0 API Fees.':'$0 API 费用',
-'Connect the newest and smartest AI models to your computer, apps, files, and browser — without paying extra API or token fees.':'把最新、最智能的 AI 连接到你的电脑、应用、文件和浏览器，无需额外支付 API 或 Token 费用。',
+'With Lucas, your web-based AI can directly control your computer — without consuming extra tokens or usage credits.':'用 Lucas，让你的网页版 AI 直接操作电脑，无需额外 Token 或额度。',
 'Start for free':'免费开始','See How It Works ↓':'查看工作原理 ↓','◆ Model agnostic':'◆ 不限 AI 模型','◈ Cross-platform':'◈ 跨平台','⚡ Direct execution':'⚡ 直接执行',
 'WHAT LUCAS UNLOCKS':'LUCAS 能做什么','Your AI can finally':'你的 AI 终于可以','do the work.':'真正开始工作。',
 'Lucas is the execution layer between intelligence and your computer. One secure MCP connection exposes the tools an AI needs to act.':'Lucas 是 AI 与电脑之间的执行层。通过一个安全的 MCP 连接，让 AI 获得执行工作所需的工具。',
