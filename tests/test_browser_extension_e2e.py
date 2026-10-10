@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXT = ROOT / 'src/gpt_windows_connector/browser_bridge_extension'
 
 HTML = b'''<!doctype html><title>Lucas Extension Test</title>
-<style>body{font:18px system-ui;padding:30px}button,input{font:inherit;margin:8px;padding:8px}</style>
+<style>body{font:18px system-ui;padding:30px}button,input{font:inherit;margin:8px;padding:8px}
+[contenteditable]{min-height:30px;border:1px solid #aaa;padding:8px}</style>
 <button id="save">Save</button><input placeholder="Name" id="name"><input type="file" id="file">
 <div contenteditable="true" aria-label="Note" id="note"></div><p id="out">Ready</p>
 <table><tr><th>Item</th><th>Count</th></tr><tr><td>Apples</td><td>3</td></tr></table>

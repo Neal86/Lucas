@@ -44,5 +44,29 @@ const run=(a,p)=>ctx.LucasCommands.run(a,p);
   delay=false;await run('download.url',{tab_id:1,url:'https://allowed.test/file'});await run('download.status',{tab_id:1,download_id:8});
   await assert.rejects(run('download.status',{tab_id:2,download_id:8}),/does not belong/);
   assert(ctx.LucasAccess.matches('sub.example.com',['*.example.com']));assert(!ctx.LucasAccess.matches('example.com.evil',['*.example.com']));
+  // First installation must send hello without reconnecting on its new UUID.
+  const identityListeners=[],identityStore={},sockets=[];
+  class FakeSocket {
+    static CONNECTING=0;static OPEN=1;
+    constructor(){this.readyState=1;this.sent=[];this.closed=false;sockets.push(this);}
+    send(data){this.sent.push(JSON.parse(data));}
+    close(){this.closed=true;}
+  }
+  const identityChrome={runtime:{id:'lucas-test',getURL:()=> 'chrome-extension://lucas-test/',onInstalled:event(),onStartup:event(),onMessage:event()},
+    storage:{local:{get:async()=>({...identityStore}),set:async values=>{
+      const changes=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,{oldValue:identityStore[k],newValue:v}]));
+      Object.assign(identityStore,values);identityListeners.forEach(fn=>fn(changes,'local'));
+    }},onChanged:{addListener:fn=>identityListeners.push(fn)}},
+    action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},
+    alarms:{onAlarm:event(),create(){}},contextMenus:{onClicked:event()},commands:{onCommand:event()}};
+  const background=vm.createContext({chrome:identityChrome,WebSocket:FakeSocket,crypto:crypto.webcrypto,
+    importScripts(){},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,clearInterval(){},
+    LucasDebugger:{detachAll:async()=>{}}});
+  vm.runInContext(fs.readFileSync(root+'/background.js','utf8'),background);
+  await sockets[0].onopen();
+  assert(!sockets[0].closed);assert(sockets[0].sent[0].type==='hello');
+  assert(sockets[0].sent[0].installation_id===identityStore.installationId);
+  await identityChrome.storage.local.set({profileName:'Changed browser label'});
+  assert(sockets[0].closed);
   console.log('extension runtime assertions passed');
 })().catch(error=>{console.error(error);process.exitCode=1;});

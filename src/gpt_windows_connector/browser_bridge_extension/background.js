@@ -44,7 +44,11 @@ function connect() {
 }
 chrome.storage.onChanged.addListener((changes,area)=>{
   if(area!=='local')return;
-  if(identityKeys.some(key=>changes[key]) && socket?.readyState===WebSocket.OPEN)socket.close(4002,'identity changed');
+  // Saving the first installation ID is part of the initial hello, not a
+  // user identity change. Closing here interrupts first-time pairing.
+  const identityChanged=identityKeys.some(key=>changes[key] &&
+    !(key==='installationId' && changes[key].oldValue===undefined));
+  if(identityChanged && socket?.readyState===WebSocket.OPEN)socket.close(4002,'identity changed');
   if(changes.paused?.newValue || changes.developerMode?.newValue===false) LucasDebugger.detachAll().catch(()=>{});
 });
 chrome.alarms.onAlarm.addListener(alarm=>{if(alarm.name==='lucas-reconnect')connect();});
