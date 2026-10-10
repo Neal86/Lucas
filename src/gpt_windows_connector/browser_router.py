@@ -38,6 +38,23 @@ BRIDGE_OPERATION_MAP = {
     "download": "download.url",
     "network": "page.network",
     "close_page": "tab.close",
+    "screenshot": "page.screenshot",
+    "frames": "page.frames",
+    "extract": "page.extract",
+    "assets": "page.assets",
+    "selection": "page.selection",
+    "double_click": "page.double_click",
+    "drag": "page.drag",
+    "group_tab": "tab.group",
+    "ungroup_tab": "tab.ungroup",
+    "download_status": "download.status",
+    "history_search": "history.search",
+    "bookmarks_search": "bookmarks.search",
+    "evaluate": "developer.evaluate",
+    "evaluate_readonly": "page.evaluate_readonly",
+    "cdp": "developer.cdp",
+    "console": "developer.events",
+    "bridge_status": "browser.status",
 }
 
 
@@ -389,9 +406,7 @@ def _binding_for_action(params: dict[str, Any], audit_context: dict[str, Any] | 
 def _bridge_params(operation: str, operation_params: dict[str, Any]) -> dict[str, Any]:
     p = dict(operation_params or {})
     if "page_index" in p and "tab_id" not in p:
-        # Bridge tabs use stable tab ids, not list positions. Keep explicit tab_id
-        # authoritative; page_index is intentionally not converted silently.
-        p.pop("page_index", None)
+        raise ValueError("Browser Bridge requires tab_id, not page_index. Call pages and choose a stable tab ID.")
     if operation in {"semantic_click", "semantic_type"} and "target" not in p:
         p["target"] = p.get("selector")
     return p
@@ -406,7 +421,16 @@ async def profile_action(
     if not operation:
         raise ValueError("operation is required")
     operation_params = dict(params.get("operation_params") or {})
-    binding, profile = _binding_for_action(params, audit_context)
+    # An explicit profile selection wins over the task's previous selection.
+    # Reconnect here so callers need not bind a task before every operation.
+    if any(params.get(key) not in (None, "") for key in
+           ("profile_key", "profile_id", "profile_name", "alias", "tag", "group", "browser_type")):
+        opened = await open_profile(params, audit_context)
+        if opened.get("status") != "ready":
+            return opened
+        binding, profile = opened["binding"], opened["profile"]
+    else:
+        binding, profile = _binding_for_action(params, audit_context)
     transport = str(binding.get("transport") or "")
     task_key = str(binding.get("task_key") or "")
 
@@ -422,11 +446,13 @@ async def profile_action(
             if workspace is None:
                 raise PermissionError("Browser upload requires a project workspace")
             encoded = []
+            total_bytes = 0
             for raw in operation_params.get("paths") or []:
                 path = resolve_in_workspace(workspace, str(raw))
                 data = path.read_bytes()
-                if len(data) > 25 * 1024 * 1024:
-                    raise ValueError(f"Bridge upload file is larger than 25 MB: {path.name}")
+                total_bytes += len(data)
+                if total_bytes > 20 * 1024 * 1024:
+                    raise ValueError("Bridge upload batch is larger than 20 MB")
                 encoded.append({
                     "name": path.name,
                     "type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
@@ -434,6 +460,8 @@ async def profile_action(
                 })
             bridge_params["files"] = encoded
         result = await bridge_server.request(installation_id, action, bridge_params, timeout=float(operation_params.get("timeout", 30) or 30))
+        if isinstance(result, dict) and result.get("requires_user_action"):
+            return {**result, "transport": "bridge", "profile": profile}
         if isinstance(result, dict) and result.get("blocker"):
             blocker = str(result.get("blocker"))
             handoff = registry.create_handoff({

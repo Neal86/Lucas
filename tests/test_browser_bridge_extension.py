@@ -11,7 +11,7 @@ def test_browser_bridge_manifest_is_mv3_and_local_only():
 
     assert manifest["manifest_version"] == 3
     assert manifest["background"]["service_worker"] == "background.js"
-    assert manifest["content_scripts"][0]["js"] == ["content.js"]
+    assert manifest["content_scripts"][0]["js"] == ["targets.js", "page_data.js", "content.js"]
     assert "<all_urls>" in manifest["host_permissions"]
 
 
@@ -21,8 +21,9 @@ def test_browser_bridge_extension_has_profile_identity_and_background_commands()
 
     assert 'ws://127.0.0.1:8766/bridge' in background
     assert "installationId" in background
-    assert 'chrome.tabs.create({url:p.url||"about:blank",active:false})' in background
-    assert 'action.startsWith("page.")' in background
+    commands = (EXT / "commands.js").read_text(encoding="utf-8")
+    assert "chrome.tabs.create({url,active:false})" in commands
+    assert "action.startsWith('page.')" in commands
     assert 'message.type !== "lucas_command"' in content
     assert 'action === "page.snapshot"' in content
     assert 'action === "page.upload"' in content
@@ -31,4 +32,4 @@ def test_browser_bridge_extension_has_profile_identity_and_background_commands()
 def test_browser_bridge_extension_does_not_request_cookie_permission():
     manifest = json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
     assert "cookies" not in manifest["permissions"]
-    assert "debugger" not in manifest["permissions"]
+    assert "debugger" in manifest["permissions"]

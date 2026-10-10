@@ -38,28 +38,11 @@ def effective_policy(
     explicit_agent: str | None = None,
     registry: BrowserProfileRegistry = default_registry,
 ) -> dict[str, Any] | None:
-    keys = actor_keys(audit_context, explicit_agent)
-    configured = registry.get_agent_policy(keys)
-    if configured:
-        return configured
+    """Profiles are selectable targets; legacy agent isolation rules are inactive.
 
-    context = dict(audit_context or {})
-    if str(context.get("client_id") or "").strip() == LEGACY_EVA_CLIENT_ID:
-        # Preserve the old Eva isolation guarantee until the user replaces it
-        # with an explicit local browser-profile rule in Lucas Settings.
-        return {
-            "agent_key": "Eva",
-            "allow_profiles": [],
-            "allow_aliases": ["eva"],
-            "allow_groups": [],
-            "allow_tags": [],
-            "deny_profiles": [],
-            "deny_groups": [],
-            "deny_tags": [],
-            "default_profile": "eva",
-            "enabled": True,
-            "legacy": True,
-        }
+    Node/account grants, folder guards and foreground approval remain enforced
+    by their existing authorities. Stored profile settings are not deleted.
+    """
     return None
 
 

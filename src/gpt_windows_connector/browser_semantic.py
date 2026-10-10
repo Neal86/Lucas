@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from . import browser
+from .browser_targets import observe_page, reference_target, unique_visible
 
 
 def _norm(value: object) -> str:
@@ -56,17 +57,7 @@ async def resolve_target(session_id: str | None = None, query: str = "", title_c
 
 async def observe(session_id: str, page_index: int = 0, limit: int = 300) -> dict:
     page = browser._page(session_id, page_index)
-    items = await page.locator("button,a,input,textarea,select,[role=button],[role=link],[contenteditable=true]").evaluate_all(
-        """(els, limit) => els.slice(0, limit).map((e, i) => ({
-          index:i, tag:e.tagName.toLowerCase(), role:e.getAttribute('role')||'',
-          text:(e.innerText||e.value||'').trim().slice(0,300), name:e.getAttribute('name')||'',
-          aria_label:e.getAttribute('aria-label')||'', placeholder:e.getAttribute('placeholder')||'',
-          type:e.getAttribute('type')||'', id:e.id||'', disabled:!!e.disabled,
-          visible:!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length)
-        }))""",
-        limit,
-    )
-    return {"url": page.url, "title": await page.title(), "elements": [item for item in items if item.get("visible")][:limit]}
+    return await observe_page(page, limit)
 
 
 def _looks_like_selector(target: str) -> bool:
@@ -78,6 +69,8 @@ async def _locator(page, target: str, *, editable: bool):
     target = str(target or "").strip()
     if not target:
         raise ValueError("target is required")
+    if target.startswith("ref:"):
+        return await reference_target(page, target), "element-ref"
     candidates = []
     if _looks_like_selector(target):
         candidates.append((page.locator(target), "selector"))
@@ -95,11 +88,9 @@ async def _locator(page, target: str, *, editable: bool):
             (page.get_by_text(target, exact=False), "text"),
         ])
     for locator, strategy in candidates:
-        try:
-            if await locator.count():
-                return locator.first, strategy
-        except Exception:
-            continue
+        matched = await unique_visible(locator, target)
+        if matched is not None:
+            return matched, strategy
     raise LookupError(f"No semantic browser element matched: {target}")
 
 
