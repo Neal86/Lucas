@@ -1,4 +1,6 @@
 (() => {
+  if (globalThis.lucasContentInstalled) return;
+  globalThis.lucasContentInstalled = true;
   function visible(el) {
     const r = el.getBoundingClientRect();
     const s = getComputedStyle(el);
@@ -76,6 +78,18 @@
 
   async function run(action, params) {
     if (action === "page.snapshot") return snapshot(params);
+    if (["page.selection", "page.extract", "page.assets"].includes(action)) return LucasPageData.run(action, params);
+    if (action === "page.focus" || action === "page.target") {
+      const el = findTarget(params.target || params.selector, action === "page.focus");
+      if (el.disabled) throw new Error("Target is disabled");
+      el.scrollIntoView({ block: "center", inline: "center" });
+      if (action === "page.focus") { el.focus({preventScroll:true}); return {focused:true}; }
+      const r = el.getBoundingClientRect();
+      const x = r.x + r.width / 2, y = r.y + r.height / 2;
+      const hit = document.elementFromPoint(x,y);
+      if (hit !== el && !el.contains(hit)) throw new Error("Target is covered. Observe the page again.");
+      return {x,y};
+    }
     if (action === "page.click") {
       const el = findTarget(params.target || params.selector, false);
       el.scrollIntoView({ block: "center", inline: "center" });
@@ -87,6 +101,11 @@
       el.scrollIntoView({ block: "center", inline: "center" });
       el.focus({ preventScroll: true });
       const value = params.clear === false ? String(el.value || "") + String(params.text || "") : String(params.text || "");
+      if (el.isContentEditable) {
+        el.textContent = params.clear === false ? String(el.textContent || "") + String(params.text || "") : String(params.text || "");
+        el.dispatchEvent(new InputEvent("input", {bubbles:true,inputType:"insertText",data:String(params.text || "")}));
+        return {target:params.target,characters:String(params.text || "").length,url:location.href};
+      }
       const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype :
         el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
       const descriptor = Object.getOwnPropertyDescriptor(proto, "value");

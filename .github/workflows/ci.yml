@@ -38,3 +38,14 @@ jobs:
         env:
           RUN_BROWSER_E2E: "1"
         run: pytest -q tests/test_browser_smoke.py
+
+      - name: Install Chrome for extension protocol tests
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        run: |
+          curl -fsSL https://storage.googleapis.com/chrome-for-testing-public/133.0.6943.53/linux64/chrome-linux64.zip -o "$RUNNER_TEMP/lucas-chrome.zip"
+          unzip -q "$RUNNER_TEMP/lucas-chrome.zip" -d "$RUNNER_TEMP/lucas-chrome"
+      - name: Browser extension E2E via raw CDP
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        env:
+          EXTENSION_TEST_CHROME: ${{ runner.temp }}/lucas-chrome/chrome-linux64/chrome
+        run: pytest -q tests/test_browser_extension_e2e.py

@@ -187,97 +187,11 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
     button(profile_actions, T("删除", "Delete"), delete_profile).pack(side="left", padx=(8, 0))
     button(profile_actions, T("刷新", "Refresh"), refresh_profiles).pack(side="right")
 
-    section(T("Agent → Browser Profile 权限", "Agent → Browser Profile permissions"))
-    policy_card = card()
-    policy_list = tk.Listbox(policy_card, height=7, font=(font, 9), bg=C["control"], fg=C["text"], relief="flat", bd=0)
-    policy_list.pack(fill="x", padx=18, pady=(14, 8))
-    policy_records: list[dict[str, Any]] = []
-    policy_fields = {}
-    policy_editor = tk.Frame(policy_card, bg=C["card"])
-    policy_editor.pack(fill="x", padx=18, pady=(0, 10))
-    policy_labels = [
-        ("agent_key", T("Agent / Client", "Agent / Client")),
-        ("default_profile", T("默认 Profile/别名", "Default profile/alias")),
-        ("allow_aliases", T("允许别名", "Allowed aliases")),
-        ("allow_groups", T("允许分组", "Allowed groups")),
-        ("allow_tags", T("允许标签", "Allowed tags")),
-        ("deny_groups", T("禁止分组", "Denied groups")),
-    ]
-    for index, (key, label) in enumerate(policy_labels):
-        row = index // 2
-        col = (index % 2) * 2
-        tk.Label(policy_editor, text=label, font=(font, 8, "bold"), fg=C["muted"], bg=C["card"]).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
-        var = tk.StringVar()
-        policy_fields[key] = var
-        tk.Entry(policy_editor, textvariable=var, font=(font, 9), bg=C["control"], fg=C["text"], relief="flat", bd=0, width=28).grid(row=row, column=col + 1, sticky="ew", padx=(0, 16), pady=4, ipady=5)
-    policy_editor.grid_columnconfigure(1, weight=1)
-    policy_editor.grid_columnconfigure(3, weight=1)
-    selected_agent = {"value": ""}
-
-    def refresh_policies():
-        policy_records[:] = registry.list_agent_policies()
-        policy_list.delete(0, "end")
-        for item in policy_records:
-            policy_list.insert("end", f"{item.get('agent_key')} → {item.get('default_profile') or 'allowed set'}")
-
-    def select_policy(_event=None):
-        indexes = policy_list.curselection()
-        if not indexes:
-            return
-        item = policy_records[indexes[0]]
-        selected_agent["value"] = str(item.get("agent_key") or "")
-        for key, var in policy_fields.items():
-            value = item.get(key)
-            if isinstance(value, list):
-                value = ", ".join(value)
-            var.set(str(value or ""))
-
-    policy_list.bind("<<ListboxSelect>>", select_policy)
-
-    def save_policy():
-        agent = policy_fields["agent_key"].get().strip()
-        if not agent:
-            return
-        result = registry.set_agent_policy(agent, {
-            "default_profile": policy_fields["default_profile"].get().strip(),
-            "allow_aliases": [v.strip() for v in policy_fields["allow_aliases"].get().split(",") if v.strip()],
-            "allow_groups": [v.strip() for v in policy_fields["allow_groups"].get().split(",") if v.strip()],
-            "allow_tags": [v.strip() for v in policy_fields["allow_tags"].get().split(",") if v.strip()],
-            "deny_groups": [v.strip() for v in policy_fields["deny_groups"].get().split(",") if v.strip()],
-            "enabled": True,
-        })
-        selected_agent["value"] = str(result["agent_key"])
-        refresh_policies()
-
-    def new_policy():
-        selected_agent["value"] = ""
-        for var in policy_fields.values():
-            var.set("")
-
-    def delete_policy():
-        agent = selected_agent["value"] or policy_fields["agent_key"].get().strip()
-        if agent:
-            registry.remove_agent_policy(agent)
-            new_policy()
-            refresh_policies()
-
-    policy_actions = tk.Frame(policy_card, bg=C["card"])
-    policy_actions.pack(fill="x", padx=18, pady=(0, 14))
-    button(policy_actions, T("新增", "New"), new_policy).pack(side="left")
-    button(policy_actions, T("保存", "Save"), save_policy, primary=True).pack(side="left", padx=(8, 0))
-    button(policy_actions, T("删除", "Delete"), delete_policy).pack(side="left", padx=(8, 0))
-    button(policy_actions, T("刷新", "Refresh"), refresh_policies).pack(side="right")
-
-    tk.Label(
-        body,
-        text=T(
-            "规则保存在本机。Agent 无法通过远程 MCP 修改自己的 Browser Profile 权限。",
-            "Rules are stored locally. An agent cannot change its own Browser Profile permissions through remote MCP.",
-        ),
-        font=(font, 8), fg=C["muted"], bg=C["window"], wraplength=760, justify="left",
-    ).pack(anchor="w", pady=(0, 20))
+    tk.Label(body, text=T(
+        "Profile 隔离已取消。网站访问、暂停和开发者权限请在 Lucas 浏览器扩展的 Settings 中管理。",
+        "Profile isolation is disabled. Manage website access, pause and developer permissions in Lucas Browser extension Settings."
+    ), font=(font, 8), fg=C["muted"], bg=C["window"], wraplength=760, justify="left").pack(anchor="w", pady=(0, 20))
 
     refresh_bridge()
     refresh_profiles()
-    refresh_policies()
     return frame

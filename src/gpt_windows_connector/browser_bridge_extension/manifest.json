@@ -1,14 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Lucas Browser Bridge",
-  "version": "1.1.0",
-  "description": "Connect this browser profile to the local Lucas Node for background AI browser automation.",
+  "name": "Lucas Browser",
+  "version": "2.0.0",
+  "description": "Let your AI work in existing browser tabs through Lucas. Background control, screenshots, page context and local website permissions.",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "downloads",
-    "webNavigation"
+    "webNavigation",
+    "debugger",
+    "sidePanel",
+    "contextMenus",
+    "tabGroups",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>",
@@ -27,14 +32,43 @@
       ],
       "js": [
         "targets.js",
+        "page_data.js",
         "content.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ],
   "action": {
-    "default_title": "Lucas Browser Bridge",
-    "default_popup": "popup.html"
+    "default_title": "Lucas Browser",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "minimum_chrome_version": "120",
+  "optional_permissions": [
+    "history",
+    "bookmarks"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "open-lucas": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L",
+        "mac": "Command+Shift+L"
+      },
+      "description": "Open Lucas browser sidebar"
+    }
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
 }

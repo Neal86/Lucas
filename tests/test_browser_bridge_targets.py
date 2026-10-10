@@ -27,7 +27,7 @@ const ctx = vm.createContext({crypto:require('crypto').webcrypto,
     querySelectorAll:q => { if(q === 'Save') throw new Error('invalid selector'); return nodes; }},
   getComputedStyle:()=>({display:'block',visibility:'visible'}),
   chrome:{runtime:{onMessage:{addListener:fn=>handler=fn}}}});
-for (const file of ['targets.js','content.js']) vm.runInContext(fs.readFileSync(ext+'/'+file,'utf8'),ctx);
+for (const file of ['targets.js','page_data.js','content.js']) vm.runInContext(fs.readFileSync(ext+'/'+file,'utf8'),ctx);
 function call(action,params={}) {return new Promise(resolve=>handler({type:'lucas_command',action,params},null,resolve));}
 (async()=>{
   const first=element('Save'), second=element('Save'), password=element('',{type:'password',value:'TOP_SECRET'});
@@ -53,4 +53,4 @@ function call(action,params={}) {return new Promise(resolve=>handler({type:'luca
     result = subprocess.run(['node', '-e', script, str(EXT)], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
     manifest = json.loads((EXT / 'manifest.json').read_text())
-    assert manifest['content_scripts'][0]['js'] == ['targets.js', 'content.js']
+    assert manifest['content_scripts'][0]['js'] == ['targets.js', 'page_data.js', 'content.js']

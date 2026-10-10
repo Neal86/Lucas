@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Lucas Browser sidebar</title><link rel="stylesheet" href="ui.css"></head><body>
+<header><img src="icon.png" alt=""><div><h1>Lucas Browser</h1><small>Use your AI with existing browser tabs</small></div></header>
+<p id="status" role="status"></p><div class="row"><button id="refresh">Refresh tabs</button><button id="settings">Settings</button></div>
+<section class="card"><h2>Choose page context</h2><div id="tabs"></div></section>
+<section class="card"><h2>Context for your AI</h2><p>Select a tab or right-click selected text → Ask AI with Lucas context. Copy this context into your AI chat, which controls the browser through the Lucas connector.</p>
+<label for="context">Page and selection</label><textarea id="context" readonly></textarea><button id="copy" class="primary">Copy context</button>
+<div class="row"><a class="button" href="https://chatgpt.com/" target="_blank" rel="noreferrer">ChatGPT</a><a class="button" href="https://claude.ai/" target="_blank" rel="noreferrer">Claude</a><a class="button" href="https://gemini.google.com/" target="_blank" rel="noreferrer">Gemini</a></div>
+<p id="result" role="status"></p></section><script src="sidepanel.js"></script></body></html>

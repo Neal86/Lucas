@@ -29,5 +29,8 @@ def test_checklist_does_not_show_over_signed_out_auth():
 
 
 def test_new_onboarding_overrides_legacy_before_boot():
-    assets = source("src/gpt_windows_connector/web_assets.py")
-    assert assets.index("+ CORE_SCRIPT") < assets.index("+ ONBOARDING_SCRIPT") < assets.index("+ ADMIN_SCRIPT")
+    from gpt_windows_connector.web_core_runtime import CORE_SCRIPT
+    from gpt_windows_connector.web_onboarding_runtime import ONBOARDING_SCRIPT
+    from gpt_windows_connector.web_admin_runtime import ADMIN_SCRIPT
+    from gpt_windows_connector.web_dashboard_runtime_bundle import DASHBOARD_RUNTIME_SCRIPT
+    assert DASHBOARD_RUNTIME_SCRIPT.index(CORE_SCRIPT) < DASHBOARD_RUNTIME_SCRIPT.index(ONBOARDING_SCRIPT) < DASHBOARD_RUNTIME_SCRIPT.index(ADMIN_SCRIPT)

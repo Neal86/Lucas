@@ -1,1 +1,20 @@
-<!doctype html><meta charset="utf-8"><style>body{font:14px system-ui;max-width:620px;margin:32px auto;padding:0 20px}label{display:block;margin:14px 0 5px}input,select{width:100%;box-sizing:border-box;padding:9px}button{margin-top:18px;padding:9px 16px}.note{color:#64748b;margin-top:18px}</style><h2>Lucas Browser Bridge</h2><p>Give this browser profile a stable identity. Lucas can then target it by name, ID, alias, tag, or group.</p><label>Browser type</label><select id="browserType"><option value="ixbrowser">ixBrowser</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="chromium">Chromium</option></select><label>Profile name</label><input id="profileName" placeholder="Jarvis"><label>Profile ID</label><input id="profileId" placeholder="11"><label>Alias</label><input id="alias" placeholder="jarvis"><label>Tags (comma separated)</label><input id="tags" placeholder="marketing, us"><label>Groups (comma separated)</label><input id="groups" placeholder="Marketing"><button id="save">Save</button><div id="result"></div><div class="note">After saving, Lucas Bridge reconnects automatically. Pairing and agent permissions are enforced by the local Lucas Node.</div><script src="options.js"></script>
+<!doctype html><html><head><meta charset="utf-8"><title>Lucas Browser settings</title><link rel="stylesheet" href="ui.css"></head><body class="settings">
+<header><img src="icon.png" alt=""><div><h1>Lucas Browser</h1><small>Local browser access settings</small></div></header>
+<section class="card"><h2>Connection</h2><p>Lucas Node must be running on this computer. Profile names help select a browser; they do not restrict an AI to one Profile.</p>
+<label for="browserType">Browser</label><select id="browserType"><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="brave">Brave</option><option value="opera">Opera</option><option value="vivaldi">Vivaldi</option><option value="ixbrowser">ixBrowser</option><option value="chromium">Chromium</option></select>
+<label for="profileName">Browser label</label><input id="profileName" placeholder="My work browser">
+<label for="profileId">Profile ID (optional)</label><input id="profileId">
+<label for="alias">Alias (optional)</label><input id="alias">
+<label for="tags">Tags, separated by commas</label><input id="tags">
+<label for="groups">Groups, separated by commas</label><input id="groups"></section>
+<section class="card"><h2>Website access</h2>
+<label for="siteMode">Default access</label><select id="siteMode"><option value="all">Allow all websites</option><option value="ask">Ask for new websites</option></select>
+<p>Blocked websites always take priority. Enter one hostname per line, such as example.com or *.example.com.</p>
+<label for="allowedHosts">Allowed websites</label><textarea id="allowedHosts"></textarea>
+<label for="blockedHosts">Blocked websites</label><textarea id="blockedHosts"></textarea>
+<label><input id="paused" type="checkbox">Pause all AI browser control</label>
+<label><input id="developerMode" type="checkbox">Enable developer CDP access</label>
+<p>Developer access lets AI inspect and change page internals, execute page JavaScript, and inspect console/network data. Normal screenshots and protocol clicks do not require this setting.</p></section>
+<section class="card"><h2>Optional browser data</h2><p>History access requires your approval for each lookup. Bookmarks access can be turned off at any time.</p>
+<button id="history">Approve next history lookup (60 seconds)</button><button id="bookmarks">Enable bookmarks</button><button id="revoke">Revoke history and bookmarks</button></section>
+<button id="save" class="primary">Save settings</button><div id="result" role="status" aria-live="polite"></div><script src="options.js"></script></body></html>
