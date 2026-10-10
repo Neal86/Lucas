@@ -2,8 +2,8 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert'),crypto=require(
 const root=process.argv[2];
 const store={},session={},calls=[],tabs=new Map([[1,{id:1,url:'https://allowed.test',title:'Test'}],[2,{id:2,url:'https://second.test',title:'Second'}]]);
 const event=()=>({addListener(){}});
-const storage=data=>({get:async keys=>Object.fromEntries((typeof keys==='string'?[keys]:keys).map(k=>[k,data[k]])),set:async values=>Object.assign(data,values),remove:async keys=>{for(const k of typeof keys==='string'?[keys]:keys)delete data[k];}});
-let delay=false,historyReads=0;
+const storage=data=>({get:async keys=>structuredClone(Object.fromEntries((typeof keys==='string'?[keys]:keys).map(k=>[k,data[k]]))),set:async values=>Object.assign(data,structuredClone(values)),remove:async keys=>{for(const k of typeof keys==='string'?[keys]:keys)delete data[k];}});
+let delay=false,historyReads=0,nextDownloadId=8;
 const chrome={runtime:{getManifest:()=>({version:'2.0.0'})},storage:{local:storage(store),session:storage(session)},permissions:{contains:async()=>true},
   debugger:{attach:async target=>calls.push(['attach',target]),detach:async target=>calls.push(['detach',target]),onDetach:event(),onEvent:event(),sendCommand:async(target,method,p)=>{
     calls.push([method,target,p]);if(method==='Page.captureScreenshot')return{data:'PNG_DATA'};if(method==='Runtime.evaluate')return{result:{value:42}};return{};}},
@@ -15,7 +15,7 @@ const chrome={runtime:{getManifest:()=>({version:'2.0.0'})},storage:{local:stora
   scripting:{executeScript:async()=>calls.push(['inject'])},
   webNavigation:{getFrame:async({tabId})=>({url:tabs.get(tabId).url}),getAllFrames:async()=>[{frameId:0,parentFrameId:-1,url:'https://allowed.test'}]},
   history:{search:async()=>{historyReads++;return[];}},bookmarks:{search:async()=>[{id:'1',title:'test',url:'https://example.com'}]},
-  downloads:{download:async()=>8,search:async()=>[{id:8,state:'complete'}]}};
+  downloads:{download:async()=>nextDownloadId++,search:async()=>[{id:8,state:'complete'}]}};
 const ctx=vm.createContext({chrome,URL,console,crypto:crypto.webcrypto,setTimeout,Promise});
 for(const file of ['access.js','debugger.js','commands.js'])vm.runInContext(fs.readFileSync(root+'/'+file,'utf8'),ctx);
 const run=(a,p)=>ctx.LucasCommands.run(a,p);
@@ -43,6 +43,9 @@ const run=(a,p)=>ctx.LucasCommands.run(a,p);
   const twoStart=calls.findIndex(c=>c[0]==='message-start'&&c[1]===2),oneEnd=calls.findIndex(c=>c[0]==='message-end'&&c[1]===1);assert(twoStart<oneEnd);
   delay=false;await run('download.url',{tab_id:1,url:'https://allowed.test/file'});await run('download.status',{tab_id:1,download_id:8});
   await assert.rejects(run('download.status',{tab_id:2,download_id:8}),/does not belong/);
+  const downloads=await Promise.all([run('download.url',{tab_id:1,url:'https://allowed.test/a'}),run('download.url',{tab_id:2,url:'https://second.test/b'})]);
+  await run('download.status',{tab_id:1,download_id:downloads[0].download_id});
+  await run('download.status',{tab_id:2,download_id:downloads[1].download_id});
   assert(ctx.LucasAccess.matches('sub.example.com',['*.example.com']));assert(!ctx.LucasAccess.matches('example.com.evil',['*.example.com']));
   const originalFrame=chrome.webNavigation.getFrame;let frameChecks=0;
   chrome.webNavigation.getFrame=async args=>++frameChecks===1?null:originalFrame(args);

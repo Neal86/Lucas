@@ -91,13 +91,14 @@
     if (action === 'download.url') {
       const url=safeUrl(p.url);const denied=await LucasAccess.check(url);if(denied)return denied;
       const id=await chrome.downloads.download({url,filename:p.filename || undefined,saveAs:false});
-      const {downloadOwners={}}=await chrome.storage.session.get('downloadOwners');
-      downloadOwners[id]=tabId;await chrome.storage.session.set({downloadOwners});return{download_id:id};
+      // Independent keys avoid lost updates when different tabs download at once.
+      await chrome.storage.session.set({['downloadOwner:'+id]:tabId});return{download_id:id};
     }
     if (action === 'download.status') {
       if(p.download_id == null)throw new Error('download_id is required');
-      const {downloadOwners={}}=await chrome.storage.session.get('downloadOwners');
-      if(downloadOwners[p.download_id]!==tabId)throw new Error('Download does not belong to this tab/task.');
+      const ownerKey='downloadOwner:'+Number(p.download_id);
+      const owners=await chrome.storage.session.get(ownerKey);
+      if(owners[ownerKey]!==tabId)throw new Error('Download does not belong to this tab/task.');
       return (await chrome.downloads.search({id:Number(p.download_id)})).map(({id,state,error,bytesReceived,totalBytes,filename})=>({id,state,error,bytes_received:bytesReceived,total_bytes:totalBytes,filename}));
     }
     throw new Error('Unsupported Bridge action: '+action);
