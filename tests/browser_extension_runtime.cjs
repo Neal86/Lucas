@@ -44,6 +44,12 @@ const run=(a,p)=>ctx.LucasCommands.run(a,p);
   delay=false;await run('download.url',{tab_id:1,url:'https://allowed.test/file'});await run('download.status',{tab_id:1,download_id:8});
   await assert.rejects(run('download.status',{tab_id:2,download_id:8}),/does not belong/);
   assert(ctx.LucasAccess.matches('sub.example.com',['*.example.com']));assert(!ctx.LucasAccess.matches('example.com.evil',['*.example.com']));
+  const originalFrame=chrome.webNavigation.getFrame;let frameChecks=0;
+  chrome.webNavigation.getFrame=async args=>++frameChecks===1?null:originalFrame(args);
+  await run('page.wait',{tab_id:1});assert(frameChecks===2);
+  frameChecks=0;
+  await assert.rejects(run('page.click',{tab_id:1,target:'Save'}),/frame no longer exists/);
+  assert(frameChecks===1);chrome.webNavigation.getFrame=originalFrame;
   // First installation must send hello without reconnecting on its new UUID.
   const identityListeners=[],identityStore={},sockets=[];
   class FakeSocket {

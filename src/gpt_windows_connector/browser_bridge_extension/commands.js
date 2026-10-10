@@ -7,7 +7,20 @@
   };
   async function pageCommand(tabId, action, p) {
     const frameId = Number(p.frame_id || 0);
-    const frame = await chrome.webNavigation.getFrame({tabId,frameId});
+    let frame = await chrome.webNavigation.getFrame({tabId,frameId});
+    if (action === 'page.wait' && frameId === 0) {
+      // tabs.create/navigation resolves before the destination document exists.
+      // Poll only for an explicit wait; never retry uncertain page mutations.
+      const deadline=Date.now()+Math.min(120000,Math.max(250,Number(p.timeout_ms || 15000)));
+      while (true) {
+        const tab=await chrome.tabs.get(tabId);
+        const pendingBlank=frame?.url==='about:blank' && tab.pendingUrl && tab.pendingUrl!=='about:blank';
+        if(frame && tab.status!=='loading' && !pendingBlank)break;
+        if(Date.now()>=deadline)throw new Error('Timeout waiting for the selected page to load.');
+        await new Promise(resolve=>setTimeout(resolve,100));
+        frame=await chrome.webNavigation.getFrame({tabId,frameId});
+      }
+    }
     if (!frame) throw new Error('Selected frame no longer exists. List frames again.');
     const denied = await LucasAccess.check(frame.url);
     if (denied) return denied;
