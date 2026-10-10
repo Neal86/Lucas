@@ -406,7 +406,16 @@ async def profile_action(
     if not operation:
         raise ValueError("operation is required")
     operation_params = dict(params.get("operation_params") or {})
-    binding, profile = _binding_for_action(params, audit_context)
+    # An explicit profile selection wins over the task's previous selection.
+    # Reconnect here so callers need not bind a task before every operation.
+    if any(params.get(key) not in (None, "") for key in
+           ("profile_key", "profile_id", "profile_name", "alias", "tag", "group", "browser_type")):
+        opened = await open_profile(params, audit_context)
+        if opened.get("status") != "ready":
+            return opened
+        binding, profile = opened["binding"], opened["profile"]
+    else:
+        binding, profile = _binding_for_action(params, audit_context)
     transport = str(binding.get("transport") or "")
     task_key = str(binding.get("task_key") or "")
 

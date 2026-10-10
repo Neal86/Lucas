@@ -67,17 +67,8 @@ def test_home_target_can_be_overridden_without_changing_ali(monkeypatch):
     assert by_label["ALI"].node_id == "ali-bc0358dd0a5d"
 
 
-def test_gateway_uses_shared_eva_browser_policy():
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "gpt_windows_connector"
-        / "gateway.py"
-    ).read_text(encoding="utf-8")
-
-    assert "resolve_eva_browser_target" in source
-    assert "target = _eva_browser_target(node_id)" in source
-    assert '"user_data_dir": target.user_data_dir' in source
-    assert '"profile": target.profile' in source
+def test_gateway_does_not_enforce_eva_profile_isolation():
+    source = (Path(__file__).resolve().parents[1] / "src" / "gpt_windows_connector" / "gateway.py").read_text(encoding="utf-8")
+    assert "_enforce_eva_browser_isolation" not in source
+    assert "_eva_browser_session" not in source
     assert "When the user says Home, use node N20630" in source
-    assert "Eva on either Home or ALI" in source

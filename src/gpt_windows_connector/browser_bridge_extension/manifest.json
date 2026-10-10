@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Lucas Browser Bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Connect this browser profile to the local Lucas Node for background AI browser automation.",
   "permissions": [
     "tabs",
@@ -20,8 +20,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*", "file:///*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file:///*"
+      ],
+      "js": [
+        "targets.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],

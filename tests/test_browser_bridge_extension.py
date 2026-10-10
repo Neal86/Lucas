@@ -11,7 +11,7 @@ def test_browser_bridge_manifest_is_mv3_and_local_only():
 
     assert manifest["manifest_version"] == 3
     assert manifest["background"]["service_worker"] == "background.js"
-    assert manifest["content_scripts"][0]["js"] == ["content.js"]
+    assert manifest["content_scripts"][0]["js"] == ["targets.js", "content.js"]
     assert "<all_urls>" in manifest["host_permissions"]
 
 

@@ -8,10 +8,13 @@
   function findTarget(target, editable) {
     const query = String(target || "").trim();
     if (!query) throw new Error("target is required");
+    if (query.startsWith("ref:")) return globalThis.lucasTargets.resolve(query, visible);
+    let cssMatches = [];
     try {
-      const found = document.querySelector(query.startsWith("css=") ? query.slice(4) : query);
-      if (found && visible(found)) return found;
+      cssMatches = [...document.querySelectorAll(query.startsWith("css=") ? query.slice(4) : query)].filter(visible);
     } catch (_) {}
+    if (cssMatches.length > 1) throw new Error("Ambiguous browser target. Call observe and use an element ref.");
+    if (cssMatches.length === 1) return cssMatches[0];
     const selector = editable
       ? "input,textarea,select,[contenteditable=true]"
       : "button,a,[role=button],[role=link],input[type=submit],input[type=button]";
@@ -30,20 +33,23 @@
       return [score, el];
     }).filter(item => item[0] > 0).sort((a, b) => b[0] - a[0]);
     if (!matches.length) throw new Error("No browser element matched: " + query);
+    if (matches.length > 1 && matches[0][0] === matches[1][0])
+      throw new Error("Ambiguous browser target. Call observe and use an element ref.");
     return matches[0][1];
   }
 
   function snapshot(params) {
-    const limit = Number(params.limit || 400);
-    const maxChars = Number(params.max_chars || 50000);
+    const limit = Math.max(1, Math.min(Number(params.limit || 400), 1000));
+    const maxChars = Math.max(1000, Math.min(Number(params.max_chars || 50000), 200000));
     const nodes = [...document.querySelectorAll(
       "button,a,input,textarea,select,[role=button],[role=link],[role=checkbox],[role=radio],[contenteditable=true]"
     )].filter(visible).slice(0, limit);
+    const refs = globalThis.lucasTargets.observe(nodes);
     const elements = nodes.map((el, index) => ({
-      index,
+      index, ref: refs[index], disabled: !!el.disabled,
       tag: el.tagName.toLowerCase(),
       role: el.getAttribute("role") || "",
-      text: String(el.innerText || el.value || "").replace(/\s+/g, " ").trim().slice(0, 500),
+      text: String(el.innerText || "").replace(/\s+/g, " ").trim().slice(0, 500),
       aria_label: el.getAttribute("aria-label") || "",
       name: el.getAttribute("name") || "",
       placeholder: el.getAttribute("placeholder") || "",

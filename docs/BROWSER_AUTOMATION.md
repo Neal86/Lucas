@@ -22,15 +22,15 @@ Named browser work goes through the local Browser Profile Router. Agents can sel
 - `group`
 - stable Lucas `profile_key`
 
-A task is bound to one profile after `profile_open`. The binding is stored locally and reused after transport reconnects, so later `profile_action` calls cannot silently drift to another account.
+Profiles are selectable browser targets, not agent isolation boundaries. `profile_open` remembers a selection for convenience. `profile_action` accepts an explicit `profile_key`, `profile_id`, `profile_name`, alias, tag or group and connects/switches to that selection before performing the operation. No prior task binding is required when a profile selector is supplied. Calls without a selector reuse the remembered selection; if there is no selection, callers must choose one rather than guessing.
 
-Agent/Profile permissions are also stored locally. An agent may be restricted to one alias, a group such as Marketing, or a set of tags. Remote MCP calls can read these rules but cannot edit the local allow/deny mapping.
+Legacy per-agent Profile allow/deny rules and the automatic Eva-only restriction are inactive. Existing configuration, profile directories, cookies and login state are preserved. Node/account authorization, local folder guards and foreground approval continue to apply.
 
 ## Browser modes
 
 ### Lucas-managed browser
 
-Use `ensure_cdp` or `ensure_profile` for a dedicated Lucas browser profile. Eva remains isolated to the configured dedicated browser profile on each authorized Node.
+Use `ensure_cdp` or `ensure_profile` for a dedicated Lucas browser profile. An explicit endpoint, profile and session are honored; the gateway never forces Eva or port 9222. Existing browser sessions can be selected directly. A browser must expose CDP or have a paired Browser Bridge before Lucas can control it.
 
 ### Browser Bridge
 
@@ -181,3 +181,18 @@ Uploads and downloads keep the existing workspace path restrictions. ixBrowser p
 The Browser Bridge service starts with Lucas Node and listens on localhost only. Install the unpacked Lucas Browser Bridge extension into any browser profile that should be agent-controllable, then pair it once with a local Profile record.
 
 For ixBrowser Local API mode, ixBrowser must be running and Local API must be enabled. When Local API is unavailable, a connected Browser Bridge can still control an already-open ixBrowser profile. If a requested profile is closed and no configured launcher/API is available, Lucas returns a resumable `requires_user_action` response naming the exact Profile that must be opened.
+
+## Observation references
+
+For Codex-style page interaction, first call `observe` with the selected `session_id` and `page_index` (CDP), or `profile_action(operation="observe", operation_params={"tab_id": ...})` (Bridge). Each visible control includes an opaque `ref`. Pass that exact string as `target` to `semantic_click` or `semantic_type` on the same tab. Bridge `snapshot` also includes references; CDP `snapshot` retains its existing ARIA format, so use `observe` to obtain actionable references.
+
+References retain DOM element identity even when controls are inserted or reordered. They expire on a new observation and cannot be used on another tab. Detached, hidden, disabled or relabeled controls stop the action and require a fresh observation. Semantic targets that match multiple visible controls are rejected instead of clicking the first match. References are in-memory and do not alter page attributes or persist to disk. Control descriptors do not include input values, including passwords.
+
+Example CDP sequence:
+
+```json
+{"action":"observe","params":{"session_id":"selected-session","page_index":0}}
+{"action":"semantic_click","params":{"session_id":"selected-session","page_index":0,"target":"ref:<returned-id>:0"}}
+```
+
+This implements a similar interaction workflow; it does not reuse Codex's proprietary browser runtime. Normal operations continue through background browser protocols. Native dialogs and verification blockers use the existing explicit handoff workflow.
