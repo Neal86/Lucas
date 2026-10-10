@@ -135,14 +135,19 @@ def test_real_browser_extension_roundtrip(tmp_path,monkeypatch):
                 await config({'paused':False})
                 # Render extension settings with real Chromium to catch CSP/script errors.
                 extension_id=workers[0]['url'].split('/')[2]
-                ui_target=(await cdp.send('Target.createTarget',{'url':f'chrome-extension://{extension_id}/options.html'}))['targetId']
+                settings_url=f'chrome-extension://{extension_id}/options.html'
+                ui_target=(await cdp.send('Target.createTarget',{'url':settings_url}))['targetId']
                 ui_session=(await cdp.send('Target.attachToTarget',{'targetId':ui_target,'flatten':True}))['sessionId']
                 for _ in range(50):
-                    state=await cdp.send('Runtime.evaluate',{'expression':'document.readyState','returnByValue':True},ui_session)
-                    if state.get('result',{}).get('value')=='complete':break
+                    # A newly created target starts on a complete about:blank.
+                    # Wait for the actual settings document before querying it.
+                    expression='location.href === '+json.dumps(settings_url)+' && document.readyState === "complete" && !!document.querySelector("#siteMode")'
+                    state=await cdp.send('Runtime.evaluate',{'expression':expression,'returnByValue':True},ui_session)
+                    if state.get('result',{}).get('value') is True:break
                     await asyncio.sleep(.1)
+                assert state.get('result',{}).get('value') is True,state
                 check=await cdp.send('Runtime.evaluate',{'expression':'document.querySelector("#siteMode").value','returnByValue':True},ui_session)
-                assert check['result']['value']=='all'
+                assert check.get('result',{}).get('value')=='all',check
                 ui=await cdp.send('Page.captureScreenshot',{'format':'png'},ui_session)
                 (tmp_path/'options.png').write_bytes(base64.b64decode(ui['data']))
                 print('Real extension verified: trusted click, text/contenteditable, read-only JS, iframe, table, screenshot, upload, download, block/pause, settings UI')
