@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import os
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -15,6 +16,9 @@ PLANS: dict[str, dict[str, Any]] = {
 EXPANSION = {"price": 14.99, "requests": 100_000, "nodes": 6, "ai_accounts": 1}
 ACTIVE_STATUSES = {"active", "trialing", "past_due"}
 
+def beta_free_enabled() -> bool:
+    return os.getenv('LUCAS_BETA_FREE', '1').strip().lower() not in {'0', 'false', 'off'}
+
 @dataclass(frozen=True)
 class Entitlements:
     plan: str; plan_name: str; status: str; expansion_quantity: int
@@ -23,7 +27,7 @@ class Entitlements:
     period_start: float; period_end: float; renewal_at: float | None
     cancel_at_period_end: bool; bonus_requests: int; nodes_connected: int = 0; bonus_nodes: int = 0; bonus_ai_accounts: int = 0; admin_grant: bool = False
     @property
-    def can_buy_expansion(self) -> bool: return self.plan == "pro_plus" and self.status in ACTIVE_STATUSES
+    def can_buy_expansion(self) -> bool: return not beta_free_enabled() and self.plan == "pro_plus" and self.status in ACTIVE_STATUSES
     def as_dict(self) -> dict[str, Any]:
         return {"plan":self.plan,"plan_name":self.plan_name,"status":self.status,"expansion_quantity":self.expansion_quantity,"request_limit":self.request_limit,"node_limit":self.node_limit,"ai_account_limit":self.ai_account_limit,"requests_used":self.requests_used,"nodes_used":self.nodes_used,"nodes_connected":self.nodes_connected,"ai_accounts_used":self.ai_accounts_used,"period_start":self.period_start,"period_end":self.period_end,"renewal_at":self.renewal_at,"cancel_at_period_end":self.cancel_at_period_end,"bonus_requests":self.bonus_requests,"bonus_nodes":self.bonus_nodes,"bonus_ai_accounts":self.bonus_ai_accounts,"admin_grant":self.admin_grant,"can_buy_expansion":self.can_buy_expansion,"request_remaining":max(0,self.request_limit-self.requests_used),"node_remaining":max(0,self.node_limit-self.nodes_used),"ai_account_remaining":max(0,self.ai_account_limit-self.ai_accounts_used)}
 
@@ -84,6 +88,8 @@ def _plan_state(db: sqlite3.Connection,user_id: str,now: float) -> tuple[str,str
     row=db.execute("SELECT * FROM subscriptions WHERE user_id=?",(user_id,)).fetchone()
     status=str(row["status"] if row and "status" in row.keys() else "inactive"); raw=str(row["plan"] if row and "plan" in row.keys() else "free")
     plan=raw if raw in PLANS and status in ACTIVE_STATUSES else "free"; expansion=int((row["expansion_quantity"] if row and "expansion_quantity" in row.keys() else 0) or 0) if plan=="pro_plus" else 0
+    # Beta entitlements override historical paid tiers without modifying billing records.
+    if beta_free_enabled(): plan="free"; expansion=0
     bonus=int((row["bonus_requests"] if row and "bonus_requests" in row.keys() else 0) or 0); pstart=float((row["current_period_start"] if row and "current_period_start" in row.keys() else 0) or 0); pend=float((row["current_period_end"] if row and "current_period_end" in row.keys() else 0) or 0)
     if plan=="free" or pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
     cancel=bool((row["cancel_at_period_end"] if row and "cancel_at_period_end" in row.keys() else 0) or 0)
@@ -119,7 +125,7 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
     now=float(now or time.time())
     with _connect(db_path) as db:
         plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now); admin_grant=_is_admin(db,user_id)
-        if admin_grant:
+        if admin_grant and not beta_free_enabled():
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
             if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
         extra_requests,extra_nodes,extra_ai,_,_=_entitlement_override(db,user_id,now); req=_operations_used(db,user_id,pstart,pend); ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,)); node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes; connected=len(_bound_ids(db,user_id)); active=len(_sync_active(db,user_id,node_limit))
@@ -127,7 +133,9 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
 
 def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1) -> Entitlements:
     e=snapshot(db_path,user_id); requested=max(1,int(requested_operations or 1))
-    if e.requests_used+requested>e.request_limit: raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
+    if e.requests_used+requested>e.request_limit:
+        if beta_free_enabled(): raise PermissionError(f"Lucas Beta monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). Limit resets next month.")
+        raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
     return e
 
 def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements: return snapshot(db_path,user_id)
@@ -135,12 +143,14 @@ def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlement
 def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlements:
     e=snapshot(db_path,user_id)
     with _connect(db_path) as db: exists=db.execute("SELECT 1 FROM oauth_client_users WHERE user_id=? AND client_id=?",(user_id,client_id)).fetchone()
-    if not exists and e.ai_accounts_used>=e.ai_account_limit: raise PermissionError(f"AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade to Pro+'} at /billing.")
+    if not exists and e.ai_accounts_used>=e.ai_account_limit:
+        if beta_free_enabled(): raise PermissionError(f"Lucas Beta AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}).")
+        raise PermissionError(f"AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade to Pro+'} at /billing.")
     return e
 
 def _effective_node_limit(db: sqlite3.Connection,user_id: str,now: float) -> int:
     plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now)
-    if _is_admin(db,user_id): plan="pro_plus"; expansion=0; base=PLANS["pro_plus"]
+    if _is_admin(db,user_id) and not beta_free_enabled(): plan="pro_plus"; expansion=0; base=PLANS["pro_plus"]
     _,extra_nodes,_,_,_=_entitlement_override(db,user_id,now); return int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes
 
 def active_node_ids(db_path: Path,user_id: str,preferred_node_ids: Iterable[str] | None=None) -> list[str]:
