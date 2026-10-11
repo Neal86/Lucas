@@ -86,6 +86,8 @@ class BillingService:
         return out
 
     def _require_checkout_configured(self) -> None:
+        if os.getenv('LUCAS_BETA_FREE', '1').strip().lower() not in {'0', 'false', 'off'}:
+            raise RuntimeError('New paid purchases are disabled during Lucas Beta.')
         if not self.checkout_configured: raise RuntimeError('Stripe checkout is not configured yet. Add the Stripe Price IDs first.')
 
     def _require_webhook_configured(self) -> None:
