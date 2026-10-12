@@ -69,11 +69,19 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                 worker=None
                 for _ in range(60):
                     targets=(await cdp.call('Target.getTargets'))['targetInfos']
-                    worker=next((x for x in targets if x['type']=='service_worker' and 'background.js' in x['url']),None)
+                    for candidate in targets:
+                        if candidate['type']!='service_worker' or not candidate['url'].startswith('chrome-extension://'):
+                            continue
+                        attached=(await cdp.call('Target.attachToTarget',{'targetId':candidate['targetId'],'flatten':True}))['sessionId']
+                        name=await cdp.evaluate('chrome.runtime.getManifest().name',attached)
+                        await cdp.call('Target.detachFromTarget',{'sessionId':attached})
+                        if name=='Lucas Browser':
+                            worker=candidate
+                            break
                     if worker:break
                     await asyncio.sleep(.1)
                 assert worker, targets
-                extension_origin=worker['url'].rsplit('/',1)[0]
+                extension_origin='chrome-extension://'+worker['url'].split('/')[2]
                 popup=(await cdp.call('Target.createTarget',{'url':extension_origin+'/popup.html'}))['targetId']
                 session=(await cdp.call('Target.attachToTarget',{'targetId':popup,'flatten':True}))['sessionId']
                 for _ in range(50):
