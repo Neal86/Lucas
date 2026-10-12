@@ -73,7 +73,8 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                         if candidate['type']!='service_worker' or not candidate['url'].startswith('chrome-extension://'):
                             continue
                         attached=(await cdp.call('Target.attachToTarget',{'targetId':candidate['targetId'],'flatten':True}))['sessionId']
-                        name=await cdp.evaluate('chrome.runtime.getManifest().name',attached)
+                        await cdp.call('Runtime.enable',session=attached)
+                        name=await cdp.evaluate('globalThis.chrome?.runtime?.getManifest?.().name',attached)
                         await cdp.call('Target.detachFromTarget',{'sessionId':attached})
                         if name=='Lucas Browser':
                             worker=candidate
