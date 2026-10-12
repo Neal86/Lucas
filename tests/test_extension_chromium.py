@@ -126,9 +126,7 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                 with pytest.raises(PermissionError):
                     await Executor((tmp_path,),{'security':preset_security('full_access')},owner_id='other').call('browser.inspect',{'session_id':sid})
                 # Actual foreground selection remains on another tab during work.
-                await cdp.call('Target.createTarget',{'url':base+'/?other'})
-                other=await cdp.evaluate(f"chrome.tabs.query({{}}).then(t=>t.find(x=>x.url==='{base}/?other').id)",session)
-                await cdp.evaluate(f"chrome.tabs.update({other},{{active:true}})",session)
+                other=await cdp.evaluate(f"chrome.tabs.create({{url:'{base}/?other',active:true}}).then(t=>t.id)",session)
                 await action('screenshot')
                 active=await cdp.evaluate("chrome.tabs.query({active:true}).then(t=>t.map(x=>x.id))",session)
                 assert other in active and tab_id not in active

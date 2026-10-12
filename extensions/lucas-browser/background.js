@@ -125,7 +125,25 @@ async function execute(tab,action,p) {
   if(action==='pages') return [{index:0,tab_id:tab,url:current.url,title:current.title}];
   if(action==='navigate') {
     const url=new URL(p.url); if(!['http:','https:'].includes(url.protocol)||url.username||url.password) throw Error('Only HTTP(S) navigation is allowed');
-    const result=await command(tab,'Page.navigate',{url:url.href}); if(result.errorText) throw Error(result.errorText); return {url:url.href};
+    await command(tab,'Page.enable');
+    let listener,timer,done;
+    const loaded=new Promise((resolve,reject)=>{
+      done=resolve;
+      listener=(source,method)=>{if(source.tabId===tab&&method==='Page.domContentEventFired') resolve();};
+      chrome.debugger.onEvent.addListener(listener);
+      timer=setTimeout(()=>reject(Error('Navigation timed out')),20000);
+    });
+    // Attach rejection handling before the CDP command so a stalled command
+    // cannot leave an unhandled load-timeout rejection.
+    loaded.catch(()=>{});
+    try {
+      const result=await command(tab,'Page.navigate',{url:url.href});
+      if(result.errorText) throw Error(result.errorText);
+      if(!result.loaderId) done();
+      await loaded;
+      const current=await chrome.tabs.get(tab);
+      return {url:current.url,title:current.title};
+    }finally{clearTimeout(timer);chrome.debugger.onEvent.removeListener(listener);}
   }
   if(action==='screenshot'){
     const options={format:'png',captureBeyondViewport:!!p.full_page};
