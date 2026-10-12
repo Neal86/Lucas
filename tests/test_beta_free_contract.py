@@ -32,3 +32,22 @@ def test_beta_preserves_paid_subscription_but_uses_free_entitlements(tmp_path, m
     assert not ent.can_buy_expansion
     with sqlite3.connect(db_path) as db:
         assert db.execute("SELECT plan,status FROM subscriptions WHERE user_id='user-1'").fetchone() == ("pro", "active")
+
+
+def test_paid_subscriber_uses_calendar_month_during_beta(tmp_path, monkeypatch):
+    import datetime
+    monkeypatch.setenv("LUCAS_BETA_FREE", "1")
+    db_path = tmp_path / "period.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE subscriptions (user_id TEXT PRIMARY KEY, plan TEXT, status TEXT, expansion_quantity INTEGER, bonus_requests INTEGER, current_period_start REAL, current_period_end REAL, cancel_at_period_end INTEGER)")
+        db.execute("INSERT INTO subscriptions VALUES ('u','pro_plus','active',2,0,1,9999999999,0)")
+        db.execute("CREATE TABLE oauth_client_users (user_id TEXT, client_id TEXT)")
+        db.execute("CREATE TABLE user_node_bindings (user_id TEXT, node_id TEXT, approved_at REAL)")
+    now = datetime.datetime(2026, 10, 12, tzinfo=datetime.timezone.utc).timestamp()
+    ent = snapshot(db_path, "u", now=now)
+    assert ent.plan == "free"
+    assert ent.status == "free"
+    assert ent.expansion_quantity == 0
+    assert ent.request_limit == 100_000
+    assert datetime.datetime.fromtimestamp(ent.period_start, datetime.timezone.utc).month == 10
+    assert ent.period_end - ent.period_start < 32 * 86400
