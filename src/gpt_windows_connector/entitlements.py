@@ -89,7 +89,7 @@ def _plan_state(db: sqlite3.Connection,user_id: str,now: float) -> tuple[str,str
     status=str(row["status"] if row and "status" in row.keys() else "inactive"); raw=str(row["plan"] if row and "plan" in row.keys() else "free")
     plan=raw if raw in PLANS and status in ACTIVE_STATUSES else "free"; expansion=int((row["expansion_quantity"] if row and "expansion_quantity" in row.keys() else 0) or 0) if plan=="pro_plus" else 0
     # Beta entitlements override historical paid tiers without modifying billing records.
-    if beta_free_enabled(): plan="free"; expansion=0
+    if beta_free_enabled(): plan="free"; expansion=0; status="free"
     bonus=int((row["bonus_requests"] if row and "bonus_requests" in row.keys() else 0) or 0); pstart=float((row["current_period_start"] if row and "current_period_start" in row.keys() else 0) or 0); pend=float((row["current_period_end"] if row and "current_period_end" in row.keys() else 0) or 0)
     if plan=="free" or pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
     cancel=bool((row["cancel_at_period_end"] if row and "cancel_at_period_end" in row.keys() else 0) or 0)
