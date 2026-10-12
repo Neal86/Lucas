@@ -76,7 +76,11 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                 extension_origin=worker['url'].rsplit('/',1)[0]
                 popup=(await cdp.call('Target.createTarget',{'url':extension_origin+'/popup.html'}))['targetId']
                 session=(await cdp.call('Target.attachToTarget',{'targetId':popup,'flatten':True}))['sessionId']
-                await asyncio.sleep(.2)
+                for _ in range(50):
+                    ready=await cdp.evaluate("Boolean(globalThis.chrome?.runtime?.sendMessage)",session)
+                    if ready: break
+                    await asyncio.sleep(.1)
+                assert ready, await cdp.evaluate("({url:location.href,text:document.body?.innerText})",session)
                 paired=await cdp.evaluate(f"chrome.runtime.sendMessage({{type:'pair',token:'{'e'*40}',port:{port}}})",session)
                 assert paired.get('ok'),paired
                 for _ in range(30):

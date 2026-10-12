@@ -19,6 +19,6 @@ def test_orchestrator_size_budgets_do_not_regress():
     budgets={"web_assets.py":5000,"webapp.py":45000,"gateway.py":42000,"node.py":28000,"settings_ui.py":56000,"tray.py":23000}
     failures=[]
     for name,budget in budgets.items():
-        size=(PKG/name).stat().st_size
+        size=len((PKG/name).read_text(encoding="utf-8").encode("utf-8"))
         if size>budget: failures.append(f"{name}: {size} > {budget}")
     assert not failures,"Architecture size budget exceeded: "+"; ".join(failures)
