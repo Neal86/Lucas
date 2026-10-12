@@ -9,7 +9,7 @@ from typing import Any
 
 import stripe
 
-from .entitlements import ACTIVE_STATUSES, EXPANSION, PLANS, snapshot
+from .entitlements import ACTIVE_STATUSES, EXPANSION, PLANS, snapshot, beta_free_enabled
 from .referrals import ReferralService
 
 ANNUAL_TOTALS = {"pro": 99.99, "pro_plus": 199.99, "expansion": 149.99}
@@ -74,6 +74,11 @@ class BillingService:
         interval='year' if stripe_price_id and stripe_price_id in annual_ids else 'month'
         out['billing_interval']=interval
         out['annual_billing_configured']=self.annual_checkout_configured
+        if beta_free_enabled():
+            out['billing_configured']=False
+            out['annual_billing_configured']=False
+            out['beta_free']=True
+            out['existing_paid_subscription']=out['has_subscription']
         monthly=float(PLANS[ent.plan]['price'])+ent.expansion_quantity*float(EXPANSION['price'])
         out['monthly_price']=round(monthly,2)
         if interval=='year':
