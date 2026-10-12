@@ -17,7 +17,7 @@ from gpt_windows_connector.browser_extension import ExtensionBridge
 from gpt_windows_connector.executor import Executor
 from gpt_windows_connector.access_control import preset_security
 
-pytestmark = pytest.mark.skipif(not os.getenv('CHROME_BIN'), reason='CHROME_BIN required for real extension integration')
+pytestmark = pytest.mark.skipif(os.getenv('RUN_EXTENSION_E2E') != '1' or not os.getenv('CHROME_BIN'), reason='RUN_EXTENSION_E2E=1 and CHROME_BIN required')
 
 
 class CDP:

@@ -40,4 +40,5 @@ jobs:
           CHROME_BIN="$(find ~/.cache/ms-playwright -type f -name chrome | head -n 1)"
           test -n "$CHROME_BIN"
           export CHROME_BIN
+          export RUN_EXTENSION_E2E=1
           pytest -q tests/test_extension_chromium.py

@@ -35,7 +35,7 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 ## Verification
 
 - `python -m pytest -q`: normal regression suite and real loopback bridge tests.
-- `CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. No Playwright automation is used by this test.
+- `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. No Playwright automation is used by this test.
 - `python -m compileall -q src` and `node --check` on both extension scripts.
 - Build a wheel and confirm all five extension files are packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
