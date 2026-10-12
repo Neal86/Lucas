@@ -25,15 +25,16 @@ def test_billing_endpoints_and_webhook_exist():
 
 def test_dashboard_has_billing_entry_points():
     from gpt_windows_connector.web_assets import DASHBOARD_HTML
-    text=DASHBOARD_HTML; assert 'data-view=\"billing\"' in text and "Operations" in text
-    fragment=dashboard_billing_html()
+    assert 'data-view="billing"' in DASHBOARD_HTML
+    fragment = dashboard_billing_html()
     assert 'id="billing" class="view hidden"' in fragment
+    assert "Lucas Beta" in fragment
+    assert "100,000 Operations/month" in fragment
     assert "Current plan" in fragment
-    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in fragment
-    assert 'id="billingCardExpansion" class="billing-plan-card"' in fragment
     assert "Beta Notice:" in fragment
-    assert "Plans, pricing, and limits may change during Beta." in fragment
-    webapp=Path("src/gpt_windows_connector/webapp.py").read_text(encoding="utf-8"); assert "dashboard_billing_html() + account_marker" in webapp and "return HTMLResponse(_dashboard_html()" in webapp
+    assert 'id="billingCardPro"' not in fragment
+    assert 'id="billingCardExpansion"' not in fragment
+    assert 'id="billingManage"' not in fragment
 
 
 def test_billable_request_guard_is_before_node_rpc():
