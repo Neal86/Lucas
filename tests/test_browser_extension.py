@@ -130,3 +130,22 @@ def test_extension_download_route():
     assert response.headers['content-type']=='application/zip'
     with ZipFile(io.BytesIO(response.content)) as archive:
         assert archive.testzip() is None
+
+
+def test_failed_cdp_attachment_preserves_user_browser(monkeypatch):
+    class ExistingBrowser:
+        @property
+        def contexts(self): raise RuntimeError("Failed after attachment")
+        async def close(self): pytest.fail("Closed the user browser")
+    class Playwright:
+        stopped=False
+        @property
+        def chromium(self): return self
+        async def connect_over_cdp(self,*args,**kwargs): return ExistingBrowser()
+        async def start(self): return self
+        async def stop(self): self.stopped=True
+    pw=Playwright()
+    monkeypatch.setattr(browser,"async_playwright",lambda:pw)
+    with pytest.raises(RuntimeError,match="Failed after attachment"):
+        asyncio.run(browser.connect_cdp())
+    assert pw.stopped

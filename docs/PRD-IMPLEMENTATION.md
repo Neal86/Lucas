@@ -9,8 +9,8 @@ This is a trace of implementation and evidence, not a production acceptance decl
 | Free Beta pricing and visible Pricing navigation | billing_ui.py, entitlements.py, billing.py | Beta tests cover new/existing plans; paid checkout, expansion and billing portal changes blocked server-side; historical records preserved |
 | 100,000 OP/month, 3 active computers, 3 AI accounts | entitlements.py, web_billing_runtime.py | Quota/device/account regression suite; existing explicitly granted admin bonuses remain supported |
 | Registration CTA and language detection | billing_ui.py, web_core_runtime.py, web_i18n_runtime.py | Pricing register link, Chinese strings and sticky nav tested; visual acceptance still required |
-| Authorized browser extension | extensions/lucas-browser, browser_extension.py, executor.py | Real local WebSocket tests cover pairing, owner isolation, expiry, revocation and disconnect; real Chromium integration is a separate CI gate |
-| Background browser operations | extension background.js | Navigation, inspection, observation, click/type/select/scroll, upload, screenshots and HTTP(S) link downloads implemented; real Chromium runtime test required |
+| Authorized browser extension | extensions/lucas-browser, browser_extension.py, executor.py | Real local WebSocket tests cover pairing, owner isolation, expiry, revocation and disconnect; real Chromium integration passed in GitHub CI |
+| Background browser operations | extension background.js | Navigation, inspection, observation, click/type/select/scroll, upload, screenshots and HTTP(S) link downloads implemented; real Chromium runtime test passed in GitHub CI |
 | Manual verification handoff | extension background.js; browser.handoff | No CAPTCHA/passkey solver and no automatic tab activation; unsupported exports and new-tab grants return a handoff |
 | No mandatory isolated Profile | gateway.py, browser.py | ALI/Eva hard-coded target removed; explicitly selected CDP remains supported; CDP failure never restarts browser |
 | Existing user browser preservation | browser.close | CDP disconnect does not close existing context/browser; regression test |
@@ -40,7 +40,11 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 - Build a wheel and confirm all five extension files are packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
 
-Local verification result: **174 passed, 4 skipped**. The 28 user-visible HTTP routes passed against an isolated local server. Extension JavaScript syntax and wheel packaging passed. Browser rendering and deployed endpoints have separate gates.
+Local verification result: **175 passed, 4 skipped**. The 28 user-visible HTTP routes passed against an isolated local server. Extension JavaScript syntax and wheel packaging passed. Browser rendering and deployed endpoints have separate gates.
+
+## CI verification
+
+Functional commit `e68257135223e82ae96e888dfc9407aff7fcbe0e` passed the real extension integration on Chromium in [CI run 38302416394](https://github.com/Neal86/Lucas/actions/runs/38302416394). This exercised real DOM reads/clicks/types/select/scroll, file upload/download, full-page and background screenshots, account isolation, navigation and tab revocation. Browser integration runs through direct CDP without Playwright automation. Windows and Linux regression results are recorded by the same workflow.
 
 ## Current environment gates
 

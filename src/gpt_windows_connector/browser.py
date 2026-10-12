@@ -174,11 +174,7 @@ async def _connect_cdp_once(endpoint: str, browser_name: str | None, profile: st
             )
         return {"session_id": session_id, "pages": len(context.pages), "endpoint": endpoint, "browser_name": browser_name, "profile": profile, "reused": False}
     except Exception:
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
+        # Failed attachment must detach without closing the user browser.
         if pw is not None:
             try:
                 await pw.stop()
