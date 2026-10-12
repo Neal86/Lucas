@@ -23,17 +23,25 @@ def paid(path, plan, expansion=0):
 
 
 def test_plan_limits_and_pro_plus_expansion(tmp_path):
-    p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro_plus",2)
-    e=snapshot(p,"u")
-    assert (e.request_limit,e.node_limit,e.ai_account_limit)==(300000,18,5)
-    assert e.can_buy_expansion is True
+    # Legacy paid-tier contract applies only after Beta ends.
+    import os
+    from unittest.mock import patch
+        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+        p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro_plus",2)
+        e=snapshot(p,"u")
+        assert (e.request_limit,e.node_limit,e.ai_account_limit)==(300000,18,5)
+        assert e.can_buy_expansion is True
 
 
 def test_expansion_never_applies_to_pro(tmp_path):
-    p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro",9)
-    e=snapshot(p,"u")
-    assert (e.request_limit,e.node_limit,e.ai_account_limit)==(25000,3,1)
-    assert e.expansion_quantity==0 and not e.can_buy_expansion
+    # Legacy paid-tier contract applies only after Beta ends.
+    import os
+    from unittest.mock import patch
+        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+        p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro",9)
+        e=snapshot(p,"u")
+        assert (e.request_limit,e.node_limit,e.ai_account_limit)==(25000,3,1)
+        assert e.expansion_quantity==0 and not e.can_buy_expansion
 
 
 def test_beta_free_limits_match_pricing(tmp_path):
@@ -52,15 +60,19 @@ def test_requests_are_task_step_operations_not_http_requests(tmp_path):
 
 
 def test_node_and_ai_limits_are_hard(tmp_path):
-    p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
-    now=time.time()
-    with sqlite3.connect(p) as db:
-        db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u",f"n{i}",now+i) for i in range(3)])
-        db.execute("INSERT INTO oauth_client_users VALUES(?,?,?)",("c1","u",now))
-    ensure_node_capacity(p,"u","n4")
-    with pytest.raises(PermissionError): ensure_ai_capacity(p,"u","c2")
-    assert len(active_node_ids(p,"u")) == 3
-    ensure_node_active(p,"u",active_node_ids(p,"u")[0])
+    # Legacy paid-tier contract applies only after Beta ends.
+    import os
+    from unittest.mock import patch
+        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+        p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
+        now=time.time()
+        with sqlite3.connect(p) as db:
+            db.executemany("INSERT INTO user_node_bindings VALUES(?,?,?)",[("u",f"n{i}",now+i) for i in range(3)])
+            db.execute("INSERT INTO oauth_client_users VALUES(?,?,?)",("c1","u",now))
+        ensure_node_capacity(p,"u","n4")
+        with pytest.raises(PermissionError): ensure_ai_capacity(p,"u","c2")
+        assert len(active_node_ids(p,"u")) == 3
+        ensure_node_active(p,"u",active_node_ids(p,"u")[0])
 
 
 def test_over_limit_existing_node_is_preserved_but_blocked(tmp_path):
@@ -78,11 +90,15 @@ def test_over_limit_existing_node_is_preserved_but_blocked(tmp_path):
 
 
 def test_request_limit_blocks_before_next_operation(tmp_path):
-    p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
-    now=time.time()
-    with sqlite3.connect(p) as db:
-        db.executemany("INSERT INTO task_steps(owner_id,started_at,operation_count) VALUES(?,?,?)",[("u",now,1)]*25000)
-    with pytest.raises(PermissionError): ensure_request_capacity(p,"u")
+    # Legacy paid-tier contract applies only after Beta ends.
+    import os
+    from unittest.mock import patch
+        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+        p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
+        now=time.time()
+        with sqlite3.connect(p) as db:
+            db.executemany("INSERT INTO task_steps(owner_id,started_at,operation_count) VALUES(?,?,?)",[("u",now,1)]*25000)
+        with pytest.raises(PermissionError): ensure_request_capacity(p,"u")
 
 
 def test_beta_free_allows_three_active_computers_and_manual_switch(tmp_path):
@@ -102,14 +118,18 @@ def test_beta_free_allows_three_active_computers_and_manual_switch(tmp_path):
 
 
 def test_admin_is_effective_pro_plus_and_supports_extra_entitlements(tmp_path):
-    p=tmp_path/"db.sqlite"; schema(p)
-    with sqlite3.connect(p) as db:
-        db.execute("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT)")
-        db.execute("INSERT INTO users VALUES(?,?)",("u","admin"))
-        db.execute("CREATE TABLE entitlement_overrides(user_id TEXT PRIMARY KEY,bonus_requests INTEGER,bonus_nodes INTEGER,bonus_ai_accounts INTEGER,updated_at REAL)")
-        db.execute("INSERT INTO entitlement_overrides VALUES(?,?,?,?,?)",("u",5000,2,4,time.time()))
-    e=snapshot(p,"u")
-    assert e.plan=="pro_plus" and e.admin_grant is True
-    assert e.request_limit==105000
-    assert e.node_limit==8
-    assert e.ai_account_limit==7
+    # Legacy paid-tier contract applies only after Beta ends.
+    import os
+    from unittest.mock import patch
+        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+        p=tmp_path/"db.sqlite"; schema(p)
+        with sqlite3.connect(p) as db:
+            db.execute("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT)")
+            db.execute("INSERT INTO users VALUES(?,?)",("u","admin"))
+            db.execute("CREATE TABLE entitlement_overrides(user_id TEXT PRIMARY KEY,bonus_requests INTEGER,bonus_nodes INTEGER,bonus_ai_accounts INTEGER,updated_at REAL)")
+            db.execute("INSERT INTO entitlement_overrides VALUES(?,?,?,?,?)",("u",5000,2,4,time.time()))
+        e=snapshot(p,"u")
+        assert e.plan=="pro_plus" and e.admin_grant is True
+        assert e.request_limit==105000
+        assert e.node_limit==8
+        assert e.ai_account_limit==7
