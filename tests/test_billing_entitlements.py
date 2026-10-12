@@ -26,7 +26,7 @@ def test_plan_limits_and_pro_plus_expansion(tmp_path):
     # Legacy paid-tier contract applies only after Beta ends.
     import os
     from unittest.mock import patch
-        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+    with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
         p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro_plus",2)
         e=snapshot(p,"u")
         assert (e.request_limit,e.node_limit,e.ai_account_limit)==(300000,18,5)
@@ -37,7 +37,7 @@ def test_expansion_never_applies_to_pro(tmp_path):
     # Legacy paid-tier contract applies only after Beta ends.
     import os
     from unittest.mock import patch
-        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+    with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
         p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro",9)
         e=snapshot(p,"u")
         assert (e.request_limit,e.node_limit,e.ai_account_limit)==(25000,3,1)
@@ -63,7 +63,7 @@ def test_node_and_ai_limits_are_hard(tmp_path):
     # Legacy paid-tier contract applies only after Beta ends.
     import os
     from unittest.mock import patch
-        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+    with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
         p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
         now=time.time()
         with sqlite3.connect(p) as db:
@@ -93,7 +93,7 @@ def test_request_limit_blocks_before_next_operation(tmp_path):
     # Legacy paid-tier contract applies only after Beta ends.
     import os
     from unittest.mock import patch
-        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+    with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
         p=tmp_path/"db.sqlite"; schema(p); paid(p,"pro")
         now=time.time()
         with sqlite3.connect(p) as db:
@@ -121,7 +121,7 @@ def test_admin_is_effective_pro_plus_and_supports_extra_entitlements(tmp_path):
     # Legacy paid-tier contract applies only after Beta ends.
     import os
     from unittest.mock import patch
-        with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
+    with patch.dict(os.environ, {'LUCAS_BETA_FREE': '0'}):
         p=tmp_path/"db.sqlite"; schema(p)
         with sqlite3.connect(p) as db:
             db.execute("CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT)")
