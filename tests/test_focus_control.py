@@ -26,8 +26,19 @@ def test_real_input_and_visible_browser_are_focus_controlled():
 def test_full_access_never_disables_focus_or_dangerous_confirmations():
     policy = preset_security("full_access")["approval_policy"]
     assert policy["background_control"] == "allow"
-    assert policy["desktop_control"] == "always_ask"
-    assert policy["git_push"] == "always_ask"
+    assert preset_security("full_access")["foreground_confirmation"] is True
+    assert policy["desktop_control"] == "allow"
+    assert policy["git_push"] == "allow"
     assert policy["software_install"] == "always_ask"
     assert policy["registry_system"] == "always_ask"
     assert policy["high_risk"] == "always_ask"
+
+
+def test_foreground_confirmation_overrides_allow_policy(monkeypatch):
+    security = LocalSecurityPolicy({"security": preset_security("full_access")})
+    asked = []
+    monkeypatch.setattr(security, "_prompt", lambda *args: asked.append(args) or False)
+    import pytest
+    with pytest.raises(PermissionError):
+        security.authorize("computer.activate", {})
+    assert asked

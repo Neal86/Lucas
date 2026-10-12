@@ -46,3 +46,7 @@ Lucas connects a user's existing AI assistant to authorized local computers and 
 
 ## Implementation status
 PRD requirements are not evidence of deployed functionality. Verify each acceptance criterion in code, tests, staging, and production separately.
+
+## Implementation trace (2026-10-12)
+
+See [docs/PRD-IMPLEMENTATION.md](docs/PRD-IMPLEMENTATION.md) for requirement-to-code mapping, local pairing, regression evidence and remaining runtime/deployment gates. Chrome/Chromium tab authorization is account-scoped; it does not require a dedicated Profile. Implementation evidence and production acceptance remain separate.

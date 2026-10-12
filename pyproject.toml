@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gpt-windows-connector"
-version = "1.7.54"
+version = "1.7.55"
 description = "Multi-user remote Windows execution MCP with VPS web dashboard for ChatGPT, Claude, Gemini and other MCP clients"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,3 +40,6 @@ lucas-tray = "gpt_windows_connector.tray:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gpt_windows_connector"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"extensions/lucas-browser" = "gpt_windows_connector/assets/lucas-browser"

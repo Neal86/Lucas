@@ -21,7 +21,7 @@ from .settings_constants import (
 
 def detect_security_preset(approval_policy: dict[str,str], network_external: str, network_lan: str, block_silent_network: bool, allowed_domains: list[str] | tuple[str, ...] | None = None) -> str:
     domains = [str(value).strip() for value in (allowed_domains or []) if str(value).strip()]
-    for name,preset in PRESETS.items():
+    for name,preset in sorted(PRESETS.items(), key=lambda item: item[0] != "完全访问权限"):
         if network_external != preset["network_external"] or network_lan != preset["network_lan"] or bool(block_silent_network) != bool(preset["block_silent_network"]):
             continue
         if name == "完全访问权限" and domains:

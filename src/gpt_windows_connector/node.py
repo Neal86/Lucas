@@ -17,6 +17,7 @@ import websockets
 from .access_control import LocalAccessStore, intersect_security, normalize_preset, preset_security
 from .config import NodeSettings
 from .executor import Executor
+from . import browser_extension
 from .settings_ui import configure_gui as _configure_gui
 from .task_runs import TaskRunStore
 
@@ -358,10 +359,10 @@ async def _serve_connection(
             node_security = user_config.get("security") if isinstance(user_config.get("security"), dict) else {}
             account_security = access.get("security") if isinstance(access.get("security"), dict) else preset_security(str(access.get("preset") or "request_approval"))
             user_config["security"] = intersect_security(dict(node_security), dict(account_security))
-            return user_id, Executor(roots, user_config)
+            return user_id, Executor(roots, user_config, owner_id=user_id)
 
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
-            wall_started=time.time(); status="success"; error_type=None
+            wall_started=time.time(); status="success"; error_type=None; active_executor=None
             try:
                 access = await asyncio.to_thread(effective_access, actor)
                 if not access:
@@ -380,7 +381,7 @@ async def _serve_connection(
             wall_ended=time.time()
             try:
                 workspace=str(params.get("workspace") or "")
-                local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type} if error_type else {},context_key=workspace or "default")
+                local_task_runs.record_operation(owner_id="local",node_id=settings.node_id,action=method,target=workspace or None,started_at=wall_started,ended_at=wall_ended,status=status,details={"error_type":error_type,"user_id":actor.get("user_id"),"source":actor.get("source") or "gateway","agent":actor.get("agent"),"request_id":str(request_id),"session_id":params.get("session_id"),"approval":active_executor.security.audit_decisions if active_executor else [],"result":status},context_key=workspace or "default",task_title=actor.get("task_title"))
             except Exception:
                 log.exception("Could not record local Task Run")
             await deliver_response(response)
@@ -479,6 +480,7 @@ async def _serve_connection(
 
 async def run_node() -> None:
     delay = 1.0
+    await browser_extension.start_node_bridge(CONFIG_DIR, local_access, int(_load_config().get("browser_extension_port", 8766)))
     while True:
         config = _load_config()
         _apply_config(config)

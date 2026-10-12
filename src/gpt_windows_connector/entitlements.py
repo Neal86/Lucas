@@ -134,7 +134,7 @@ def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
 def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1) -> Entitlements:
     e=snapshot(db_path,user_id); requested=max(1,int(requested_operations or 1))
     if e.requests_used+requested>e.request_limit:
-        if beta_free_enabled(): raise PermissionError(f"Lucas Beta monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). Limit resets next month.")
+        if beta_free_enabled(): raise PermissionError(f"Lucas Beta monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). Limit resets at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(e.period_end))}.")
         raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
     return e
 
@@ -172,5 +172,5 @@ def set_active_node(db_path: Path,user_id: str,node_id: str) -> list[str]:
 def ensure_node_active(db_path: Path,user_id: str,node_id: str) -> Entitlements:
     e=snapshot(db_path,user_id)
     with _connect(db_path) as db: bound=db.execute("SELECT 1 FROM user_node_bindings WHERE user_id=? AND node_id=?",(user_id,node_id)).fetchone()
-    if bound and node_id not in active_node_ids(db_path,user_id): raise PermissionError(f"This computer is inactive for your plan ({e.node_limit} active computer(s)). Activate it in Computers or upgrade your plan.")
+    if bound and node_id not in active_node_ids(db_path,user_id): raise PermissionError(f"This computer is inactive for your plan ({e.node_limit} active computer(s)). Activate it in Computers.")
     return e

@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Lucas Browser",
+  "version": "2.1.0",
+  "minimum_chrome_version": "116",
+  "description": "Let your AI work in browser tabs you explicitly authorize through your local Lucas Node.",
+  "permissions": ["activeTab", "tabs", "storage", "debugger", "alarms"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "action": {"default_popup": "popup.html", "default_title": "Lucas Browser — tab permissions"}
+}

@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -33,6 +33,7 @@ class User:
     created_at: float
     role: str = "user"
     status: str = "active"
+    client_id: str | None = None
 
 
 class AuthStore:
@@ -218,16 +219,18 @@ class AuthStore:
             raise PermissionError("Account is disabled")
         return user
 
-    def issue_token(self, user: User, ttl_seconds: int | None = None) -> str:
+    def issue_token(self, user: User, ttl_seconds: int | None = None, client_id: str | None = None) -> str:
         now = int(time.time())
         ttl = self.jwt_ttl_seconds if ttl_seconds is None else max(60, min(int(ttl_seconds), self.jwt_ttl_seconds))
         payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector"}
+        if client_id:
+            payload["azp"] = client_id
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
 
     def verify_token(self, token: str) -> User:
         try:
             payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"], issuer="gpt-windows-connector")
-            return self.get_user(str(payload["sub"]))
+            return replace(self.get_user(str(payload["sub"])), client_id=payload.get("azp"))
         except Exception as exc:
             raise PermissionError("Invalid or expired access token") from exc
 

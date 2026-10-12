@@ -3,16 +3,17 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from . import browser, browser_semantic, computer, files, git_tools, processes, shell
+from . import browser, browser_extension, browser_semantic, computer, files, git_tools, processes, shell
 from .config import resolve_in_workspace, validate_workspace
 from .path_guard import validate_command_paths, validate_launch_target
 from .security import LocalSecurityPolicy
 
 
 class Executor:
-    def __init__(self, allowed_roots: tuple[Path, ...], config: dict | None = None) -> None:
+    def __init__(self, allowed_roots: tuple[Path, ...], config: dict | None = None, owner_id: str = "local") -> None:
         self.allowed_roots = tuple(root.resolve() for root in allowed_roots)
         self.security = LocalSecurityPolicy(config or {})
+        self.owner_id = owner_id
 
     def workspace(self, raw: str) -> Path:
         return validate_workspace(self.allowed_roots, raw)
@@ -78,6 +79,10 @@ class Executor:
 
     async def call(self, method: str, params: dict) -> object:
         p, workspace = await asyncio.to_thread(self._prepare_call, method, params)
+        if method.startswith("browser.") and p.get("session_id") and not str(p["session_id"]).startswith("ext-"):
+            session = browser._session(p["session_id"])
+            if session.owner_id != self.owner_id:
+                raise PermissionError("Browser session belongs to another Lucas account")
         sync = {
             "workspace.info": lambda: {"path": str(workspace), "name": workspace.name},
             "workspace.browse": lambda: self.browse_workspaces(**p),
@@ -144,6 +149,25 @@ class Executor:
                 lambda: str(resolve_in_workspace(workspace, p["save_path"]))
             )
 
+        if method == "browser.extension_sessions" or str(p.get("session_id", "")).startswith("ext-"):
+            if browser_extension.bridge is None:
+                raise RuntimeError("Lucas Browser bridge is unavailable")
+            if method == "browser.download":
+                destination = Path(p["save_path"])
+                result = await browser_extension.bridge.call(self.owner_id, "download", p)
+                if isinstance(result, dict) and result.get("handoff_required"):
+                    return result
+                import base64
+                data = base64.b64decode(result["base64"], validate=True)
+                if len(data) > 20 * 1024 * 1024:
+                    raise ValueError("Download exceeds 20 MiB")
+                await asyncio.to_thread(destination.parent.mkdir, parents=True, exist_ok=True)
+                await asyncio.to_thread(destination.write_bytes, data)
+                return {"path": str(destination), "suggested_filename": result.get("suggested_filename"), "bytes": len(data)}
+            return await browser_extension.bridge.call(self.owner_id, method.removeprefix("browser."), p)
+        if method == "browser.resolve":
+            p["owner_id"] = self.owner_id
+
         async_methods = {
             "browser.connect_cdp": browser.connect_cdp,
             "browser.ensure_cdp": browser.ensure_cdp,
@@ -153,6 +177,8 @@ class Executor:
             "browser.semantic_click": browser_semantic.semantic_click,
             "browser.semantic_type": browser_semantic.semantic_type,
             "browser.pages": browser.pages,
+            "browser.scroll": browser.scroll,
+            "browser.handoff": browser.handoff,
             "browser.new_page": browser.new_page,
             "browser.navigate": browser.navigate,
             "browser.inspect": browser.inspect,
@@ -166,5 +192,11 @@ class Executor:
         }
         func = async_methods.get(method)
         if func:
-            return await func(**p)
+            result = await func(**p)
+            if method in {"browser.connect_cdp", "browser.ensure_cdp", "browser.launch_persistent"}:
+                session = browser._session(result["session_id"])
+                if session.owner_id not in {None, self.owner_id}:
+                    raise PermissionError("Browser session belongs to another Lucas account")
+                session.owner_id = self.owner_id
+            return result
         raise KeyError(f"Unknown method: {method}")

@@ -1,0 +1,6 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Lucas Browser</title><link rel="stylesheet" href="popup.css"></head><body>
+<h1>Lucas Browser</h1><p>Authorize only the current tab. AI works in the background. Authorization expires after 8 hours or disconnect.</p>
+<label>Local pairing token <input id="token" type="password" autocomplete="off"></label>
+<label>Node bridge port <input id="port" type="number" min="1024" max="65535" value="8766"></label><button id="connect">Pair with Node</button>
+<label>Approved Lucas account <select id="owner"></select></label><button id="grant">Allow AI in this tab</button>
+<button id="revoke">Revoke all tab permissions</button><p id="status" role="status"></p><ul id="sessions"></ul><script src="popup.js"></script></body></html>

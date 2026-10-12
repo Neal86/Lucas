@@ -33,8 +33,11 @@ jobs:
       - name: Install Chromium for browser E2E
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
         run: python -m playwright install --with-deps chromium
-      - name: Browser E2E
+      - name: Chromium extension integration (direct CDP)
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
-        env:
-          RUN_BROWSER_E2E: "1"
-        run: pytest -q tests/test_browser_smoke.py
+        shell: bash
+        run: |
+          CHROME_BIN="$(find ~/.cache/ms-playwright -type f -name chrome | head -n 1)"
+          test -n "$CHROME_BIN"
+          export CHROME_BIN
+          pytest -q tests/test_extension_chromium.py

@@ -12,7 +12,7 @@ _PAGE_DATA = {
         "items": [
             ("Files & projects", "Let AI read and work inside folders you explicitly allow, while keeping project boundaries visible and controllable."),
             ("Terminal & code", "Run development and automation workflows on the connected computer instead of moving every step into a cloud execution environment."),
-            ("Browser & computer use", "Allow AI to interact with supported browser and desktop workflows when a task needs more than text generation."),
+            ("Browser & computer use", "Install Lucas Browser, pair it locally, and authorize individual tabs for background AI control."),
             ("Remote computers", "Connect multiple computers to one Lucas account according to your plan and choose which computer an AI workflow can use."),
         ],
     },
@@ -22,6 +22,7 @@ _PAGE_DATA = {
         "h1": "From AI request to computer action in three steps.",
         "lead": "Lucas acts as the bridge between your AI assistant and a computer you control. The AI talks to Lucas through MCP; Lucas routes approved tool calls to the selected computer.",
         "items": [
+            ("Browser extension", "Download /download/Lucas-Browser.zip, extract it, enable Developer mode at chrome://extensions or edge://extensions, and Load unpacked. In Lucas Settings open Browser to copy the local pairing token; choose your approved account and authorize the current tab. Grants expire after 8 hours or disconnect. ixBrowser requires an extension-compatible Chromium engine."),
             ("1. Connect a computer", "Install Lucas Node on the computer you want to use and approve the connection locally."),
             ("2. Add Lucas MCP to your AI", "Connect a compatible AI platform to Lucas so it can discover the tools exposed for your account."),
             ("3. Start working", "Ask the AI to work with files, code, browsers or desktop apps. Lucas sends the requested tool operations to the connected computer."),

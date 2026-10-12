@@ -146,6 +146,8 @@ class BillingService:
         return self.base_url+'/billing?expansion=1'
 
     def portal(self,user_id: str) -> str:
+        if beta_free_enabled():
+            raise PermissionError("Paid billing changes are disabled during Lucas Beta; existing subscriptions require separate review.")
         if not self.secret: raise RuntimeError('Stripe API key is not configured yet.')
         row=self._sub_row(user_id)
         if not row or not row['billing_customer_id']: raise ValueError('No Stripe customer exists for this account yet')

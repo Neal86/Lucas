@@ -133,7 +133,7 @@ def _user():
 
 
 def _actor(user) -> dict:
-    return {"user_id": user.id, "email": user.email, "name": user.name or ""}
+    return {"user_id": user.id, "email": user.email, "name": user.name or "", "agent": user.client_id, "source": "oauth" if user.client_id else "account"}
 
 
 _SHELL_STRUCTURAL = re.compile(
@@ -354,6 +354,7 @@ def _operation_count(method: str, params: dict | None = None) -> int:
 async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | None = None, include_workspace: bool = True, task_title: str | None = None):
     user = _user()
     payload = dict(params or {})
+    audit_context = {"agent": user.client_id, "source": "oauth" if user.client_id else "account", "session_id": payload.get("session_id"), "task_title": task_title}
     original_command = str(payload.get("command") or "") if method == "shell.run" else ""
     sub_operations = _shell_operations(original_command) if method == "shell.run" else []
     operation_count = len(sub_operations) if sub_operations else _operation_count(method, payload)
@@ -381,7 +382,7 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
                 rpc_timeout = max(180.0, min(float(payload.get("timeout") or 120) + 60.0, 3660.0))
             except (TypeError, ValueError):
                 rpc_timeout = 180.0
-        result = await registry.rpc(node_id, user.id, method, payload, actor=_actor(user), timeout=rpc_timeout)
+        result = await registry.rpc(node_id, user.id, method, payload, actor={**_actor(user), "task_title":task_title}, timeout=rpc_timeout)
         if trace_shell and isinstance(result, dict):
             clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""), original_command)
             result["stdout"] = clean_stdout
@@ -391,13 +392,13 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     except Exception as exc:
         duration = time.monotonic() - started; wall_ended = time.time()
         auth.record_operation(user.id, False, duration, operation_count)
-        auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={"error_type":type(exc).__name__,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+        auth.audit(user.id, method, workspace, {**audit_context, "node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
+        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={**audit_context,"error_type":type(exc).__name__,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
         raise
     duration = time.monotonic() - started; wall_ended = time.time()
     auth.record_operation(user.id, True, duration, operation_count)
-    auth.audit(user.id, method, workspace, {"node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+    auth.audit(user.id, method, workspace, {**audit_context, "node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
+    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={**audit_context,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
     return result
 
 
@@ -573,7 +574,7 @@ transport_security = TransportSecuritySettings(
 
 mcp = FastMCP(
     "Lucas",
-    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. BROWSER-FIRST ROUTING IS MANDATORY: whenever the user asks to use a browser, website, web app, browser tab, Chrome, Edge, ALI browser, or Eva browser, start with browser_tool, normally action ensure_cdp -> resolve -> observe -> semantic_click/semantic_type. Do not start a normal web-page task with computer_tool. For the ALI node, the default browser target is the Eva Chrome profile exposed over CDP at http://127.0.0.1:9222. Fall back to selector click/type only when semantic actions fail, then computer.ui_click/ui_set_text only for browser chrome or OS-native UI that CDP cannot access, and use raw coordinate computer.click/type only as the final fallback because raw desktop input can steal focus and requires foreground approval.",
+    instructions="Multi-user remote computer access layer. New accounts connect with a Node ID plus the local Connection Code, then the Windows Node is the final authority for approval, Codex-style access policy, and Allowed folders. Previously authorized accounts reuse their local grant. Every workspace is validated locally before execution. IMPORTANT: for every user-requested execution task, automatically derive one concise, human-readable task_title from the CURRENT USER'S ORIGINAL PROMPT and pass that same title on every execution tool call. The user does NOT need to write a special 'task title' field. Prefer the main action + object from the prompt (for example, 'Create Task Manager Web App', 'Review software service contract', or 'Analyze accounting transactions'). Never use a tool name, shell command, workspace, or file path as the task title. Lucas groups all calls with that derived title into one Task Run. BROWSER-FIRST ROUTING IS MANDATORY: use browser_tool for websites. Prefer extension_sessions, then the user-authorized session_id for observe/inspect/click/type/scroll. If no extension tab is authorized, request that the user grant it in Lucas Browser. CDP is an explicit fallback with the user-selected endpoint; never assume a dedicated profile or seize desktop focus. Use handoff for verification. Use computer_tool only for native UI or a confirmed browser failure.",
     stateless_http=True,
     json_response=True,
     transport_security=transport_security,
@@ -662,18 +663,12 @@ async def git_tool(node_id: str, workspace: str, action: str, params: dict | Non
 
 @mcp.tool()
 async def browser_tool(node_id: str, workspace: str, action: str, params: dict | None = None, task_title: str | None = None) -> object:
-    """Preferred tool for ALL normal browser and web-page work. Start with ensure_cdp to get/reuse a session, then resolve/observe and semantic_click/semantic_type. Use this instead of computer_tool for navigation, reading pages, clicking web controls, typing into web forms, tab work, uploads/downloads, and logged-in web apps. On the ALI node, ensure_cdp defaults to the Eva Chrome browser at 127.0.0.1:9222. Only fall back to computer_tool for OS/browser-chrome UI that CDP cannot access."""
-    allowed = {"discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
+    """Operate explicitly authorized browser tabs in the background. Start with extension_sessions and use the returned session_id; ask the user to authorize a tab if none is granted. CDP remains an explicit fallback. handoff returns a manual-step request without moving desktop focus."""
+    allowed = {"extension_sessions", "handoff", "scroll", "discover", "connect_cdp", "ensure_cdp", "launch_persistent", "pages", "resolve", "observe", "new_page", "navigate", "inspect", "semantic_click", "semantic_type", "click", "type", "select", "upload", "download", "screenshot", "close"}
     if action not in allowed:
         raise ValueError(f"Unsupported browser action: {action}")
     payload = dict(params or {})
-    if action in {"connect_cdp", "ensure_cdp"}:
-        node = registry.nodes.get(node_id)
-        if node and str(node.name or "").strip().lower() == "ali":
-            payload.setdefault("endpoint", "http://127.0.0.1:9222")
-            payload.setdefault("browser_name", "chrome")
-            payload.setdefault("profile", "eva")
-    if action not in {"discover", "pages", "resolve", "observe", "inspect", "screenshot"}:
+    if not str(payload.get("session_id", "")).startswith("ext-") and action not in {"extension_sessions", "handoff", "discover", "pages", "resolve", "observe", "inspect", "screenshot"}:
         await _desktop_lock(node_id, workspace)
     return await _node_rpc(node_id, workspace, f"browser.{action}", payload, task_title=task_title)
 

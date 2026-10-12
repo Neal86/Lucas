@@ -742,6 +742,8 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         var.trace_add("write",schedule_auto_save)
     gateway.trace_add("write",lambda *_: schedule_auto_save(delay=700))
 
+    from .browser_extension_setup import show_pairing
+    button(fi,"浏览器插件 / Browser",lambda: show_pairing(root,CONFIG_DIR)).pack(side="left")
     button(fi,"关闭",root.destroy,primary=True).pack(side="right"); button(fi,"恢复默认",reset_defaults).pack(side="right",padx=(0,10))
     show_page(_load_last_page())
     localize_tk_tree(root, SETTINGS_EN, language)

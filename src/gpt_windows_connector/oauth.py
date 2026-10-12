@@ -141,7 +141,7 @@ class OAuthProvider:
         return t
 
     def tokens(self,u: User,cid: str,scope: str,want_refresh: bool):
-        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600),"token_type":"Bearer","expires_in":3600,"scope":scope}
+        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600,client_id=cid),"token_type":"Bearer","expires_in":3600,"scope":scope}
         if want_refresh: out["refresh_token"]=self.refresh(cid,u.id,scope)
         return out
 

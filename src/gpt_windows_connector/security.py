@@ -47,7 +47,7 @@ READ_METHODS = {
     "workspace.info", "workspace.browse", "files.list", "files.read", "files.search", "files.stat",
     "git.status", "git.diff", "git.log", "git.branch", "git.show", "process.poll", "process.list",
     "computer.info", "computer.processes", "computer.windows", "computer.screenshot", "computer.clipboard_get",
-    "computer.ui_elements", "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot", "browser.resolve", "browser.observe",
+    "computer.ui_elements", "browser.discover", "browser.pages", "browser.inspect", "browser.screenshot", "browser.resolve", "browser.observe", "browser.extension_sessions", "browser.handoff",
 }
 
 FILE_WRITE_METHODS = {"files.write", "files.patch", "files.mkdir", "files.move", "files.copy"}
@@ -60,7 +60,7 @@ FOREGROUND_CONTROL_METHODS = {
 }
 SCREENSHOT_METHODS = {"computer.screenshot", "browser.screenshot"}
 CLIPBOARD_METHODS = {"computer.clipboard_get", "computer.clipboard_set"}
-BROWSER_CONTROL_METHODS = {"browser.connect_cdp", "browser.launch_persistent", "browser.new_page", "browser.navigate", "browser.click", "browser.type", "browser.select", "browser.semantic_click", "browser.semantic_type", "browser.close"}
+BROWSER_CONTROL_METHODS = {"browser.connect_cdp", "browser.ensure_cdp", "browser.scroll", "browser.launch_persistent", "browser.new_page", "browser.navigate", "browser.click", "browser.type", "browser.select", "browser.semantic_click", "browser.semantic_type", "browser.close"}
 BROWSER_TRANSFER_METHODS = {"browser.upload", "browser.download"}
 GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.commit", "git.pull"}
 NETWORK_METHODS = {"browser.navigate", "browser.new_page", "git.pull", "git.push"}
@@ -112,7 +112,7 @@ def _matches(patterns: list[str], text: str) -> bool:
 
 
 def _extract_url(method: str, params: dict[str, Any]) -> str | None:
-    if method == "browser.navigate":
+    if method in {"browser.navigate", "browser.new_page"}:
         return str(params.get("url") or "").strip() or None
     text = _command_text(method, params)
     match = re.search(r"https?://[^\s\"']+", text, flags=re.IGNORECASE)
@@ -150,6 +150,7 @@ def _host_allowed(host: str, allowed: list[str]) -> bool:
 @dataclass
 class LocalSecurityPolicy:
     config: dict[str, Any]
+    audit_decisions: list[dict] = field(default_factory=list)
     _approved: set[str] = field(default_factory=set)
     _approval_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -244,17 +245,23 @@ class LocalSecurityPolicy:
     def _enforce_decision(self, decision: str, category: str, method: str, params: dict[str, Any], summary: str) -> None:
         decision = str(decision or "ask").lower()
         if decision == "allow":
+            self.audit_decisions.append({"category":category,"decision":"allowed_by_policy"})
             return
         if decision == "block":
+            self.audit_decisions.append({"category":category,"decision":"blocked_by_policy"})
             raise PermissionError(f"Blocked by local Lucas security policy: {summary}")
         key = self._approval_key(category, method, params, summary)
         if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
+            self.audit_decisions.append({"category":category,"decision":"remembered_approval"})
             return
         with self._approval_lock:
             if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
+                self.audit_decisions.append({"category":category,"decision":"remembered_approval"})
                 return
             if not self._prompt(category, method, summary):
+                self.audit_decisions.append({"category":category,"decision":"denied_locally"})
                 raise PermissionError(f"Denied locally: {summary}")
+            self.audit_decisions.append({"category":category,"decision":"approved_locally"})
             if decision != "always_ask" and self.security.get("remember_approvals", True):
                 self._approved.add(key)
 

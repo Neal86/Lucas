@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 WEB_ZH_JS = r'''{
+'Free during Beta':'测试期间免费','Start Free Beta':'免费开始测试','Lucas Beta':'Lucas Beta','100,000 Operations per month':'每月 100,000 次操作','3 Computers':'3 台电脑','3 AI accounts':'3 个 AI 账号','Multiple concurrent tasks':'多个并发任务','Full Lucas execution':'完整 Lucas 执行功能','No additional Lucas token fees':'无额外 Lucas Token 费用','/ month':'/ 月','Lucas is free to use while we test and improve the product. Plans and limits may change after Beta.':'产品测试和改进期间可免费使用 Lucas。测试结束后套餐和限制可能调整。',
 'Capabilities':'功能','Security':'安全','How it works':'工作原理','Pricing':'价格','Plan & Billing':'套餐与账单','Manage Plan & Billing':'管理套餐与账单','Manage plan':'管理套餐','Operations this period':'本周期操作','Sign in':'登录','Dashboard':'控制台',
 'Let AI Work for You —':'让 AI 为你工作 —','With $0 Token Fees':'$0 Token 费用','Connect the newest and smartest AI models to your computer, apps, files, and browser — and let them get real work done.':'连接最新、最智能的 AI 模型到你的电脑、应用、文件和浏览器，让它们真正完成工作。','Connect your computer':'连接电脑','See how it works ↓':'查看工作原理 ↓',
 'Model agnostic':'不限模型','Cross-platform':'跨平台','Token-free execution':'无额外执行 Token',

@@ -31,12 +31,14 @@ def score_page(title: str, url: str, query: str = "", title_contains: str = "", 
     return score
 
 
-async def resolve_target(session_id: str | None = None, query: str = "", title_contains: str = "", url_contains: str = "", browser_name: str | None = None, profile: str | None = None, prefer_page_index: int | None = None) -> dict:
+async def resolve_target(session_id: str | None = None, query: str = "", title_contains: str = "", url_contains: str = "", browser_name: str | None = None, profile: str | None = None, prefer_page_index: int | None = None, owner_id: str | None = None) -> dict:
     """Resolve the most likely connected browser tab from semantic hints."""
     session_ids = [session_id] if session_id else list(browser._SESSIONS)
     candidates: list[dict[str, Any]] = []
     for sid in session_ids:
         session = browser._session(sid)
+        if owner_id is not None and session.owner_id != owner_id:
+            continue
         for index, page in enumerate(session.context.pages):
             title = await page.title()
             score = score_page(title, page.url, query, title_contains, url_contains)

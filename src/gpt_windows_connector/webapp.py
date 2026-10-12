@@ -234,6 +234,12 @@ async def sitemap_xml(_: Request):
     return Response(body, media_type="application/xml")
 
 
+async def download_browser_extension(_: Request):
+    from .browser_extension_setup import extension_zip
+    from starlette.responses import Response
+    return Response(extension_zip(), media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="Lucas-Browser-2.1.0.zip"'})
+
+
 async def download_lucas_node(_: Request):
     return FileResponse(
         "/app/scripts/install-node.ps1",
@@ -652,6 +658,7 @@ routes = [
     Route("/admin/operations", admin_page, methods=["GET"]),
     Route("/admin/subscriptions", admin_page, methods=["GET"]),
     Route("/admin/system", admin_page, methods=["GET"]),
+    Route("/download/Lucas-Browser.zip", download_browser_extension, methods=["GET"]),
     Route("/download/Lucas-Node.ps1", download_lucas_node, methods=["GET"]),
     Route("/download/Lucas-Node.bat", download_lucas_launcher, methods=["GET"]),
     Route("/api/logout", api_logout, methods=["POST"]),

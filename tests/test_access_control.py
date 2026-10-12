@@ -15,7 +15,7 @@ def test_persistent_user_access_round_trip(tmp_path):
     security = preset_security("auto_approve"); saved = store.upsert(actor, "auto_approve", [str(root)], security=security)
     assert saved["user_id"] == "user-123" and saved["preset"] == "auto_approve"
     effective = store.effective("user-123", [str(root)]); assert effective is not None
-    assert effective["preset"] == "auto_approve" and effective["security"]["approval_policy"]["git_push"] == "allow"
+    assert effective["preset"] == "auto_approve" and effective["security"]["approval_policy"]["git_push"] == "always_ask"
     assert effective["allowed_roots"] == [str(root.resolve())]
     assert store.remove("user-123") is True and store.effective("user-123", [str(root)]) is None
 

@@ -23,6 +23,7 @@ class BrowserSession:
     profile: str | None = None
     user_data_dir: str | None = None
     endpoint: str | None = None
+    owner_id: str | None = None
 
 
 _SESSIONS: dict[str, BrowserSession] = {}
@@ -83,7 +84,7 @@ def _chrome_executable(browser_name: str | None = None) -> Path | None:
     wanted = (browser_name or "chrome").lower()
     for item in discover_browsers():
         if str(item.get("name") or "").lower() == wanted:
-            p = Path(str(item.get("executable") or ""))
+            p = Path(str(item.get("executable_path") or ""))
             if p.exists():
                 return p
     return None
@@ -187,19 +188,8 @@ async def _connect_cdp_once(endpoint: str, browser_name: str | None, profile: st
 
 
 async def connect_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
-    # First try the existing dedicated browser. If its DevTools socket is stale,
-    # restart only that isolated profile and retry once.
-    try:
-        return await _connect_cdp_once(endpoint, browser_name, profile)
-    except Exception as first_error:
-        if not profile:
-            raise
-        restarted = await asyncio.to_thread(_restart_dedicated_browser, endpoint, browser_name, profile)
-        if not restarted:
-            raise first_error
-        result = await _connect_cdp_once(endpoint, browser_name, profile)
-        result["restarted_browser"] = True
-        return result
+    # Connecting must never restart a visible browser or seize focus.
+    return await _connect_cdp_once(endpoint, browser_name, profile)
 
 
 async def ensure_cdp(endpoint: str = "http://127.0.0.1:9222", browser_name: str | None = None, profile: str | None = None) -> dict:
@@ -327,9 +317,22 @@ async def close(session_id: str) -> dict:
     session = _SESSIONS.pop(session_id, None)
     if not session:
         return {"closed": False}
-    await session.context.close()
-    if session.browser:
+    if not session.endpoint:
+        await session.context.close()
+    # CDP browser.close would close the user's existing browser.
+    if session.browser and not session.endpoint:
         await session.browser.close()
     if session.playwright:
         await session.playwright.stop()
     return {"closed": True}
+
+
+async def scroll(session_id: str, x: int = 0, y: int = 0, page_index: int = 0) -> dict:
+    page = _page(session_id, page_index)
+    await page.evaluate("([x,y]) => window.scrollBy(x,y)", [x,y])
+    return {"url": page.url}
+
+
+async def handoff(session_id: str, page_index: int = 0) -> dict:
+    page = _page(session_id, page_index)
+    return {"handoff_required": True, "url": page.url, "reason": "Complete the manual step in this tab, then observe again"}
