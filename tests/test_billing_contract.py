@@ -5,25 +5,10 @@ from gpt_windows_connector.billing_ui import dashboard_billing_html, pricing_htm
 
 def test_pricing_contract():
     html = pricing_html()
-    for text in [
-        "Free",
-        "1,000 Operations / month",
-        "Pro",
-        "10,000 Operations / month",
-        "Pro+",
-        "30,000 Operations / month",
-        "Expansion Pack",
-        "+30,000 Operations / month",
-        "+6 Computers",
-        "+1 AI account",
-        "Beta Notice:",
-        "Plans, pricing, and limits may change during Beta.",
-    ]:
-        assert text in html
-    assert "grid-template-columns:repeat(4,1fr)" in html
-    assert 'class="plans"' in html
-    assert 'class="expansion"' not in html
-    assert 'position:sticky;top:0' in html
+    for expected in ("Lucas Beta", "Free during Beta", "100,000 Operations per month", "3 Computers", "3 AI accounts", "Start Free Beta"):
+        assert expected in html
+    for obsolete in ("Choose Pro", "Expansion Pack", "Monthly</button>", "Annual</button>"):
+        assert obsolete not in html
 
 
 def test_expansion_is_pro_plus_only_in_backend():
