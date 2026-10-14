@@ -49,3 +49,22 @@ Functional commit `e68257135223e82ae96e888dfc9407aff7fcbe0e` passed the real ext
 ## Current environment gates
 
 The local execution sandbox denies Chromium's Unix socket creation, so real browser integration cannot be completed here. Coolify project inspection returned HTTP 401 Unauthenticated, blocking deployed staging verification and live subscription review. These must not be reported as passing.
+
+## Development acceptance: atomic OAuth admission (2026-10-14)
+
+Based on staging `98919dd4dc329a8751771c026e58f0af159fc634`; proposed in a separate development branch, not deployed. This closes a concurrency gap in acceptance criterion 4 (AI-account enforcement agrees with the dashboard) and the security/reliability requirement.
+
+- Consent and refresh-token admission now check capacity and insert the account relationship under one SQLite `BEGIN IMMEDIATE` transaction. Competing gateway workers cannot both claim the last available AI-account slot.
+- Consent requests and authorization codes are consumed once under a write transaction. Concurrent repeat clicks or code exchanges cannot issue duplicate grants. Invalid client, redirect, or PKCE attempts do not consume a valid code.
+- Existing authorized clients can reconnect/refresh at the limit. Beta's three-account limit, legacy paid limits, admin bonuses and bonus expiry still use the same entitlement calculation. No schema migration, subscription mutation, browser/Profile requirement, local permission change or production deployment is included.
+- Entitlement helpers accept a caller-owned connection without committing it. Failed grant inserts roll back the new account relationship and preserve retryable consent.
+- CI now also runs for pull requests targeting `staging`, so this development path receives the existing Linux/Windows matrix and real Chromium extension check.
+
+Evidence:
+
+- The four core race tests in `tests/test_oauth_concurrency.py` were run against unchanged staging first: **4 failed**, demonstrating over-limit admission and duplicate consent/code issuance.
+- Final local Linux/Python 3.12 regression suite: **190 passed, 4 skipped**. All **15** new OAuth concurrency, replay, cancellation, invalid-PKCE/client/redirect, rollback, quota and bonus cases passed.
+- Python compilation, both extension JavaScript syntax checks and Git whitespace checks passed.
+- `scripts/smoke_web_pages.py` passed all **28 routes** against an isolated local HTTP server. This is not deployed-staging evidence or visual/browser acceptance.
+- The four default skips are the optional browser smoke, two Windows PowerShell tests, and opt-in real extension integration. A separate real Chromium attempt failed before the browser started because this sandbox denies its process-singleton socket (`Operation not permitted`). The check is not counted as passing; exact-commit CI must establish Linux Chromium and Windows results.
+- Independent code review found no blocking defects; production release still requires deployed staging smoke, existing-subscription audit/handling, Windows Node/browser acceptance and explicit confirmation.

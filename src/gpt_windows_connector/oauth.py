@@ -112,17 +112,24 @@ class OAuthProvider:
         if not r: return JSONResponse({"error":"authorization_request_expired"},400)
         if not u: return self.login(rid)
         uri=str(r["redirect_uri"]); state=str(r["state"] or "")
-        if f.get("decision")!="allow":
-            with self.db() as db: db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
-            return self.err(uri,"access_denied",state)
         try:
-            ensure_ai_capacity(self.db_path,u.id,str(r["client_id"]))
+            with self.db() as db:
+                # Serialize consent consumption and quota admission, including
+                # simultaneous connections from different gateway workers.
+                db.execute("BEGIN IMMEDIATE")
+                r=db.execute("SELECT * FROM oauth_requests WHERE request_id=?",(rid,)).fetchone()
+                if not r or float(r["expires_at"])<time.time():
+                    return JSONResponse({"error":"authorization_request_expired"},400)
+                if f.get("decision")!="allow":
+                    db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
+                    return self.err(uri,"access_denied",state)
+                ensure_ai_capacity(self.db_path,u.id,str(r["client_id"]),connection=db)
+                code=secrets.token_urlsafe(32)
+                db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
+                db.execute("INSERT INTO oauth_codes VALUES(?,?,?,?,?,?,?)",(self.h(code),r["client_id"],u.id,uri,r["scope"],r["code_challenge"],time.time()+300))
+                db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
         except PermissionError as exc:
             return HTMLResponse(f"<h2>Lucas AI account limit reached</h2><p>{html.escape(str(exc))}</p><p><a href='/billing'>Open Plan & Billing</a></p>",403)
-        code=secrets.token_urlsafe(32)
-        with self.db() as db:
-            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
-            db.execute("INSERT INTO oauth_codes VALUES(?,?,?,?,?,?,?)",(self.h(code),r["client_id"],u.id,uri,r["scope"],r["code_challenge"],time.time()+300)); db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
         self.auth.audit(u.id,"oauth.authorize",str(r["client_id"]),{"scope":str(r["scope"])}); q={"code":code}; q.update({"state":state} if state else {}); return RedirectResponse(uri+("&" if "?" in uri else "?")+urlencode(q),302)
 
     @staticmethod
@@ -130,9 +137,10 @@ class OAuthProvider:
         actual=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("="); return bool(verifier) and secrets.compare_digest(actual,challenge)
 
     def refresh(self,cid: str,uid: str,scope: str) -> str:
-        ensure_ai_capacity(self.db_path,uid,cid)
         t=secrets.token_urlsafe(48); now=time.time()
         with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            ensure_ai_capacity(self.db_path,uid,cid,connection=db)
             # A refresh token proves a client is authorized for this user. Keep
             # the durable ownership index in sync here as well as in consent so
             # every token creation path preserves dashboard/user isolation.
@@ -150,9 +158,14 @@ class OAuthProvider:
         if not self.client(cid): return JSONResponse({"error":"invalid_client"},401)
         if grant=="authorization_code":
             ch=self.h(f.get("code",""))
-            with self.db() as db: r=db.execute("SELECT * FROM oauth_codes WHERE code_hash=?",(ch,)).fetchone()
-            if not r or float(r["expires_at"])<time.time() or str(r["client_id"])!=cid or f.get("redirect_uri","")!=str(r["redirect_uri"]) or not self.pkce(f.get("code_verifier",""),str(r["code_challenge"])): return JSONResponse({"error":"invalid_grant"},400)
-            with self.db() as db: db.execute("DELETE FROM oauth_codes WHERE code_hash=?",(ch,))
+            with self.db() as db:
+                # A valid authorization code is one-use even when exchanged
+                # concurrently. Invalid PKCE/client/redirect attempts keep it.
+                db.execute("BEGIN IMMEDIATE")
+                r=db.execute("SELECT * FROM oauth_codes WHERE code_hash=?",(ch,)).fetchone()
+                if not r or float(r["expires_at"])<time.time() or str(r["client_id"])!=cid or f.get("redirect_uri","")!=str(r["redirect_uri"]) or not self.pkce(f.get("code_verifier",""),str(r["code_challenge"])):
+                    return JSONResponse({"error":"invalid_grant"},400)
+                db.execute("DELETE FROM oauth_codes WHERE code_hash=?",(ch,))
             u=self.auth.get_user(str(r["user_id"])); scope=str(r["scope"]); self.auth.audit(u.id,"oauth.token",cid); return JSONResponse(self.tokens(u,cid,scope,True),headers={"Cache-Control":"no-store","Pragma":"no-cache"})
         if grant=="refresh_token":
             th=self.h(f.get("refresh_token",""))

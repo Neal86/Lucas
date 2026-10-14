@@ -4,6 +4,7 @@ import calendar
 import os
 import sqlite3
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -121,9 +122,10 @@ def _sync_active(db: sqlite3.Connection,user_id: str,limit: int,preferred_ids: I
         if node_id not in manual: db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,0) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=0",(user_id,node_id,now))
     return desired
 
-def snapshot(db_path: Path,user_id: str,now: float|None=None) -> Entitlements:
+def snapshot(db_path: Path,user_id: str,now: float|None=None,*,connection: sqlite3.Connection|None=None) -> Entitlements:
     now=float(now or time.time())
-    with _connect(db_path) as db:
+    # A caller-owned transaction must not be committed by this helper.
+    with (_connect(db_path) if connection is None else nullcontext(connection)) as db:
         plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now); admin_grant=_is_admin(db,user_id)
         if admin_grant and not beta_free_enabled():
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
@@ -140,9 +142,12 @@ def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int
 
 def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements: return snapshot(db_path,user_id)
 
-def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str) -> Entitlements:
-    e=snapshot(db_path,user_id)
-    with _connect(db_path) as db: exists=db.execute("SELECT 1 FROM oauth_client_users WHERE user_id=? AND client_id=?",(user_id,client_id)).fetchone()
+def ensure_ai_capacity(db_path: Path,user_id: str,client_id: str,*,connection: sqlite3.Connection|None=None) -> Entitlements:
+    # OAuth passes its BEGIN IMMEDIATE transaction so the check and admission
+    # share one SQLite write lock, including across gateway processes.
+    with (_connect(db_path) if connection is None else nullcontext(connection)) as db:
+        e=snapshot(db_path,user_id,connection=db)
+        exists=db.execute("SELECT 1 FROM oauth_client_users WHERE user_id=? AND client_id=?",(user_id,client_id)).fetchone()
     if not exists and e.ai_accounts_used>=e.ai_account_limit:
         if beta_free_enabled(): raise PermissionError(f"Lucas Beta AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}).")
         raise PermissionError(f"AI account limit reached ({e.ai_accounts_used}/{e.ai_account_limit}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade to Pro+'} at /billing.")
