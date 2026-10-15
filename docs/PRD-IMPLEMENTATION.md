@@ -7,8 +7,8 @@ This is a trace of implementation and evidence, not a production acceptance decl
 | Requirement | Implementation | Evidence / remaining gate |
 |---|---|---|
 | Free Beta pricing and visible Pricing navigation | billing_ui.py, entitlements.py, billing.py | Beta tests cover new/existing plans; paid checkout, expansion and billing portal changes blocked server-side; historical records preserved |
-| 100,000 OP/month, 3 active computers, 3 AI accounts | entitlements.py, web_billing_runtime.py | Quota/device/account regression suite; existing explicitly granted admin bonuses remain supported |
-| Registration CTA and language detection | billing_ui.py, web_core_runtime.py, web_i18n_runtime.py | Pricing register link, Chinese strings and sticky nav tested; visual acceptance still required |
+| 100,000 OP/month, 3 active computers, 3 AI accounts | entitlements.py, operation_admission.py, web_operation_usage_runtime.py | Atomic minimum admission, distinct completed/held usage and quota/device/account regressions; existing explicitly granted admin bonuses remain supported |
+| Registration CTA, language detection and setup guidance | billing_ui.py, web_registration_runtime.py, web_i18n_runtime.py, node_docs_ui.py | Guarded registration flows and localized standalone guide; browser evidence below, deployed/device acceptance remains separate |
 | Authorized browser extension | extensions/lucas-browser, browser_extension.py, executor.py | Real local WebSocket tests cover pairing, owner isolation, expiry, revocation and disconnect; real Chromium integration passed in GitHub CI |
 | Background browser operations | extension background.js | Navigation, inspection, observation, click/type/select/scroll, upload, screenshots and HTTP(S) link downloads implemented; real Chromium runtime test passed in GitHub CI |
 | Manual verification handoff | extension background.js; browser.handoff | No CAPTCHA/passkey solver and no automatic tab activation; unsupported exports and new-tab grants return a handoff |
@@ -844,3 +844,81 @@ deployment, provider operation or real-user device action was performed.
   Local Chromium restrictions were not retried. Staging, live Windows Node,
   Edge/ixBrowser, provider email and existing Stripe handling remain separate
   acceptance gates.
+
+- Exact-head [CI 38674977570](https://github.com/Neal86/Lucas/actions/runs/38674977570)
+  passed for `988ad2984589273de324e0fcbb89be3d858c727b`: Linux Python
+  3.11/3.12 each **755 passed, 13 skipped**, Windows Python 3.11 **757 passed,
+  11 skipped**, real Chromium extension/CDP **1 passed**, and
+  OAuth/dashboard/onboarding/usage **9 passed** with synthetic mail. The two
+  new English/Chinese usage flows passed in the real browser. Merge
+  `f36cf39c82b1b02dc4869c5e41b9850aa8510357` had exactly the tested/published
+  tree `ea60427d5cd3d9e41c97f1c7474b7036cd27f523`, covering all 185 blobs.
+
+## Registration UI state and localized Computer Node guidance
+
+The registration client now lives in `web_registration_runtime.py`, composed by
+the existing core runtime. Registration, verification and resend share the
+existing auth-mode generation. Mode switches clear pending email/code/metadata,
+cooldowns and disabled state. Requests capture their own payload and target;
+duplicate submissions and overlapping verification/resend are blocked. Stale
+responses cannot reopen the old form, replace the current error, reset Turnstile,
+restart cooldowns, fire completion tracking or start an obsolete dashboard boot.
+Current successful flows retain their busy lock through the existing guarded
+`/auth/me` and dashboard refresh sequence.
+
+These are client-side state guarantees. Server registration/verification may
+already have committed, sent mail or issued a cookie before a response becomes
+stale; ignoring that response does not undo those effects. No server cancellation,
+revocation, HTTP API, schema or authentication-policy change is included. Existing
+password/email/Turnstile payloads, backend expiry/resend rules, 60-second client
+cooldown and login behavior remain in place.
+
+The standalone `/docs/computer-node` page now uses the shared browser-language
+runtime and authoritative English/Chinese catalog, including page title,
+description, HTML language and accessible labels. English remains the fallback.
+Its existing sticky/responsive layout, download/navigation destinations and
+checklist separation remain. Setup explicitly states that a newly requesting
+account requires local approval after code verification. The connection-code
+FAQ describes current/regenerated codes rather than claiming automatic expiry.
+
+The guide documents the existing Settings → General → Lucas Node update controls,
+version/reconnection checks and local permissions. It does not add or run an
+updater. The current default installer/updater reads GitHub `main`; a development
+checkout or staging page does not establish that those changes are installed on
+a Windows computer. Actual install/update/reconnection and Edge/ixBrowser
+compatibility still need an explicitly authorized device acceptance session.
+
+The CI browser step includes a separate guide test file alongside the existing
+OAuth/dashboard suite. All fixtures use loopback HTTP, isolated state and
+synthetic email; source checks do not replace staging or real-device acceptance.
+
+### Verification
+
+- Unchanged `348fbc1b0f6d7e4b4019398af10e1401b3b9f3d7` failed **15**
+  supplied registration guard regressions, with **1** existing resend control
+  passing. Separate actual-composed-boot probes demonstrated late registration
+  and verification opening the old dashboard after a mode change.
+- The fixed registration runtime passes **71** dedicated cases and preserves
+  all **34** existing auth-mode tests. Coverage includes current success/error
+  retry, payload snapshots, mutual exclusion, stale responses/finally callbacks,
+  mode reset, English/Chinese labels, and current/stale boot and refresh results.
+- The final guide contract/runtime set passes **25** cases; identical tests
+  against unchanged `348fbc1` fail **14**, with **11** compatibility controls
+  passing. Six Chinese language variants/fallbacks, English/unsupported-language
+  fallback, all translated text/attributes, unchanged links and update/approval
+  guidance are covered. Existing setup/checklist assertions remain.
+- Full local Linux/Python 3.12 suite: **849 passed, 43 skipped**. Python compile,
+  final dashboard/guide script syntax, all extension JavaScript, whitespace,
+  real isolated HTTP page smoke **28/28** and wheel parity for **80** Python
+  modules plus all **7** extension assets pass.
+- Independent review passed **247 focused tests**, **90** response-order stress
+  combinations and **12** real boot/refresh-ownership probes, with no remaining
+  source/test blocker. The fixture's ASGI observer and response gate preserve
+  chunked bodies, cookies/headers, early errors and non-HTTP pass-through.
+- The browser suite preserves its original **9** cases, adds **28** parameterized
+  English/Chinese registration cases and **2** standalone guide cases. Real
+  production HTTP/SQLite handlers pass synthetic-mail fixture smoke, including
+  held verification, cookies, errors and guide/logo responses. Guide cases check
+  actual accessibility names, desktop/mobile layout and sticky behavior without
+  activating downloads or updater actions. All **39** web cases still require
+  exact-head CI; no local Chromium retry was performed.

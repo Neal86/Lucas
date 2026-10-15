@@ -42,7 +42,7 @@ jobs:
           export CHROME_BIN
           export RUN_EXTENSION_E2E=1
           pytest -q tests/test_extension_chromium.py
-      - name: Chromium OAuth login integration (direct CDP, synthetic email delivery)
+      - name: Chromium web onboarding integration (direct CDP, synthetic email delivery)
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
         shell: bash
         run: |
@@ -50,4 +50,4 @@ jobs:
           test -n "$CHROME_BIN"
           export CHROME_BIN
           export RUN_LOGIN_E2E=1
-          pytest -q tests/test_oauth_login_chromium.py
+          pytest -q tests/test_oauth_login_chromium.py tests/test_computer_node_docs_chromium.py
