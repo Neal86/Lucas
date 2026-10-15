@@ -169,7 +169,10 @@ def set_active_node(db_path: Path,user_id: str,node_id: str) -> list[str]:
         limit=_effective_node_limit(db,user_id,now); bound=set(_bound_ids(db,user_id))
         if node_id not in bound: raise ValueError("Computer is not connected to this account")
         current=_sync_active(db,user_id,limit)
-        if node_id in current: db.execute("UPDATE user_active_nodes SET manual=1,activated_at=? WHERE user_id=? AND node_id=?",(now,user_id,node_id)); return active_node_ids(db_path,user_id)
+        if node_id in current:
+            db.execute("UPDATE user_active_nodes SET manual=1,activated_at=? WHERE user_id=? AND node_id=?",(now,user_id,node_id))
+            # Synchronize inside this transaction: a second writer would wait on our own lock.
+            return _sync_active(db,user_id,limit)
         if len(current)>=limit and current:
             rows=db.execute("SELECT node_id,manual,activated_at FROM user_active_nodes WHERE user_id=? ORDER BY manual ASC,activated_at ASC",(user_id,)).fetchall(); victim=next((str(r["node_id"]) for r in rows if str(r["node_id"])!=node_id),current[-1]); db.execute("DELETE FROM user_active_nodes WHERE user_id=? AND node_id=?",(user_id,victim))
         db.execute("INSERT INTO user_active_nodes(user_id,node_id,activated_at,manual) VALUES(?,?,?,1) ON CONFLICT(user_id,node_id) DO UPDATE SET activated_at=excluded.activated_at,manual=1",(user_id,node_id,now)); return _sync_active(db,user_id,limit)

@@ -515,3 +515,38 @@ not add arbitrary-page, screenshot or general sensitive-content redaction.
 - Independent review found no remaining blocker. Real Chromium execution is
   pending published exact-head CI; local synthetic tests alone do not establish
   browser integration acceptance.
+
+## Development acceptance: repeat computer activation (2026-10-15)
+
+Re-activating an already active computer now synchronizes the active set inside
+its existing SQLite transaction. The old branch opened a second writer while
+holding its own write lock, so an ordinary repeated activation could wait until
+SQLite raised `database is locked` instead of returning the selected computers.
+
+- The unchanged real SQLite path reproduced the failure after its default
+  **30-second timeout**. A regression fixture shortens only the test connection
+  timeout and fails on that parent in **0.61 seconds**, without production
+  timing changes or a live device.
+- **27 dedicated transaction tests passed**, covering WAL and DELETE journals,
+  repeat/stale requests, manual selection and eviction priority, bound-computer
+  ownership, Beta/legacy/expansion limits, overrides and expiry, rollback, and
+  HTTP audit/billing behavior after commit. Related activation/billing/admin/
+  Beta/UI checks passed **44 tests**; independent activation/OAuth checks passed
+  **53 tests** and found no remaining blocker.
+- No response format, route, schema, entitlement limit, account binding,
+  permission or deployment behavior changes. Existing manual choices and
+  transaction rollback remain authoritative.
+
+### Combined verification for the two fixes
+
+- Full local Linux/Python 3.12 suite: **451 passed, 9 skipped**. Python
+  compilation, extension JavaScript syntax and whitespace checks passed.
+- Isolated HTTP page smoke: **28/28 routes passed**. This is a disposable local
+  app fixture, not deployed staging or production readiness.
+- Built the wheel and verified both corrected Python modules and all **six**
+  extension assets byte-for-byte against source. No package publication or
+  installation on a user computer was performed.
+- Independent review passed **64 focused tests**, with **1** real Chromium test
+  explicitly skipped locally. Windows and real Chromium acceptance remain
+  pending the published exact-head CI result recorded on PR #3. Existing
+  staging/device/subscription/production release gates remain open.
