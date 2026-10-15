@@ -27,9 +27,14 @@ export function pageAction(action,p) {
   }else element=document.querySelector(p.selector);
   if(!element||!visible(element)||element.disabled) throw Error('Control missing, hidden or disabled');
   if(action==='click'||action==='semantic_click'){
-    // Attribute presence matters: target="" and formtarget="" override a base
-    // or form target. Only the first base with a target participates.
-    const targetFor=(control,override=null)=>override??control.getAttribute('target')??document.querySelector('base[target]')?.getAttribute('target')??'';
+    // Presence-empty formtarget overrides the form target. Chromium then
+    // falls back to base[target] when that effective target is empty (unlike
+    // the spec's presence-only fallback). Guard this native behavior too;
+    // only the first base[target] participates, even when its value is empty.
+    const targetFor=(control,override=null)=>{
+      const target=override??control.getAttribute('target');
+      return target||document.querySelector('base[target]')?.getAttribute('target')||'';
+    };
     // These keywords stay in this tab because evaluation uses the main frame.
     // Never trim: " _self " and whitespace-only strings are named targets.
     // Named targets may reuse an unapproved tab, so hand them off conservatively.

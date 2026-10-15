@@ -653,7 +653,7 @@ remains serialized into the authorized tab without accepting caller-supplied
 JavaScript. Directly resolvable light-DOM link and form navigation targets are
 checked before clicking:
 named/new contexts, inherited `base` targets and submitter `formtarget` overrides
-return the existing manual-handoff result. Empty and same-context overrides,
+return the existing manual-handoff result. Explicit same-context overrides,
 ordinary same-tab controls and background operation remain supported. Native
 label forwarding to a submit control uses the same target check. A new target
 still needs the user's separate explicit tab authorization.
@@ -675,7 +675,7 @@ assets. No bridge protocol, MCP API, database/schema, entitlement, real-user
 credential, live-device, deployment or persisted-user-data change is included.
 The extension must be updated to receive these source fixes.
 
-### Regression and integration evidence
+### First verification attempt
 
 - **131** serialized page-action runtime cases passed; the identical suite on
   the unchanged parent failed **67**, with **64 compatibility controls passing**.
@@ -692,11 +692,50 @@ The extension must be updated to receive these source fixes.
   extension JavaScript syntax checks, whitespace, isolated HTTP smoke **28/28**,
   wheel/source parity for all 77 Python modules and seven extension assets, and
   ZIP asset/content/CRC checks passed.
-- The existing real Chromium fixture now checks the actual popup button retry
-  flow, **19** blocked native cross-context cases, **12** successful same-tab
-  navigation cases and ordinary controls. Tab snapshots, a named unrelated tab,
+- The first Chromium fixture added the actual popup button retry flow,
+  **19** blocked native cross-context cases, **12** intended same-tab
+  navigation controls and ordinary controls. The initial run did not pass all
+  of those checks. Tab snapshots, a named unrelated tab,
   request/click sentinels, unchanged grants and preserved foreground selection
   accompany the prior upload/download/revocation/password/CDP checks.
-- Real Chromium remains pending published exact-head CI; the local sandbox
-  restriction was not retried. These fixtures do not establish live Windows,
-  Edge/ixBrowser, staging deployment or provider-email acceptance.
+- Initial exact-head [CI 38672415949](https://github.com/Neal86/Lucas/actions/runs/38672415949)
+  failed for `f00b1579539db956f0f5ab3a25464dd21dc8a2d3`: both Linux suites
+  passed **663/11**, but the real Chromium fixture exposed an incorrect
+  assumption that an empty link target overrides an external base target.
+  Windows separately had one Node subprocess timeout in the existing password
+  observation fixture (**664 passed, 9 skipped, 1 failed**); no privacy assertion
+  failed. OAuth browser checks were skipped after the extension failure. This
+  failed run is retained, and the correction requires fresh exact-head CI.
+  The local browser restriction was not retried. These fixtures do not establish
+  live Windows Node, Edge/ixBrowser, staging or provider-email acceptance.
+
+### Chromium empty-target compatibility correction
+
+CI exposed a real difference between the [HTML target algorithm](https://html.spec.whatwg.org/multipage/semantics.html#get-an-element%27s-target)
+and Chromium's native behavior. A present empty `target` is preserved by that
+standard algorithm, but Chromium falls back to the first `base[target]` for an
+empty effective target. An empty submitter `formtarget` still overrides its
+form's target before that base fallback. The guard now conservatively handles
+this engine behavior; explicit `_self` remains unambiguous and empty targets
+without an external base continue working. The compatibility guard does not
+rewrite page attributes or click first to discover the destination.
+
+- Corrected serialized runtime suite: **159 passed**. The identical suite fails
+  **16** cases on the first fix, with **143 controls passing**; against the
+  original pre-extraction source it fails **84**, with **75 controls passing**.
+  Both original and failed-first-fix evidence are retained.
+- Expanded real Chromium fixture now has **27** blocked native target cases and
+  **15** same-tab navigation controls, including empty anchor/form/submitter
+  targets under named and blank bases, no-base empties and explicit self
+  overrides. Exact-head CI must establish the corrected browser behavior.
+- The pre-existing observation test gives the Node subprocess **30 seconds on
+  Windows and 10 elsewhere**. The CI failure was a timeout in a finite synthetic
+  map/JSON expression, with no failed privacy assertion; precise runner cause
+  was not measured. All assertions remain, with no retry or added skip. The
+  nine privacy cases pass locally and both timeout branches were checked.
+- Final full local Linux/Python 3.12 suite: **691 passed, 11 skipped**. Independent
+  corrected-source review passed **237 focused tests**, with **1** opt-in
+  Chromium case skipped and no remaining blocker. All extension JavaScript and
+  Python syntax, whitespace, HTTP smoke **28/28**, rebuilt wheel/source parity
+  for all 77 Python modules/seven assets, and ZIP content/CRC checks passed.
+  Fresh exact-head Windows and real Chromium CI remains the acceptance gate.

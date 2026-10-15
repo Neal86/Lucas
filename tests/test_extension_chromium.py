@@ -85,6 +85,12 @@ def _write_native_target_fixtures(directory):
       <form action="destination.html" target="lucas-ungranted-context">
         <input type="hidden" name="case" value="self-submitter"><button id="self-submitter" formtarget="_self">Self submitter target</button>
       </form>
+      <form id="self-form" action="destination.html" target="_self">
+        <input type="hidden" name="case" value="self-form"><button>Self form target</button>
+      </form>
+      <form action="destination.html" target="_self">
+        <input type="hidden" name="case" value="empty-self-submitter"><button id="empty-self-submitter" formtarget="">Empty override of self form</button>
+      </form>
       <script>
         document.addEventListener('click', () => document.querySelector('#effects').textContent = 'clicked', true);
         document.addEventListener('submit', () => document.querySelector('#effects').textContent = 'submitted', true);
@@ -273,9 +279,13 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                     'native-base.html': [
                         ('click', '#inherited-anchor'), ('semantic_click', 'Inherited submit'),
                         ('click', '#inherited-form input[type=submit]'),
+                        ('click', '#empty-anchor'), ('click', '#empty-form button'),
+                        ('click', '#empty-submitter'), ('click', '#empty-self-submitter'),
                     ],
                     'native-blank-base.html': [
                         ('semantic_click', 'Inherited link'), ('click', '#inherited-form button'),
+                        ('click', '#empty-anchor'), ('click', '#empty-form button'),
+                        ('click', '#empty-submitter'), ('click', '#empty-self-submitter'),
                     ],
                 }
                 for fixture, cases in blocked_cases.items():
@@ -294,22 +304,26 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                         assert destination_requests == requests_before, (fixture,control)
                         await assert_only_original_grant()
 
-                # Empty target attributes override inherited/form targets.
-                # Reserved same-context targets and non-submit controls must
-                # retain their native behavior instead of being overblocked.
+                # Real Chromium CI caught empty targets falling back to the
+                # document's cross-context base target. Keep those in the
+                # blocked set above, and prove empty targets work without a
+                # base while explicit _self still overrides any base target.
                 same_tab_cases = [
                     ('native.html', '#inherited-anchor', 'inherited-link'),
                     ('native.html', '#inherited-form button', 'inherited-form'),
                     ('native.html', '#parent-anchor', 'parent-link'),
                     ('native.html', '#top-anchor', 'top-link'),
+                    ('native.html', '#empty-anchor', 'empty-link'),
+                    ('native.html', '#empty-form button', 'empty-form'),
+                    ('native.html', '#empty-submitter', 'empty-submitter'),
+                    ('native.html', '#empty-self-submitter', 'empty-self-submitter'),
                     ('native-base.html', '#label-link span', 'label-link'),
-                    ('native-base.html', '#empty-anchor', 'empty-link'),
                     ('native-base.html', '#self-anchor', 'self-link'),
-                    ('native-base.html', '#empty-form button', 'empty-form'),
-                    ('native-base.html', '#empty-submitter', 'empty-submitter'),
+                    ('native-base.html', '#self-form button', 'self-form'),
                     ('native-base.html', '#self-submitter', 'self-submitter'),
-                    ('native-blank-base.html', '#empty-anchor', 'empty-link'),
-                    ('native-blank-base.html', '#empty-submitter', 'empty-submitter'),
+                    ('native-blank-base.html', '#self-anchor', 'self-link'),
+                    ('native-blank-base.html', '#self-form button', 'self-form'),
+                    ('native-blank-base.html', '#self-submitter', 'self-submitter'),
                 ]
                 for fixture, selector, destination in same_tab_cases:
                     await action('navigate',url=f'{base}/{fixture}')
@@ -322,7 +336,7 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                         current=await cdp.evaluate(f"chrome.tabs.get({tab_id})",session)
                         if current['url']==expected and current['status']=='complete': break
                         await asyncio.sleep(.1)
-                    assert current['url']==expected and current['status']=='complete', (fixture,selector,current)
+                    assert current['url']==expected and current['status']=='complete', (fixture,selector,current,await tab_snapshot(),destination_requests[requests_before:])
                     assert 'Native destination' in (await action('inspect'))['text']
                     assert len(destination_requests)==requests_before+1
                     assert [x for x in await tab_snapshot() if x['id']!=tab_id] == [x for x in before if x['id']!=tab_id]

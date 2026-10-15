@@ -1,6 +1,7 @@
 """Execute the production CDP observer against a synthetic DOM, without a browser."""
 import asyncio
 import json
+import os
 import shutil
 import subprocess
 
@@ -12,6 +13,8 @@ from gpt_windows_connector.executor import Executor
 
 
 NODE = shutil.which("node")
+# CI Windows process startup can exceed 10s; assertions and execution stay unchanged.
+NODE_RUNTIME_TIMEOUT = 30 if os.name == "nt" else 10
 RUNTIME = pytest.mark.skipif(NODE is None, reason="Node.js is required for observation runtime tests")
 PASSWORD = "SYNTHETIC-PASSWORD-DO-NOT-USE"
 
@@ -45,7 +48,7 @@ class RuntimePage:
         console.log(JSON.stringify((""" + expression + ")(elements, " + json.dumps(limit) + ")));"
         result = subprocess.run(
             [NODE, "-e", script, json.dumps(self.elements)],
-            capture_output=True, text=True, check=True, timeout=10,
+            capture_output=True, text=True, check=True, timeout=NODE_RUNTIME_TIMEOUT,
         )
         return json.loads(result.stdout)
 

@@ -265,10 +265,10 @@ def test_first_same_tab_base_target_beats_later_blank(element, target):
 
 @pytest.mark.parametrize('element', ['anchor', 'form', 'submitter'])
 @pytest.mark.parametrize('target', ['', '_SeLf'])
-def test_explicit_same_tab_target_overrides_base(element, target):
+def test_explicit_target_respects_chromium_empty_base_fallback(element, target):
     base = node('base', attrs={'target': '_blank'})
     controls = [link(target)] if element == 'anchor' else submitter(**{('target' if element == 'form' else 'formtarget'): target})
-    assert_click([base] + controls, False)
+    assert_click([base] + controls, target == '')
 
 
 @pytest.mark.parametrize('tag,kind', [
@@ -364,3 +364,19 @@ def test_disabled_and_hidden_controls_still_reject(properties):
 def test_interactive_descendant_does_not_hide_enclosing_external_anchor(tag):
     child = node(tag, attrs={'id': 'inner', 'type': 'button'}, children=[node('span', attrs={'id': 'chosen'})])
     assert_click([node('a', attrs={'href': '/next', 'target': '_blank'}, children=[child])], True)
+
+
+@pytest.mark.parametrize('base_target', [None, '', '_self', '_BLANK', 'base-window'])
+@pytest.mark.parametrize('form_target', [None, '', '_self', '_blank', 'form-window'])
+def test_empty_formtarget_replaces_form_target_then_uses_chromium_base_fallback(base_target, form_target):
+    bases = [] if base_target is None else [node('base', attrs={'target': base_target})]
+    # Presence-empty supersedes form.target. Chromium then falls back to base,
+    # not to the form target. Explicit _self is the unambiguous same-tab choice.
+    assert_click(bases + submitter(target=form_target, formtarget=''), base_target in {'_BLANK', 'base-window'})
+
+
+@pytest.mark.parametrize('tag,kind', [('button', 'submit'), ('input', 'submit'), ('input', 'image')])
+def test_label_forwarded_empty_formtarget_handoffs_for_external_base(tag, kind):
+    control = node(tag, attrs={'id': 'submit-control', 'type': kind, 'form': 'form', 'formtarget': ''})
+    label = node('label', attrs={'id': 'chosen', 'for': 'submit-control'})
+    assert_click([node('base', attrs={'target': 'base-window'}), node('form', attrs={'id': 'form', 'target': '_self'}), control, label], True)
