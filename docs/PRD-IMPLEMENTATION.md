@@ -922,3 +922,35 @@ synthetic email; source checks do not replace staging or real-device acceptance.
   actual accessibility names, desktop/mobile layout and sticky behavior without
   activating downloads or updater actions. All **39** web cases still require
   exact-head CI; no local Chromium retry was performed.
+
+### Cross-platform fixture correction
+
+- First exact-head [CI 38676427766](https://github.com/Neal86/Lucas/actions/runs/38676427766)
+  for `5346900cb83a600bb9bc7e62bfbea60d1d521f8d` passed Linux Python 3.11/3.12
+  (**849 passed, 43 skipped** each), real Chromium extension/CDP (**1 passed**)
+  and all **39** web browser cases. Windows had **106 failed, 745 passed,
+  41 skipped**: every failure was `WinError 206` while starting the shared
+  dashboard-auth Node fixture, before any JavaScript assertion could execute.
+  This failed run is retained rather than represented as full acceptance.
+- The rendered command measured **40,990 UTF-16 command-line units** in an
+  independent probe, above the [Windows CreateProcessW limit](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+  `tests/test_dashboard_auth_modes.py` now supplies the unchanged generated
+  script through [Node's stdin entry point](https://nodejs.org/api/cli.html),
+  explicitly using UTF-8. The shared-login-policy test already delegates to this
+  helper and needs no file change. Production code and existing assertions are
+  unchanged.
+- An enclosing function preserves the fixture's previous declaration scope.
+  Plain stdin alone exposed functions on `globalThis`, where named DOM stubs
+  overwrote `authError`; the initial local stdin-only attempt failed **107**
+  cases and was corrected before publication. Independent review reproduced
+  this scope issue, including the ineffective explicit CommonJS-mode variant.
+- A new large Chinese-script regression failed on the original `-e` transport
+  and checks short argv, explicit UTF-8, scope wrapper and completed execution.
+  It adds no skips, retries or relaxed assertions. Windows and real Chromium
+  still require a fresh exact-head CI result for the corrective commit.
+- Corrected full local Linux/Python 3.12 regression: **850 passed, 43 skipped**.
+  Independent focused review: **134 passed**; all existing test assertions are
+  unchanged, six generated EN/Chinese/boot/refresh inner scripts are byte-identical
+  to the previous transport, and a greater-than-1-MiB Unicode stdin stress probe
+  passes. Python compile and whitespace checks pass; the unchanged product wheel
+  still matches all **80** Python modules and **7** extension assets.

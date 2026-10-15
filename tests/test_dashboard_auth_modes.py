@@ -88,9 +88,32 @@ console.log('dashboard-auth-complete');
         script = script.replace("async function boot(){bootCount++}\n", "")
     if real_refresh:
         script = script.replace("async function refresh(){}\n", "")
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=20)
+    # Rendered runtime can exceed Windows' command-line limit; stdin also keeps
+    # Unicode fixtures independent of the runner's default locale encoding.
+    # Preserve -e's local declarations: plain stdin exposes hoisted functions on
+    # globalThis, where the DOM named-element fixture can otherwise replace them.
+    wrapped_script = "(function(){\n" + script + "\n})();"
+    result = subprocess.run([node, "-"], input=wrapped_script, capture_output=True,
+                            text=True, encoding="utf-8", timeout=20)
     assert result.returncode == 0, result.stderr
     assert 'dashboard-auth-complete' in result.stdout, 'Runtime did not finish; an unexpected duplicate request may still be pending'
+
+
+def test_large_unicode_runtime_uses_stdin(monkeypatch):
+    """Keep generated scripts off Windows' bounded command line."""
+    original_run = subprocess.run
+
+    def check_transport(args, **kwargs):
+        assert args[1:] == ["-"]
+        assert kwargs.get("encoding") == "utf-8"
+        assert len(kwargs.get("input", "")) > 32767
+        assert "中文注册" in kwargs["input"]
+        assert kwargs["input"].startswith("(function(){\n")
+        assert kwargs["input"].endswith("\n})();")
+        return original_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", check_transport)
+    run_dashboard_js("/*" + "中文注册" * 10000 + "*/\nassert.equal('中文注册'.length,4);")
 
 
 @pytest.mark.parametrize("register", [True, False], ids=["signup", "signin"])
