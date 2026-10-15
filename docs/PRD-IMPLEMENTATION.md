@@ -48,7 +48,7 @@ Functional commit `e68257135223e82ae96e888dfc9407aff7fcbe0e` passed the real ext
 
 ## Current environment gates
 
-The local execution sandbox denies Chromium's Unix socket creation, so real browser integration cannot be completed here. Coolify project inspection returned HTTP 401 Unauthenticated, blocking deployed staging verification and live subscription review. These must not be reported as passing.
+The local execution sandbox denies Chromium's Unix socket creation; exact-head GitHub CI provides the real Chromium evidence recorded below and on PR #3. The earlier Coolify HTTP 401 is historical: read-only access worked on 2026-10-15. The running app named Lucas-Staging is configured for main, with an image tagged f04f87af477ae77a14a5287d8f6a966b217111cb, not this development branch. Its test configuration bypasses login verification and has no SMTP, so it cannot establish production email-login acceptance. Deploying a reviewed commit to an explicitly approved, isolated staging target and checking its actual image/endpoints remain required. No deployment or live subscription handling was performed.
 
 ## Development acceptance: atomic OAuth admission (2026-10-14)
 
@@ -550,3 +550,44 @@ SQLite raised `database is locked` instead of returning the selected computers.
   explicitly skipped locally. Windows and real Chromium acceptance remain
   pending the published exact-head CI result recorded on PR #3. Existing
   staging/device/subscription/production release gates remain open.
+
+- Exact-head [CI 38669057105](https://github.com/Neal86/Lucas/actions/runs/38669057105)
+  passed for `71eebf5ee9bc8fe6db263fd8009a5362cd8a6402`: Linux Python
+  3.11/3.12 each **451 passed, 9 skipped**, Windows Python 3.11 **453 passed,
+  7 skipped**, real Chromium extension/CDP-fallback privacy **1 passed**, and
+  OAuth/dashboard **5 passed**. The fixture verified actual password-control
+  redaction and browser/foreground preservation. CI's PR merge tree exactly
+  matched the published development-head tree; email delivery was synthetic.
+
+## Development acceptance: isolated staging data configuration (2026-10-15)
+
+The development branch's `docker-compose.test.yml` directly bound the production
+Docker volume's host data path into the test gateway. Deploying that source
+unchanged could let staging read or modify production data. This source-only
+correction replaces the bind with `lucas-staging-data:/data` and an empty
+Compose-managed volume declaration. There is no global `name`, external volume
+reference or host path; [Compose scopes the volume to its project](https://docs.docker.com/reference/compose-file/volumes/).
+Production Compose and its data volume are unchanged.
+
+- Dedicated source regressions passed **4 tests**; the unchanged source failed
+  **3**, with its test-service configuration control passing. These validate
+  the mount/declaration and retained test-only settings without Docker or data.
+- No running application, mount, volume, credential, permissions, database or
+  deployment was changed. The current main-based staging app already declares
+  an independent named staging volume, which must be verified and preserved
+  when a future deployment is approved. This change does not copy, migrate,
+  delete or attach any data.
+- Before deployment, verify the selected app, exact commit, rendered Compose
+  mount, actual volume identity and separation from production. A new project
+  may receive an empty test volume. The app name alone is not evidence of its
+  branch or isolation. Runtime Docker and deployed-isolation acceptance remain
+  separate gates; this environment has no local Docker executable.
+- Full local Linux/Python 3.12 suite: **455 passed, 9 skipped**. Independent
+  review passed the **4** focused tests, confirmed **3** parent failures and
+  **1** passing control, and rejected five unsafe declaration/mount mutations.
+  No blocking source issue remained. These are fixed-shape source contracts,
+  not a general Compose parser or proof of a running mount.
+- Python compilation, extension JavaScript syntax and whitespace checks passed;
+  isolated local HTTP page smoke passed **28/28 routes**. Rebuilt wheel Python
+  modules and all six extension assets exactly match source. Exact-head CI and
+  future deployed acceptance are recorded separately on PR #3.
