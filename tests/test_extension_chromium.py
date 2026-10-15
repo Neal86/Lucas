@@ -96,13 +96,16 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                     state=await cdp.evaluate("chrome.runtime.sendMessage({type:'status'})",session)
                     if state['owners']:break
                     await asyncio.sleep(.1)
+                assert state['can_grant'], state
                 tab_id=await cdp.evaluate(f"chrome.tabs.query({{}}).then(t=>t.find(x=>x.url.startsWith('{base}')).id)",session)
                 granted=await cdp.evaluate(f"chrome.runtime.sendMessage({{type:'grant',owner_id:'owner',tab_id:{tab_id}}})",session)
                 assert granted.get('ok'),granted
                 for _ in range(30):
                     sessions=bridge.list_sessions('owner')['sessions']
-                    if sessions:break
+                    state=await cdp.evaluate("chrome.runtime.sendMessage({type:'status'})",session)
+                    if sessions and state['sessions']:break
                     await asyncio.sleep(.1)
+                assert sessions and state['sessions']
                 sid=sessions[0]['session_id']
                 executor=Executor((tmp_path,),{'security':preset_security('full_access')},owner_id='owner')
                 async def action(name,**params):
@@ -136,6 +139,23 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                 await cdp.evaluate("chrome.runtime.sendMessage({type:'revoke'})",session)
                 await asyncio.sleep(.1)
                 assert not bridge.list_sessions('owner')['sessions']
+                with pytest.raises(PermissionError):
+                    await action('inspect')
+                # A new explicit grant still works after cancellation/cleanup,
+                # and reauthorization must not select the background tab.
+                granted=await cdp.evaluate(f"chrome.runtime.sendMessage({{type:'grant',owner_id:'owner',tab_id:{tab_id}}})",session)
+                assert granted.get('ok'),granted
+                for _ in range(30):
+                    sessions=bridge.list_sessions('owner')['sessions']
+                    state=await cdp.evaluate("chrome.runtime.sendMessage({type:'status'})",session)
+                    if sessions and state['sessions']:break
+                    await asyncio.sleep(.1)
+                assert sessions and state['sessions']
+                sid=sessions[0]['session_id']
+                assert 'Fixture' in (await action('inspect'))['text']
+                active=await cdp.evaluate("chrome.tabs.query({active:true}).then(t=>t.map(x=>x.id))",session)
+                assert other in active and tab_id not in active
+                await cdp.evaluate("chrome.runtime.sendMessage({type:'revoke'})",session)
         finally:
             proc.terminate();proc.wait(timeout=10)
             await bridge.stop()

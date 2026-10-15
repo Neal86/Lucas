@@ -37,7 +37,7 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 - `python -m pytest -q`: normal regression suite and real loopback bridge tests.
 - `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. No Playwright automation is used by this test.
 - `python -m compileall -q src` and `node --check` on both extension scripts.
-- Build a wheel and confirm all five extension files are packaged.
+- Build a wheel and confirm the complete extension asset set is packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
 
 Local verification result: **175 passed, 4 skipped**. The 28 user-visible HTTP routes passed against an isolated local server. Extension JavaScript syntax and wheel packaging passed. Browser rendering and deployed endpoints have separate gates.
@@ -415,3 +415,68 @@ verification, not deployed staging or production acceptance.
 - Independent corrective review passed **55 focused tests** and found no
   actionable source-level correctness/security/compatibility blockers. Real
   Chromium remains the final integration gate for this correction.
+
+- Corrective exact-head [CI 38666160274](https://github.com/Neal86/Lucas/actions/runs/38666160274)
+  passed for `da565636407bcf41a31012d836da722bb83046c4`: Linux Python
+  3.11/3.12 each **377 passed, 9 skipped**, Windows Python 3.11 **379 passed,
+  7 skipped**, real Chromium OAuth/dashboard **5 passed** and extension
+  integration **1 passed**. Browser mail delivery remains synthetic only.
+
+## Development acceptance: extension grant cancellation (2026-10-15)
+
+Follow-on to PR #3 head `da565636407bcf41a31012d836da722bb83046c4`,
+addressing the PRD requirement that local browser authorization stays explicit
+and revocation cannot silently restore a cancelled tab grant. No real user
+browser, device, credential, deployment or production data is changed.
+
+- The unchanged extension could accept a late grant acknowledgement after
+  Revoke all had completed, restoring a locally usable browser session. A
+  deterministic runtime fixture reproduces the issue using the actual extension
+  source, synthetic Chrome/WebSocket interfaces and no real browser or account.
+- The fix isolates grant lifecycle state and cancellation from page actions,
+  correlates grant requests with acknowledgements, binds work to its originating
+  connection and prevents cancelled asynchronous setup from recreating access.
+- Revocation prevents later command dispatch after asynchronous boundaries. It
+  cannot undo a browser command already submitted to Chrome or reverse a page
+  change that has already occurred.
+
+### Compatibility and rollout boundaries
+
+- No MCP route, database schema, pairing-token format, browser permission,
+  Profile requirement or foreground-focus behavior changes. Existing approved
+  account checks and tab-scoped grants remain authoritative.
+- The updated extension requires a Node bridge that announces correlated grant
+  acknowledgement support. With an older bridge, granting fails closed with an
+  update message. The updated bridge retains legacy-extension compatibility;
+  the cancellation guarantee requires updating the extension as well.
+- The new lifecycle module must be present in both the extension ZIP and wheel
+  assets. Pairing remains local-only, and reconnection never automatically
+  authorizes a tab.
+
+### Regression evidence and remaining acceptance
+
+- **37 deterministic extension runtime cases passed**; the unchanged parent
+  extension failed **29**, with **8** controls passing. The tests load the actual
+  ES modules and cover cancellation before/after lookup and attachment, delayed
+  acknowledgements, remote revoke, duplicate/mismatched replies, old sockets,
+  overlapping pairing, timeouts, shared-tab owners and every multi-step command
+  dispatch boundary. These are synthetic interface tests, not live Chrome.
+- Independent review passed **21 interface-level probes** and the **37** runtime
+  cases. It found no remaining actionable blocker after stale attachment-state
+  and pending-acknowledgement revocation corrections. These extra state cases
+  were deterministic fixtures, not additional live-browser demonstrations.
+- Focused Python suite: **48 passed**. Full local Linux/Python 3.12 suite:
+  **415 passed, 9 skipped**. Python compilation, extension/module/runtime-test
+  JavaScript syntax and whitespace checks passed. Isolated HTTP page smoke:
+  **28/28 routes passed**, without claiming deployed readiness.
+- Built the wheel and generated the extension ZIP, then verified all **six**
+  extension assets byte-for-byte against the final source, including the new
+  lifecycle module. No extension store publication or device installation ran.
+- The real Chromium integration now also verifies explicit revoke/re-grant,
+  rejection of the old session and preservation of the unrelated foreground
+  tab. Local Chromium launch remains sandbox-blocked; the PR records the
+  published exact-head CI result for real-browser and Windows acceptance.
+- Deployed staging, actual Windows Node/Edge/ixBrowser operation, existing Stripe
+  subscription handling and explicit production approval remain release gates.
+  PR #2 is a divergent browser implementation, not a prerequisite to merge
+  wholesale: its additional capabilities require selective permission review.

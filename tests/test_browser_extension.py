@@ -24,6 +24,8 @@ def test_token_persists_and_archive_is_installable(tmp_path):
         assert 'debugger' in manifest['permissions']
         assert 'host_permissions' not in manifest
         assert z.read('Lucas-Browser/background.js')
+        assert z.read('Lucas-Browser/grant_lifecycle.js')
+        assert b"'./grant_lifecycle.js'" in z.read('Lucas-Browser/background.js')
 
 
 def test_bridge_rejects_bad_origin_and_token():
@@ -81,6 +83,42 @@ def test_real_websocket_grant_rpc_revoke_and_disconnect():
                 sid = json.loads(await ws.recv())['session_id']
             await asyncio.sleep(.02)
             assert not bridge.sessions
+        finally:
+            await bridge.stop()
+    asyncio.run(run())
+
+
+def test_bridge_correlates_grants_errors_and_preserves_legacy_clients():
+    async def run():
+        bridge = ExtensionBridge('x' * 40, lambda: [{'user_id': 'owner'}])
+        await bridge.start(0)
+        port = bridge.server.sockets[0].getsockname()[1]
+        try:
+            async with connect(f'ws://127.0.0.1:{port}', origin='chrome-extension://test') as ws:
+                await ws.send(json.dumps({'type': 'hello', 'token': 'x' * 40}))
+                ready = json.loads(await ws.recv())
+                assert 'grant_request_id' in ready['capabilities']
+                await ws.send(json.dumps({'type': 'grant', 'request_id': 'fixture-request-1', 'owner_id': 'owner', 'tab_id': 7}))
+                granted = json.loads(await ws.recv())
+                assert granted['type'] == 'granted'
+                assert granted['request_id'] == 'fixture-request-1'
+                assert granted['owner_id'] == 'owner' and granted['tab_id'] == 7
+                await ws.send(json.dumps({'type': 'revoke', 'session_id': granted['session_id']}))
+                # Preserve the old protocol for existing installations, without
+                # claiming their old extension gains cancellation protection.
+                await ws.send(json.dumps({'type': 'grant', 'owner_id': 'owner', 'tab_id': 8}))
+                legacy = json.loads(await ws.recv())
+                assert legacy['type'] == 'granted' and 'request_id' not in legacy
+                assert granted['session_id'] not in bridge.sessions
+                await ws.send(json.dumps({'type': 'grant', 'request_id': 'fixture-denied', 'owner_id': 'not-approved', 'tab_id': 7}))
+                denied = json.loads(await ws.recv())
+                assert denied['type'] == 'grant_error' and denied['request_id'] == 'fixture-denied'
+                assert len(bridge.sessions) == 1
+                for invalid in (None, '', 7, [], {}, 'x' * 129, 'invalid id'):
+                    await ws.send(json.dumps({'type': 'grant', 'request_id': invalid, 'owner_id': 'owner', 'tab_id': 7}))
+                    response = json.loads(await ws.recv())
+                    assert response['type'] == 'grant_error'
+                    assert len(bridge.sessions) == 1
         finally:
             await bridge.stop()
     asyncio.run(run())

@@ -12,7 +12,7 @@ def extension_zip() -> bytes:
         root = Path(__file__).parents[2] / "extensions" / "lucas-browser"
     stream = io.BytesIO()
     with ZipFile(stream, "w") as archive:
-        for name in ("manifest.json", "background.js", "popup.html", "popup.js", "popup.css"):
+        for name in ("manifest.json", "background.js", "grant_lifecycle.js", "popup.html", "popup.js", "popup.css"):
             archive.write(root / name, "Lucas-Browser/" + name)
     return stream.getvalue()
 
