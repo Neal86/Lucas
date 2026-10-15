@@ -1,6 +1,6 @@
 # Lucas PRD V2.1 implementation and acceptance
 
-Updated: 2026-10-12. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
+Updated: 2026-10-15. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
 
 This is a trace of implementation and evidence, not a production acceptance declaration.
 
@@ -36,7 +36,7 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 
 - `python -m pytest -q`: normal regression suite and real loopback bridge tests.
 - `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. Extension actions use raw CDP; the same isolated browser fixture also exercises the production Playwright-backed CDP fallback for password-observation redaction.
-- `python -m compileall -q src` and `node --check` on both extension scripts.
+- `python -m compileall -q src` and `node --check` on every extension JavaScript file.
 - Build a wheel and confirm the complete extension asset set is packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
 
@@ -639,5 +639,64 @@ installation/approval/reconnection, real email delivery or Stripe acceptance.
   An independent fixture smoke verified login 202/200, offline-request 400 and
   activation 200 with three active/four connected computers, and rejection of
   the demoted computer; no RPC occurred.
-- Real Chromium execution remains pending published exact-head CI. Local
-  synthetic DOM and HTTP results are not substituted for that browser gate.
+- Exact-head [CI 38671142116](https://github.com/Neal86/Lucas/actions/runs/38671142116)
+  passed for `236b3d8b81f687d2582ca100b0a0e7d3d23a9938`: Linux Python
+  3.11/3.12 each **509 passed, 11 skipped**, Windows Python 3.11 **511 passed,
+  9 skipped**, real Chromium extension/CDP **1 passed** and OAuth/dashboard/
+  onboarding **7 passed**. The tested merge tree matched the published source
+  tree. Browser email delivery was synthetic; no live Node was used.
+
+## Development acceptance: native browser handoff and popup errors (2026-10-15)
+
+The extension's fixed page-action function is isolated in `page_actions.js` and
+remains serialized into the authorized tab without accepting caller-supplied
+JavaScript. Directly resolvable light-DOM link and form navigation targets are
+checked before clicking:
+named/new contexts, inherited `base` targets and submitter `formtarget` overrides
+return the existing manual-handoff result. Empty and same-context overrides,
+ordinary same-tab controls and background operation remain supported. Native
+label forwarding to a submit control uses the same target check. A new target
+still needs the user's separate explicit tab authorization.
+
+This is a native light-DOM target guard, not a sandbox for arbitrary website
+event handlers, shadow/slotted activation, script-created windows or later page
+navigation. No automatic grant,
+new host/debugger permission, forced browser Profile or focus change is added.
+
+The popup presents action failures in a separate accessible error region that
+status polling does not overwrite. Rejected pairing requests retain their input
+for correction; transport and action errors are caught, and a successful retry
+clears the action error. A successful pair response only accepts the connection
+attempt: it does not establish that the Node has authenticated the supplied token.
+Existing connection status continues to report that later outcome.
+
+The distributable ZIP includes the new module along with the existing six
+assets. No bridge protocol, MCP API, database/schema, entitlement, real-user
+credential, live-device, deployment or persisted-user-data change is included.
+The extension must be updated to receive these source fixes.
+
+### Regression and integration evidence
+
+- **131** serialized page-action runtime cases passed; the identical suite on
+  the unchanged parent failed **67**, with **64 compatibility controls passing**.
+  The harness runs the actual background-generated CDP expression in a separate
+  page context and checks that handoff happens before click/event side effects.
+- **23** shipped-popup runtime cases passed; the unchanged parent failed **20**,
+  with **3 positive controls passing**. Coverage includes polling, rejected and
+  malformed responses, transport failures, stale replies and revoke during a
+  pending tab query, plus retained input and ordinary owner/session rendering.
+- Independent review passed **200 focused tests**, with the opt-in Chromium
+  case skipped locally. The enclosing-anchor/label interaction and a browser
+  fixture assertion mismatch were corrected and rechecked; no blocker remained.
+- Full local Linux/Python 3.12 suite: **663 passed, 11 skipped**. Python and all
+  extension JavaScript syntax checks, whitespace, isolated HTTP smoke **28/28**,
+  wheel/source parity for all 77 Python modules and seven extension assets, and
+  ZIP asset/content/CRC checks passed.
+- The existing real Chromium fixture now checks the actual popup button retry
+  flow, **19** blocked native cross-context cases, **12** successful same-tab
+  navigation cases and ordinary controls. Tab snapshots, a named unrelated tab,
+  request/click sentinels, unchanged grants and preserved foreground selection
+  accompany the prior upload/download/revocation/password/CDP checks.
+- Real Chromium remains pending published exact-head CI; the local sandbox
+  restriction was not retried. These fixtures do not establish live Windows,
+  Edge/ixBrowser, staging deployment or provider-email acceptance.
