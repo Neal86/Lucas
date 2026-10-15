@@ -23,6 +23,7 @@ from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 from .legal_ui import privacy_html, terms_html, refund_html, contact_html
 from .node_docs_ui import computer_node_docs_html
 from .oauth_grants import revoke_connection
+from .operation_admission import list_unresolved
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -479,7 +480,7 @@ async def api_task_runs(request: Request):
         task_count = int(db.execute(f"SELECT COUNT(*) n FROM task_runs WHERE {run_where}", run_params).fetchone()["n"] or 0)
         op_count = int(db.execute(f"SELECT COALESCE(SUM(operation_count),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
         duration_ms = int(db.execute(f"SELECT COALESCE(SUM(duration_ms),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
-    return JSONResponse({"runs": runs, "summary": {"task_runs": task_count, "operations": op_count, "duration_ms": duration_ms, "days": days or None}})
+    return JSONResponse({"runs": runs, "unresolved_operations": list_unresolved(gateway.db_path, user.id, limit=limit, node_id=node_id, since=since), "summary": {"task_runs": task_count, "operations": op_count, "duration_ms": duration_ms, "days": days or None}})
 
 async def api_logs(request: Request):
     user = _auth_user(request)

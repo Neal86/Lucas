@@ -4,7 +4,7 @@ import calendar
 import os
 import sqlite3
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -27,13 +27,38 @@ class Entitlements:
     requests_used: int; nodes_used: int; ai_accounts_used: int
     period_start: float; period_end: float; renewal_at: float | None
     cancel_at_period_end: bool; bonus_requests: int; nodes_connected: int = 0; bonus_nodes: int = 0; bonus_ai_accounts: int = 0; admin_grant: bool = False
+    requests_pending: int = 0
+    requests_unconfirmed: int = 0
     @property
     def can_buy_expansion(self) -> bool: return not beta_free_enabled() and self.plan == "pro_plus" and self.status in ACTIVE_STATUSES
     def as_dict(self) -> dict[str, Any]:
-        return {"plan":self.plan,"plan_name":self.plan_name,"status":self.status,"expansion_quantity":self.expansion_quantity,"request_limit":self.request_limit,"node_limit":self.node_limit,"ai_account_limit":self.ai_account_limit,"requests_used":self.requests_used,"nodes_used":self.nodes_used,"nodes_connected":self.nodes_connected,"ai_accounts_used":self.ai_accounts_used,"period_start":self.period_start,"period_end":self.period_end,"renewal_at":self.renewal_at,"cancel_at_period_end":self.cancel_at_period_end,"bonus_requests":self.bonus_requests,"bonus_nodes":self.bonus_nodes,"bonus_ai_accounts":self.bonus_ai_accounts,"admin_grant":self.admin_grant,"can_buy_expansion":self.can_buy_expansion,"request_remaining":max(0,self.request_limit-self.requests_used),"node_remaining":max(0,self.node_limit-self.nodes_used),"ai_account_remaining":max(0,self.ai_account_limit-self.ai_accounts_used)}
+        return {"plan":self.plan,"plan_name":self.plan_name,"status":self.status,"expansion_quantity":self.expansion_quantity,"request_limit":self.request_limit,"node_limit":self.node_limit,"ai_account_limit":self.ai_account_limit,"requests_used":self.requests_used,"requests_pending":self.requests_pending,"requests_unconfirmed":self.requests_unconfirmed,"nodes_used":self.nodes_used,"nodes_connected":self.nodes_connected,"ai_accounts_used":self.ai_accounts_used,"period_start":self.period_start,"period_end":self.period_end,"renewal_at":self.renewal_at,"cancel_at_period_end":self.cancel_at_period_end,"bonus_requests":self.bonus_requests,"bonus_nodes":self.bonus_nodes,"bonus_ai_accounts":self.bonus_ai_accounts,"admin_grant":self.admin_grant,"can_buy_expansion":self.can_buy_expansion,"request_remaining":max(0,self.request_limit-self.requests_used-self.requests_pending-self.requests_unconfirmed),"node_remaining":max(0,self.node_limit-self.nodes_used),"ai_account_remaining":max(0,self.ai_account_limit-self.ai_accounts_used)}
 
 def _connect(db_path: Path) -> sqlite3.Connection:
     db=sqlite3.connect(db_path,timeout=30); db.row_factory=sqlite3.Row; return db
+
+@contextmanager
+def _snapshot_transaction(db_path: Path, connection: sqlite3.Connection | None):
+    # A caller owns its transaction, including rollback on an exception.
+    if connection is not None:
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        yield connection
+        return
+    db = None
+    try:
+        # Preserve _connect's context-manager contract, also used by integrations.
+        # Snapshot synchronizes active nodes and reads both accounting ledgers in
+        # one transaction, never the gap during settlement.
+        with _connect(db_path) as db:
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")
+            yield db
+    finally:
+        # The context must commit/roll back before its connection is closed.
+        if db is not None:
+            db.close()
+
 
 def _free_period(now: float) -> tuple[float,float]:
     tm=time.gmtime(now); start=calendar.timegm((tm.tm_year,tm.tm_mon,1,0,0,0,0,0,0))
@@ -123,21 +148,24 @@ def _sync_active(db: sqlite3.Connection,user_id: str,limit: int,preferred_ids: I
     return desired
 
 def snapshot(db_path: Path,user_id: str,now: float|None=None,*,connection: sqlite3.Connection|None=None) -> Entitlements:
-    now=float(now or time.time())
-    # A caller-owned transaction must not be committed by this helper.
-    with (_connect(db_path) if connection is None else nullcontext(connection)) as db:
+    # A caller-owned transaction must not be committed or closed by this helper.
+    with _snapshot_transaction(db_path, connection) as db:
+        now = float(time.time() if now is None else now)
         plan,status,expansion,bonus,pstart,pend,cancel,base=_plan_state(db,user_id,now); admin_grant=_is_admin(db,user_id)
         if admin_grant and not beta_free_enabled():
             plan="pro_plus"; status="admin"; expansion=0; base=PLANS["pro_plus"]
             if pstart<=0 or pend<=pstart: pstart,pend=_free_period(now)
         extra_requests,extra_nodes,extra_ai,_,_=_entitlement_override(db,user_id,now); req=_operations_used(db,user_id,pstart,pend); ai=_count(db,"SELECT COUNT(*) FROM oauth_client_users WHERE user_id=?",(user_id,)); node_limit=int(base["nodes"])+expansion*int(EXPANSION["nodes"])+extra_nodes; connected=len(_bound_ids(db,user_id)); active=len(_sync_active(db,user_id,node_limit))
-    return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus+extra_requests,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"])+extra_ai,req,active,ai,pstart,pend,pend if plan!="free" and not admin_grant else None,cancel,bonus,connected,extra_nodes,extra_ai,admin_grant)
+        from .operation_admission import reservation_counts
+        pending, unconfirmed = reservation_counts(db, user_id, pstart, pend, now)
+    return Entitlements(plan,str(base["name"]),status if plan!="free" else "free",expansion,int(base["requests"])+expansion*int(EXPANSION["requests"])+bonus+extra_requests,node_limit,int(base["ai_accounts"])+expansion*int(EXPANSION["ai_accounts"])+extra_ai,req,active,ai,pstart,pend,pend if plan!="free" and not admin_grant else None,cancel,bonus,connected,extra_nodes,extra_ai,admin_grant,pending,unconfirmed)
 
-def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1) -> Entitlements:
-    e=snapshot(db_path,user_id); requested=max(1,int(requested_operations or 1))
-    if e.requests_used+requested>e.request_limit:
-        if beta_free_enabled(): raise PermissionError(f"Lucas Beta monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). Limit resets at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(e.period_end))}.")
-        raise PermissionError(f"Monthly Operation limit reached ({e.requests_used}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
+def ensure_request_capacity(db_path: Path,user_id: str,requested_operations: int=1,*,connection: sqlite3.Connection|None=None,now: float|None=None) -> Entitlements:
+    e=snapshot(db_path,user_id,now,connection=connection); requested=max(1,int(requested_operations or 1))
+    committed=e.requests_used+e.requests_pending+e.requests_unconfirmed
+    if committed+requested>e.request_limit:
+        if beta_free_enabled(): raise PermissionError(f"Lucas Beta monthly Operation limit reached ({committed}/{e.request_limit}; this action needs {requested}). Limit resets at {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime(e.period_end))}.")
+        raise PermissionError(f"Monthly Operation limit reached ({committed}/{e.request_limit}; this action needs {requested}). {'Add an Expansion Pack' if e.can_buy_expansion else 'Upgrade your plan'} at /billing.")
     return e
 
 def ensure_node_capacity(db_path: Path,user_id: str,node_id: str) -> Entitlements: return snapshot(db_path,user_id)

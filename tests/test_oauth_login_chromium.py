@@ -19,6 +19,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
@@ -138,8 +139,9 @@ def login_server(tmp_path, monkeypatch):
     monkeypatch.delenv("GWC_BYPASS_LOGIN_VERIFICATION", raising=False)
     monkeypatch.setenv("GWC_SMTP_HOST", "unused.example.test")
     monkeypatch.setenv("GWC_SMTP_FROM", "lucas@example.test")
-    from gpt_windows_connector import gateway, login_policy, server as dashboard_server
+    from gpt_windows_connector import admin, gateway, login_policy, server as dashboard_server
     from gpt_windows_connector.billing import BillingService
+    from gpt_windows_connector.task_runs import TaskRunStore
 
     deliveries, responses = [], []
     monkeypatch.setattr(login_policy, "send_verification_email",
@@ -156,6 +158,7 @@ def login_server(tmp_path, monkeypatch):
         monkeypatch.setattr(gateway, "db_path", path)
         monkeypatch.setattr(gateway, "auth", auth)
         monkeypatch.setattr(gateway, "oauth", provider)
+        monkeypatch.setattr(gateway, "task_runs", TaskRunStore(path))
         monkeypatch.setattr(gateway, "billing", BillingService(path, base))
         monkeypatch.setattr(gateway, "auth_store", gateway.NodeAuthStore(path))
         bindings = gateway.UserNodeBindingStore(path)
@@ -180,13 +183,17 @@ def login_server(tmp_path, monkeypatch):
             Route("/oauth/token", provider.token, methods=["POST"]),
             Route("/client/callback", callback),
             Route("/dashboard", dashboard_server.webapp.dashboard),
+            Route("/admin/users", dashboard_server.webapp.admin_page),
             Route("/api/logout", dashboard_server.webapp.api_logout, methods=["POST"]),
             Route("/api/nodes", dashboard_server.webapp.api_nodes),
             Route("/api/nodes/request-access", dashboard_server.webapp.api_request_node_access, methods=["POST"]),
             Route("/api/nodes/{node_id}/activate", dashboard_server.webapp.api_activate_node, methods=["POST"]),
             Route("/api/billing/summary", dashboard_server.webapp.api_billing_summary),
             Route("/api/logs", dashboard_server.webapp.api_logs),
+            Route("/api/task-runs", dashboard_server.webapp.api_task_runs),
             Route("/api/ai-connections", dashboard_server.webapp.api_ai_connections),
+            Route("/api/admin/users", admin.users),
+            Route("/api/admin/users/{user_id}", admin.user_detail),
             Mount("/", app=gateway.AuthMiddleware(Starlette(routes=[
                 Route("/auth/me", gateway.auth_me),
             ]))),
@@ -546,6 +553,251 @@ def test_dashboard_computer_onboarding_at_capacity_and_beta_limits(login_server,
         assert db.execute("SELECT COUNT(*) FROM user_active_nodes WHERE user_id=?", (user_id,)).fetchone()[0] == 3
         assert db.execute("SELECT COUNT(*) FROM audit_logs WHERE action='node.activate' AND user_id=?", (user_id,)).fetchone()[0] == 1
         assert db.execute("SELECT COUNT(*) FROM audit_logs WHERE action='node.access_request' AND user_id=?", (user_id,)).fetchone()[0] == 0
+
+
+def seed_completed_operation_usage(server):
+    """Legacy completed operations, without reservation rows or any live Node."""
+    from gpt_windows_connector import gateway
+
+    with server.provider.db() as db:
+        user_id = db.execute("SELECT id FROM users WHERE email=?", (EMAIL,)).fetchone()[0]
+    now = time.time()
+    for status, count in (("success", 7), ("failed", 3)):
+        server.provider.auth.record_operation(user_id, status == "success", 0.25, count)
+        gateway.task_runs.record_operation(
+            owner_id=user_id, node_id="computer-browser-usage-offline", action="files.list",
+            target="/synthetic/" + status, started_at=now, ended_at=now + 0.25,
+            status=status, operation_count=count, context_key="browser-usage-" + status,
+            task_title="Synthetic confirmed " + status,
+        )
+    return user_id
+
+
+def seed_unresolved_operation_usage(server, user_id, monkeypatch):
+    """Exercise the reservation service against this fixture's disposable DB."""
+    from gpt_windows_connector import gateway, operation_admission
+
+    store = operation_admission.OperationAdmissionStore(
+        server.provider.auth.db_path, auth_store=server.provider.auth, task_store=gateway.task_runs,
+    )
+
+    def reserve(name, count):
+        return store.reserve(
+            owner_id=user_id, node_id="computer-browser-usage-offline", action="files.list",
+            target="/synthetic/" + name, requested_operations=count, timeout_seconds=3600,
+            context_key="browser-usage-" + name, task_title="Synthetic " + name,
+            details={"source": "oauth", "agent": "Synthetic browser AI",
+                     "session_id": "synthetic-browser-session-" + name, "task_title": "Synthetic " + name},
+        )
+
+    pending = reserve("pending", 5)
+    unconfirmed = reserve("unconfirmed", 11)
+    store.mark_unconfirmed(unconfirmed["id"], error_type="TimeoutError")
+    # Freeze only the service's clock, never the HTTP server's global time module.
+    historical_time = time.time() - 35 * 86400
+    with monkeypatch.context() as clock_patch:
+        clock_patch.setattr(operation_admission, "time", SimpleNamespace(time=lambda: historical_time))
+        historical = reserve("historical-unconfirmed", 13)
+        store.mark_unconfirmed(historical["id"], error_type="TimeoutError")
+    return {"pending": pending, "unconfirmed": unconfirmed, "historical": historical}
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_dashboard_operation_reservations_distinguish_confirmed_and_unknown(
+    login_server, tmp_path, monkeypatch, language,
+):
+    """Real localized UI and authorized APIs; synthetic records and mail only."""
+    from gpt_windows_connector import gateway
+
+    server = login_server
+    user_id = seed_completed_operation_usage(server)
+    admin_email = "operation-browser-admin@example.test"
+    with monkeypatch.context() as admin_patch:
+        admin_patch.setenv("GWC_SUPER_ADMIN_EMAIL", admin_email)
+        admin_user = server.provider.auth.register(admin_email, PASSWORD)
+    assert admin_user.role == "super_admin"
+    assert gateway.registry.nodes == gateway.registry.pending_requests == {}
+    zh = language == "zh-CN"
+    labels = {
+        "completed": "已完成操作" if zh else "Completed Operations",
+        "pending": "待处理占用额度" if zh else "Pending held units",
+        "unconfirmed": "结果未确认占用额度" if zh else "Unconfirmed held units",
+        "remaining": "剩余操作额度" if zh else "Remaining Operations",
+        "unresolved": "待确认操作记录" if zh else "Unresolved actions",
+        "pending_status": "待处理" if zh else "Pending",
+        "unconfirmed_status": "结果未确认" if zh else "Outcome unconfirmed",
+        "historical": "历史记录 · 当前不占用额度" if zh else "Historical · not currently held",
+        "reset": "周期重置时间" if zh else "Period reset",
+        "admission_end": "准入时计费周期结束时间" if zh else "Admission period ends",
+        "source": "请求来源" if zh else "Source",
+        "agent": "AI 客户端" if zh else "AI client",
+        "session": "会话" if zh else "Session",
+        "task_title": "任务标题" if zh else "Task title",
+        "held_explanation": "占用额度是预留的最低额度，不表示已确认执行的操作次数，也不表示解析出的 Shell 操作数量。" if zh else
+                            "Held units are reserved minimum quota, not confirmed executed Operations or a parsed shell-operation count.",
+        "timeout_explanation": "待处理操作超过截止时间后会显示为结果未确认。超时不代表执行失败。" if zh else
+                               "Pending actions become outcome unconfirmed after their deadline. A timeout does not prove execution failed.",
+        "reset_explanation": "占用额度按准入时间归入当前计费周期。Beta 额度每月重置，历史记录仍可查看。" if zh else
+                             "Held units are attributed by admission time within the current billing period. Beta quota resets monthly; historical records remain reviewable.",
+        "retry_explanation": "系统不会自动重试或返还额度。" if zh else "There is no automatic retry or quota refund.",
+        "review_explanation": "管理员审核后可通过现有的额外操作额度功能补充额度，但这不会确认原操作的执行结果。" if zh else
+                              "After review, an administrator can grant replacement capacity with the existing Extra Operations control. This does not resolve the execution outcome.",
+        "separate_explanation": "这些记录不计入已完成任务步骤的成功或失败总数。" if zh else
+                                "These records are separate from completed task-step success and failure totals.",
+    }
+    baseline = {"completed": 10, "pending": 0, "unconfirmed": 0, "remaining": 99990, "limit": 100000}
+    held = {"completed": 10, "pending": 5, "unconfirmed": 11, "remaining": 99974, "limit": 100000}
+
+    async def usage_is(cdp, session, selector, expected):
+        await wait_for(cdp, session, visible(selector + " [data-operation-usage]"))
+        expression = f"""(() => {{
+            const root = document.querySelector({json.dumps(selector)});
+            return Object.fromEntries({json.dumps(list(expected))}.map(name => {{
+                const value = root.querySelector('[data-operation-count="'+name+'"]');
+                return [name, value ? Number(value.textContent.replace(/[^0-9]/g,'')) : null];
+            }}));
+        }})()"""
+        await wait_for(cdp, session, f"JSON.stringify({expression}) === {json.dumps(json.dumps(expected, separators=(',', ':')))}")
+        text = await cdp.evaluate(f"document.querySelector({json.dumps(selector)}).innerText", session)
+        for key in ("completed", "pending", "unconfirmed", "remaining"):
+            assert labels[key] in text
+        reset = await cdp.evaluate(
+            f"document.querySelector({json.dumps(selector + ' [data-operation-reset]')}).textContent", session)
+        assert reset.startswith(labels["reset"] + ": ")
+        assert "—" not in reset and "Invalid Date" not in reset
+
+    async def explanation_is(cdp, session, selector, admin=False):
+        help_selector = selector + " [data-operation-help]"
+        if not await cdp.evaluate(f"document.querySelector({json.dumps(help_selector)}).open", session):
+            await click(cdp, session, help_selector + " summary")
+        await wait_for(cdp, session, f"document.querySelector({json.dumps(help_selector)}).open")
+        text = await cdp.evaluate(f"document.querySelector({json.dumps(help_selector)}).innerText", session)
+        for key in ("held_explanation", "timeout_explanation", "reset_explanation", "retry_explanation"):
+            assert labels[key] in text
+        if admin:
+            assert labels["review_explanation"] in text
+
+    async def unresolved_is(cdp, session, selector, reservations):
+        await wait_for(cdp, session,
+                       f"document.querySelectorAll({json.dumps(selector + ' [data-operation-id]')}).length === 3")
+        text = await cdp.evaluate(f"document.querySelector({json.dumps(selector)}).innerText", session)
+        assert labels["unresolved"] in text
+        assert labels["separate_explanation"] in text
+        for key, expected_status, currently_held in (
+            ("pending", "pending", "true"),
+            ("unconfirmed", "outcome_unconfirmed", "true"),
+            ("historical", "outcome_unconfirmed", "false"),
+        ):
+            row = selector + f' [data-operation-id="{reservations[key]["id"]}"]'
+            actual = await cdp.evaluate(f"""(() => {{
+                const row = document.querySelector({json.dumps(row)});
+                return {{status: row.getAttribute('data-operation-status'),
+                    held: row.getAttribute('data-currently-held'), text: row.innerText,
+                    accountingReview: !!row.querySelector('[data-operation-review="accounting"]'),
+                    controls: row.querySelectorAll('button, a[role="button"]').length}};
+            }})()""", session)
+            assert actual["status"] == expected_status
+            assert actual["held"] == currently_held
+            assert labels["pending_status" if key == "pending" else "unconfirmed_status"] in actual["text"]
+            assert actual["controls"] == 0  # No unsafe retry/release inferred from a timeout.
+            assert actual["accountingReview"] is False  # No received execution result for these timeouts.
+            name = "historical-unconfirmed" if key == "historical" else key
+            for label, value in (("source", "oauth"), ("agent", "Synthetic browser AI"),
+                                 ("session", "synthetic-browser-session-" + name),
+                                 ("task_title", "Synthetic " + name)):
+                assert labels[label] + ": " + value in actual["text"]
+            assert labels["admission_end"] + ": " in actual["text"]
+            if key == "historical":
+                assert labels["historical"] in actual["text"]
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await cdp.call("Page.addScriptToEvaluateOnNewDocument", {"source":
+                "Object.defineProperty(navigator,'language',{value:" + json.dumps(language) + "});"}, session)
+            await cdp.call("Page.navigate", {"url": server.base + "/dashboard"}, session)
+            await wait_for(cdp, session, visible("#loginForm"))
+            await dashboard_login(cdp, session)
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await wait_for(cdp, session, visible("#loginVerifyForm"))
+            assert len(server.deliveries) == 1 and server.deliveries[0][0] == EMAIL
+            await cdp.evaluate(
+                f"loginVerifyCode.value={json.dumps(server.deliveries[-1][1])};verifyLogin().then(()=>true)", session)
+            await wait_for(cdp, session, visible("#metricRequests"))
+            assert [r["status"] for r in server.responses] == [202, 200]
+            assert await cdp.evaluate("document.documentElement.lang", session) == language
+            await usage_is(cdp, session, "#metricRequests", baseline)
+            # Pre-reservation accounts retain completed-only usage semantics.
+            await click(cdp, session, '.nav[data-view="billing"]')
+            await usage_is(cdp, session, "#billingRequests", baseline)
+            assert await cdp.evaluate("billingPrice.textContent", session) == "$0"
+            before = await cdp.evaluate("api('/api/task-runs?days=all')", session)
+            assert before["summary"]["task_runs"] == 2
+            assert before["summary"]["operations"] == 10
+            assert before["unresolved_operations"] == []
+            denied = await cdp.evaluate(
+                f"fetch('/api/admin/users/{user_id}').then(r=>r.status)", session)
+            assert denied == 403  # A regular account still cannot inspect admin detail.
+
+            reservations = seed_unresolved_operation_usage(server, user_id, monkeypatch)
+            await cdp.evaluate("refresh().then(()=>true)", session)
+            await click(cdp, session, '.nav[data-view="dashboard"]')
+            await usage_is(cdp, session, "#metricRequests", held)
+            await explanation_is(cdp, session, "#metricRequests")
+            await click(cdp, session, '.nav[data-view="billing"]')
+            await usage_is(cdp, session, "#billingRequests", held)
+            await explanation_is(cdp, session, "#billingRequests")
+            assert await cdp.evaluate("billingPrice.textContent", session) == "$0"
+            assert await cdp.evaluate("state.billing.beta_free", session) is True
+            assert not await cdp.evaluate(visible("#billingError"), session)
+            assert await cdp.evaluate(
+                "document.querySelectorAll('#billingCardPro,#billingCardExpansion,#billingManage,"
+                "#billingChoosePro,#billingChooseProPlus,#billingExpansionQty').length", session) == 0
+
+            await click(cdp, session, '.nav[data-view="tasks"]')
+            await unresolved_is(cdp, session, "#taskRunUnresolved", reservations)
+            await explanation_is(cdp, session, "#taskRunUnresolved")
+            after = await cdp.evaluate("api('/api/task-runs?days=all')", session)
+            assert after["summary"] == before["summary"]
+            assert len(after["runs"]) == 2
+            assert await cdp.evaluate("document.querySelectorAll('#taskRunTable .task-run-card').length", session) == 2
+            assert await cdp.evaluate(
+                "[...document.querySelectorAll('#taskRunSummary .metric')].slice(0,2).map(e=>Number(e.textContent))",
+                session) == [2, 10]
+            steps = [step for task in after["runs"] for step in task["steps"]]
+            assert len(steps) == 2
+            assert {step["status"]: step["operation_count"] for step in steps} == {"success": 7, "failed": 3}
+            assert sum(task["success_count"] for task in after["runs"]) == 1
+            assert sum(task["error_count"] for task in after["runs"]) == 1
+
+            # Real admin authorization and renderer, using only a synthetic admin.
+            admin_token = server.provider.auth.issue_token(admin_user)
+            assert (await cdp.call("Network.setCookie", {
+                "name": "gwc_access_token", "value": admin_token, "url": server.base,
+                "httpOnly": True, "sameSite": "Lax",
+            }, session))["success"]
+            await cdp.call("Page.navigate", {"url": server.base + "/admin/users"}, session)
+            await wait_for(cdp, session, visible("#adminUsersTable"))
+            await click(cdp, session, f'#adminUsersTable tr[onclick="showAdminUser(\'{user_id}\')"]')
+            await wait_for(cdp, session, visible("#adminUserModal"))
+            await usage_is(cdp, session, "#adminUserDetail", held)
+            await unresolved_is(cdp, session, "#adminUserDetail", reservations)
+            await explanation_is(cdp, session, "#adminUserDetail [data-unresolved-operations]", admin=True)
+            assert await cdp.evaluate(visible("#adminDetailBonus"), session)
+            detail = await cdp.evaluate(f"api('/api/admin/users/{user_id}')", session)
+            assert detail["user"]["email"] == EMAIL
+            assert detail["usage"]["total"] == 10
+            assert len(detail["operations"]) == 2
+            assert {op["status"]: op["operation_count"] for op in detail["operations"]} == {"success": 7, "failed": 3}
+            assert len(detail["unresolved_operations"]) == 3
+
+    asyncio.run(run())
+    assert gateway.registry.nodes == gateway.registry.pending_requests == {}
+    with server.provider.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM task_steps WHERE owner_id=?", (user_id,)).fetchone()[0] == 2
+        assert tuple(db.execute(
+            "SELECT SUM(operation_count),SUM(success_count),SUM(error_count) FROM usage_daily WHERE user_id=?",
+            (user_id,),
+        ).fetchone()) == (10, 7, 3)
 
 
 @pytest.mark.parametrize("after_password", [False, True], ids=["initial-login", "pending-code"])

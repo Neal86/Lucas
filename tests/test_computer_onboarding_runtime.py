@@ -34,6 +34,7 @@ def run_computer_js(body: str, language: str = "en"):
 
     runtime = "\n".join((
         between("const WEB_LANG=", "</script>"),
+        between("function operationNumber(", "const state="),
         between("const state=", "async function billingChangePlan("),
         between("async function api(", "function showAuth("),
         between("function closeModal(", "let onboardingStep="),

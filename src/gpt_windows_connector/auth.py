@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -269,17 +270,20 @@ class AuthStore:
         with self._connect() as db:
             db.execute("INSERT INTO usage_daily(user_id,day,request_count) VALUES(?,?,1) ON CONFLICT(user_id,day) DO UPDATE SET request_count=request_count+1", (user_id, day))
 
-    def record_operation(self, user_id: str, success: bool, duration_seconds: float, operation_count: int = 1) -> None:
-        day = time.strftime("%Y-%m-%d", time.gmtime())
+    def record_operation(self, user_id: str, success: bool, duration_seconds: float, operation_count: int = 1, *,
+                         connection: sqlite3.Connection | None = None, started_at: float | None = None) -> None:
+        # Admission time keeps late completion in its original usage day.
+        day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if started_at is None else started_at))
         count = max(1, int(operation_count or 1))
-        with self._connect() as db:
+        with (self._connect() if connection is None else nullcontext(connection)) as db:
             db.execute("INSERT INTO usage_daily(user_id,day,operation_count,success_count,error_count,execution_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET operation_count=operation_count+excluded.operation_count,success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count,execution_seconds=execution_seconds+excluded.execution_seconds", (user_id, day, count, count if success else 0, 0 if success else count, max(0.0, duration_seconds)))
 
-    def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None) -> None:
-        with self._connect() as db:
+    def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None, *,
+              connection: sqlite3.Connection | None = None, created_at: float | None = None) -> None:
+        with (self._connect() if connection is None else nullcontext(connection)) as db:
             db.execute(
                 "INSERT INTO audit_logs(user_id,action,target,details,created_at) VALUES(?,?,?,?,?)",
-                (user_id, action, target, json.dumps(details or {}, ensure_ascii=False), time.time()),
+                (user_id, action, target, json.dumps(details or {}, ensure_ascii=False), time.time() if created_at is None else created_at),
             )
 
 

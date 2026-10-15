@@ -739,3 +739,108 @@ rewrite page attributes or click first to discover the destination.
   Python syntax, whitespace, HTTP smoke **28/28**, rebuilt wheel/source parity
   for all 77 Python modules/seven assets, and ZIP content/CRC checks passed.
   Fresh exact-head Windows and real Chromium CI remains the acceptance gate.
+
+- Corrected exact-head [CI 38673170272](https://github.com/Neal86/Lucas/actions/runs/38673170272)
+  passed for `b9761c79c04b428bccdd9c785ec32120917652a2`: Linux Python
+  3.11/3.12 each **691 passed, 11 skipped**, Windows Python 3.11 **693 passed,
+  9 skipped**, actual Chromium extension/CDP **1 passed** with all 27 blocked
+  targets and 15 same-tab navigation controls, and OAuth/dashboard/onboarding
+  **7 passed** with synthetic email delivery. The CI merge tree exactly matched
+  the tested/published source tree. The preceding failed run remains recorded.
+
+## Atomic Operation admission and reviewable unresolved work
+
+The gateway now reserves the minimum required quota before dispatching a Node
+RPC. The new `operation_admission.py` service uses an additive
+`operation_reservations` table and a SQLite `BEGIN IMMEDIATE` transaction, shared
+with the entitlement check. The lock ends before the remote await, preserving
+concurrent tasks below the limit while preventing two callers from consuming
+the same final available unit. Every serving gateway must be upgraded for this
+guarantee; a mixed fleet with the old check-only path is not covered.
+
+An explicit negative Node response is a confirmed failure. Confirmed success or
+failure atomically creates its task step, updates task/usage totals, writes the
+execution audit, and settles the reservation. Repeating settlement does not
+charge again or change the first confirmed outcome. The Node wire protocol is
+unchanged. Timeout, transport loss, cancellation and expired pending work remain
+separate unresolved records: they do not establish failure, create completed
+task steps, or increment success/error totals.
+
+The entitlement projection keeps `requests_used` as confirmed completed usage,
+adds `requests_pending` and `requests_unconfirmed`, and subtracts all three from
+`request_remaining`. Both held and completed units use the admission timestamp
+within the effective current billing period. A late result therefore converts
+its hold to completed usage in the same period without charging twice; it does
+not move into the completion month. This also applies when paid subscription
+windows overlap after a plan change. Beta uses fixed UTC calendar months, so
+prior-month unresolved records stop holding the next month's capacity while
+remaining available for review. Original admission-period boundaries remain
+historical metadata, not a separate timer that refunds current quota.
+
+This admission/review layer never retries or refunds unknown work. Existing
+same-request transport reconnect/replay behavior is unchanged; this is not an
+end-to-end exactly-once execution guarantee. Its deadline changes
+the displayed state rather than cancelling the Node operation. Pending records
+survive process restart; reading the recovered store marks expired records
+unconfirmed. If a confirmed Node result arrives but its local settlement fails,
+all accounting writes roll back. The original result is preserved without
+re-dispatch, and best-effort metadata labels the record **Accounting unconfirmed**
+with the known success/failure. If storage also rejects that annotation, the
+durable pending minimum remains and becomes outcome-unconfirmed after recovery.
+An administrator can review evidence and use the existing Extra Operations
+control to grant replacement capacity; that does not settle the unknown result.
+No new release, refund or retry endpoint is provided.
+
+Shell admission still reserves a minimum of one unit. A confirmed result uses
+the existing runtime operation count, with the existing static fallback; it can
+exceed that minimum and the plan limit, after which further admission is blocked.
+This is not a hard execution ceiling. A count lost with a gateway crash cannot
+be reconstructed without a larger Node protocol change; the minimum remains
+reviewable. Commands, output and exception messages are not persisted in the
+new ledger. Source/agent/session/task metadata is sanitized, and transition
+audits carry a reservation ID linking to that metadata.
+
+Dashboard, billing, task history and admin user detail share the isolated
+`web_operation_usage_runtime.py` renderer. English and Chinese labels distinguish
+completed Operations, pending/unconfirmed held units, remaining quota, current
+reset and historical records. The task/admin APIs add owner-scoped unresolved
+records with the existing node/time filters; completed summaries retain their
+old meaning. Beta's free-price explanation and paid-control suppression remain.
+The existing privacy test now uses the explicit confirmed-error type for its
+known-failure fixture; the onboarding runtime harness includes the new composed
+renderer. Their assertions remain intact.
+
+This is source and disposable-fixture validation only. The additive schema is
+initialized when the new admission path is used; no live database migration,
+deployment, provider operation or real-user device action was performed.
+
+### Verification
+
+- The same barrier-held last-slot gateway regression dispatches **two** RPCs on
+  unchanged parent `1f479030457462af20fa15ae60268316109fc6d4`, and exactly **one**
+  with the fix. Below-limit calls still overlap rather than serializing remote
+  work. All activity uses disposable stores and synthetic registry responses.
+- **64 new tests** pass: **24** service/SQLite cases, **28** gateway/HTTP cases,
+  and **12** composed-JavaScript/API cases. Coverage includes cross-process
+  admission, duplicate settlement, transactional failure at each accounting
+  stage, double bookkeeping faults, restart/deadline behavior, month/day and paid
+  overlap attribution, owner isolation, shell counts, sanitized metadata and
+  English/Chinese rendering.
+- Independent review passed **186 focused tests** with no remaining source
+  blocker, plus a 32-reservation concurrent-settlement/snapshot stress probe.
+  Review corrected the paid-overlap attribution and late accounting-evidence
+  enrichment. Full regression caught a context-manager integration mismatch in
+  the snapshot helper; its existing connection contract was restored without
+  changing the active-computer tests.
+- Final local Linux/Python 3.12 suite: **755 passed, 13 skipped**. Python compile,
+  all three final-page JavaScript blocks, extension module syntax, whitespace,
+  isolated real HTTP page smoke **28/28**, and wheel/source parity for **79**
+  Python modules and all **7** extension assets passed.
+- The two new real-Chromium English/Chinese cases preserve all seven previous
+  cases. They cover dashboard/billing/task/admin usage distinctions, historical
+  records, metadata, authorization, localized reset/review help and Beta's $0
+  offer. Their disposable HTTP fixture passes with real production handlers,
+  SQLite and synthetic mail; browser execution remains the exact-head CI gate.
+  Local Chromium restrictions were not retried. Staging, live Windows Node,
+  Edge/ixBrowser, provider email and existing Stripe handling remain separate
+  acceptance gates.

@@ -12,6 +12,7 @@ import pytest
 from gpt_windows_connector.auth import AuthStore, reset_current_user, set_current_user
 from gpt_windows_connector.gateway_stores import NodeAuthStore, UserNodeBindingStore
 from gpt_windows_connector.task_runs import TaskRunStore
+from gpt_windows_connector.gateway_registry import ConfirmedNodeError
 
 
 def _record(store, details, *, operation_count=1, action="shell.run"):
@@ -188,7 +189,7 @@ def test_gateway_audit_paths_preserve_accounting_without_command_details(gateway
         async def rpc(self, node_id, owner_id, method, payload, *, actor, timeout):
             self.calls.append((node_id, owner_id, method, copy.deepcopy(payload), actor, timeout))
             if outcome == "failure":
-                raise RuntimeError("synthetic registry failure")
+                raise ConfirmedNodeError("synthetic registry failure")
             return {"stdout": stdout, "stderr": "", "exit_code": 0}
 
     registry = HarmlessRegistry()
@@ -206,7 +207,7 @@ def test_gateway_audit_paths_preserve_accounting_without_command_details(gateway
             task_title="Audit privacy check",
         )
         if outcome == "failure":
-            with pytest.raises(RuntimeError, match="synthetic registry failure"):
+            with pytest.raises(ConfirmedNodeError, match="synthetic registry failure"):
                 asyncio.run(call)
         else:
             assert asyncio.run(call) == {"stdout": "visible output\n", "stderr": "", "exit_code": 0}
@@ -231,7 +232,7 @@ def test_gateway_audit_paths_preserve_accounting_without_command_details(gateway
     assert details["session_id"] == "audit-session"
     assert details["task_title"] == "Audit privacy check"
     if outcome == "failure":
-        assert details["error_type"] == "RuntimeError"
+        assert details["error_type"] == "ConfirmedNodeError"
     assert stored["owner_id"] == user.id
     assert stored["node_id"] == "audit-device"
     assert stored["status"] == expected_status

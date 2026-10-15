@@ -4,6 +4,7 @@ import json
 import sqlite3
 import time
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,8 @@ class TaskRunStore:
                          target: str | None, started_at: float, ended_at: float,
                          status: str, details: dict[str, Any] | None = None,
                          operation_count: int = 1, context_key: str | None = None,
-                         task_title: str | None = None) -> str:
+                         task_title: str | None = None, connection: sqlite3.Connection | None = None,
+                         operation_id: str | None = None) -> str:
         owner_id=str(owner_id or "local"); node_id=str(node_id or "unknown")
         action=str(action or "operation"); target=str(target or "") or None
         task_title=" ".join(str(task_title or "").split())[:180] or None
@@ -73,7 +75,11 @@ class TaskRunStore:
         duration_ms=max(0,round((ended_at-started_at)*1000))
         operation_count=max(1,int(operation_count or 1))
         details = sanitize_task_details(details)
-        with self._connect() as db:
+        with (self._connect() if connection is None else nullcontext(connection)) as db:
+            if operation_id is not None:
+                existing = db.execute("SELECT task_run_id FROM task_steps WHERE id=?", (operation_id,)).fetchone()
+                if existing:
+                    return str(existing[0])
             if task_title:
                 row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,titled_context)).fetchone()
                 if not row:
@@ -93,7 +99,7 @@ class TaskRunStore:
                 db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at))
             success=status=="success"
             db.execute("UPDATE task_runs SET last_activity_at=?,ended_at=?,success_count=success_count+?,error_count=error_count+? WHERE id=?",(ended_at,ended_at,1 if success else 0,0 if success else 1,run_id))
-            db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,details) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,json.dumps(details or {},ensure_ascii=False)))
+            db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,details) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(operation_id or uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,json.dumps(details or {},ensure_ascii=False)))
         return run_id
 
     def list_runs(self, owner_id: str, *, node_id: str | None=None, limit: int=100, since: float | None=None) -> list[dict[str,Any]]:
