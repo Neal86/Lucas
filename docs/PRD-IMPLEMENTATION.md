@@ -591,3 +591,53 @@ Production Compose and its data volume are unchanged.
   isolated local HTTP page smoke passed **28/28 routes**. Rebuilt wheel Python
   modules and all six extension assets exactly match source. Exact-head CI and
   future deployed acceptance are recorded separately on PR #3.
+
+
+- Exact-head [CI 38670017946](https://github.com/Neal86/Lucas/actions/runs/38670017946)
+  passed for `bad11e43a56c899a08617d8912c7254faae733e1`: Linux Python
+  3.11/3.12 each **455 passed, 9 skipped**, Windows Python 3.11 **457 passed,
+  7 skipped**, real Chromium extension/CDP **1 passed** and OAuth/dashboard
+  **5 passed**. The tested merge tree matched the published source tree. These
+  checks do not establish Docker rendering or deployed-volume isolation.
+
+## Development acceptance: computer onboarding and Chinese Beta copy (2026-10-15)
+
+The Connect computer dialog incorrectly counted every authorized computer as an
+active slot and refused to open at the account limit, even when those computers
+were offline. The backend already allows additional bindings and limits the
+active subset. The dashboard now follows that existing model: it opens the
+connection-code flow while local approval and server-side active limits remain
+authoritative. Opening the dialog sends no access request and grants no access.
+
+Chinese checklist, current connection instructions/status and Beta explanations
+use the existing shared translation catalog. The dynamically created checklist
+dialog also gets a localized accessible label. English remains the fallback.
+The README now describes the free Beta offer and its distinction from model
+tokens instead of advertising obsolete paid plans. Historical billing records
+and paid-plan implementation are retained.
+
+No API, schema, entitlement limit, permission, pairing, account/device setting
+or deployment behavior changes are included. This does not complete live Node
+installation/approval/reconnection, real email delivery or Stripe acceptance.
+
+### Regression and integration evidence
+
+- **54** executable rendered-runtime cases passed; **25 failed** on the
+  unchanged parent, with **29 compatibility controls passing**. The harness
+  loads actual composed functions/catalog and covers below/at/above-limit
+  offline bindings, explicit-submit/code/local-approval behavior, dialog reset,
+  reconnect prefill, dynamic Chinese checklist/labels and Beta notices.
+- Independent focused review passed **102 tests**, with **7** opt-in Chromium
+  cases skipped locally. Full local Linux/Python 3.12 suite: **509 passed,
+  11 skipped**. Compilation, JavaScript syntax and whitespace checks passed.
+- Isolated HTTP page smoke passed **28/28 routes**. Rebuilt wheel Python modules
+  and all six extension assets exactly match source.
+- Two new English/Chinese Chromium cases use real rendered UI, production HTTP
+  handlers and disposable SQLite records for offline computers. They exercise
+  the modal at capacity, immediate offline-request rejection, reconnect,
+  checklist/Beta localization and active-slot replacement without a live Node.
+  An independent fixture smoke verified login 202/200, offline-request 400 and
+  activation 200 with three active/four connected computers, and rejection of
+  the demoted computer; no RPC occurred.
+- Real Chromium execution remains pending published exact-head CI. Local
+  synthetic DOM and HTTP results are not substituted for that browser gate.

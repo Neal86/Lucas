@@ -1,9 +1,10 @@
-"""Opt-in OAuth and dashboard login regressions using Chromium, HTTP and SQLite.
+"""Opt-in OAuth and dashboard regressions using Chromium, HTTP and SQLite.
 
 Run with RUN_LOGIN_E2E=1 and CHROME_BIN pointing to a Chromium binary.
 Only delivery of synthetic verification emails is replaced; login, challenge
 validation, OAuth consent, cookies and code redemption use production handlers.
 The browser has a fresh temporary profile and can reach only the loopback app.
+Computer onboarding uses synthetic offline SQLite records, never a live Node.
 """
 from __future__ import annotations
 
@@ -181,6 +182,9 @@ def login_server(tmp_path, monkeypatch):
             Route("/dashboard", dashboard_server.webapp.dashboard),
             Route("/api/logout", dashboard_server.webapp.api_logout, methods=["POST"]),
             Route("/api/nodes", dashboard_server.webapp.api_nodes),
+            Route("/api/nodes/request-access", dashboard_server.webapp.api_request_node_access, methods=["POST"]),
+            Route("/api/nodes/{node_id}/activate", dashboard_server.webapp.api_activate_node, methods=["POST"]),
+            Route("/api/billing/summary", dashboard_server.webapp.api_billing_summary),
             Route("/api/logs", dashboard_server.webapp.api_logs),
             Route("/api/ai-connections", dashboard_server.webapp.api_ai_connections),
             Mount("/", app=gateway.AuthMiddleware(Starlette(routes=[
@@ -383,6 +387,165 @@ def test_oauth_email_verification_then_consent_issues_one_use_code(login_server,
             assert server.counts()["oauth_codes"] == 0
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_dashboard_computer_onboarding_at_capacity_and_beta_limits(login_server, tmp_path, language):
+    """Exercise real UI/API state with offline fixtures and no Node operations."""
+    from gpt_windows_connector import gateway, webapp
+    from gpt_windows_connector.entitlements import ensure_node_active
+
+    server = login_server
+    with server.provider.db() as db:
+        user_id = db.execute("SELECT id FROM users WHERE email=?", (EMAIL,)).fetchone()[0]
+        webapp._ensure_dashboard_metadata_schema(db)
+
+    def seed_computer(node_id, authorized=True):
+        # These are isolated account fixtures, not simulated device approvals.
+        if authorized:
+            gateway.bindings.upsert(user_id, node_id)
+        with server.provider.db() as db:
+            db.execute(
+                "INSERT INTO dashboard_user_nodes "
+                "(user_id,node_id,node_name,access_state,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                (user_id, node_id, "Synthetic offline computer", "authorized" if authorized else "unauthorized",
+                 time.time(), time.time()),
+            )
+
+    for index in range(1, 4):
+        seed_computer(f"computer-browser-offline-{index}")
+    reconnect_id = "computer-browser-reconnect"
+    seed_computer(reconnect_id, authorized=False)
+    assert gateway.registry.nodes == {}  # api_nodes cannot dispatch access.check.
+
+    zh = language == "zh-CN"
+    expected = {
+        "coach_label": "入门指南" if zh else "Getting Started",
+        "checklist": "设置清单" if zh else "Setup Checklist",
+        "steps": ["连接你的 AI", "连接电脑", "设置权限"] if zh else [
+            "Connect your AI", "Connect your computer", "Set permissions"],
+        "close": "关闭" if zh else "Close",
+        "help": "帮助 · 入门指南" if zh else "Help · Getting Started",
+        "hint": "你可以随时在这里重新打开设置指南。" if zh else "You can reopen setup guidance here anytime.",
+        "got_it": "知道了" if zh else "Got it",
+        "connect_help": "输入目标电脑 Lucas 设置中显示的 Node ID 和 8 位连接码。连接码验证通过后，仍须由该电脑在本地批准此 Lucas 账号。" if zh else
+                        "Enter the Node ID and 8-digit Connection Code shown in Lucas Settings on the target computer. After the code is verified, that computer must still approve this Lucas account locally.",
+        "beta": "测试期间免费。每月 100,000 次操作、3 台电脑、3 个 AI 账号。套餐和限制可能调整。" if zh else
+                "Free during testing. 100,000 Operations/month, 3 Computers, 3 AI accounts. Plans and limits may change.",
+        "beta_footer": "测试提示：测试期间套餐、价格和限制可能调整。" if zh else
+                       "Beta Notice: Plans, pricing, and limits may change during Beta.",
+        "beta_notice": "Lucas 测试期间免费。套餐和限制可能调整。" if zh else
+                       "Lucas Beta is free during testing. Plans and limits may change.",
+    }
+
+    async def text_is(cdp, session, selector, text):
+        await wait_for(cdp, session,
+                       f"document.querySelector({json.dumps(selector)})?.textContent.trim() === {json.dumps(text)}")
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await cdp.call("Page.addScriptToEvaluateOnNewDocument", {"source":
+                "Object.defineProperty(navigator,'language',{value:" + json.dumps(language) + "});"}, session)
+            await cdp.call("Page.navigate", {"url": server.base + "/dashboard"}, session)
+            await wait_for(cdp, session, visible("#loginForm"))
+            await dashboard_login(cdp, session)
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await wait_for(cdp, session, visible("#loginVerifyForm"))
+            assert len(server.deliveries) == 1 and server.deliveries[0][0] == EMAIL
+            await cdp.evaluate(
+                f"loginVerifyCode.value={json.dumps(server.deliveries[-1][1])};verifyLogin().then(()=>true)", session)
+            await wait_for(cdp, session, visible("#lucasCoach"))
+            assert [r["status"] for r in server.responses] == [202, 200]
+            assert await cdp.evaluate("document.documentElement.lang", session) == language
+
+            # The dynamic checklist reflects persisted authorization, not online status.
+            await text_is(cdp, session, "#lucasCoach h3", expected["checklist"])
+            assert await cdp.evaluate("document.querySelector('#lucasCoach').getAttribute('aria-label')", session) == expected["coach_label"]
+            assert await cdp.evaluate("[...document.querySelectorAll('#lucasCoach .coach-step')].map(b=>b.lastElementChild.textContent)", session) == expected["steps"]
+            assert await cdp.evaluate("[...document.querySelectorAll('#lucasCoach .coach-step')].map(b=>b.classList.contains('done'))", session) == [False, True, True]
+            await text_is(cdp, session, "#coachClose", expected["close"])
+            await text_is(cdp, session, "#gettingStartedNav", expected["help"])
+            await click(cdp, session, "#coachClose")
+            await wait_for(cdp, session, visible("#coachReopenHint"))
+            await text_is(cdp, session, "#coachReopenHint button", expected["got_it"])
+            assert await cdp.evaluate("document.querySelector('#coachReopenHint').firstChild.textContent", session) == expected["hint"]
+            assert not await cdp.evaluate(visible("#lucasCoach"), session)
+            await click(cdp, session, "#coachReopenHint button")
+            await click(cdp, session, "#gettingStartedNav")
+            await text_is(cdp, session, "#lucasCoach h3", expected["checklist"])
+            await click(cdp, session, '#lucasCoach .coach-step[data-target="ai"]')
+            await wait_for(cdp, session, "location.pathname === '/ai-connections'")
+            assert await cdp.evaluate(visible("#ai"), session)
+            assert not await cdp.evaluate(visible("#lucasCoach"), session)
+            await click(cdp, session, "#gettingStartedNav")
+            await click(cdp, session, '#lucasCoach .coach-step[data-target="nodes"]')
+            await wait_for(cdp, session, "location.pathname === '/nodes'")
+            assert await cdp.evaluate(visible("#nodes"), session)
+            assert await cdp.evaluate("({paired:metricPairedNodes.textContent,online:metricNodes.textContent})", session) == {"paired": "3", "online": "0"}
+            assert await cdp.evaluate("({limit:state.billing.node_limit,active:state.billing.nodes_used,connected:state.billing.nodes_connected})", session) == {"limit": 3, "active": 3, "connected": 3}
+
+            # Three authorized bindings must not block opening the connect dialog.
+            await click(cdp, session, "#connectComputerBtn")
+            await wait_for(cdp, session, visible("#connectModal"))
+            assert await cdp.evaluate("({id:connectNodeId.value,code:connectCode.value,inputmode:connectCode.inputMode,maxlength:connectCode.maxLength})", session) == {"id": "", "code": "", "inputmode": "numeric", "maxlength": 8}
+            await text_is(cdp, session, "#connectModal p", expected["connect_help"])
+            assert await cdp.evaluate("[...document.querySelectorAll('#connectModal label')].map(e=>e.textContent)", session) == ["Node ID", "连接码" if zh else "Connection Code"]
+            await click(cdp, session, '#connectModal button[onclick="requestNodeAccess()"]')
+            await text_is(cdp, session, "#toast", "请输入 Node ID" if zh else "Node ID is required")
+            await cdp.evaluate(f"connectNodeId.value={json.dumps(reconnect_id)};connectCode.value='1234567';true", session)
+            await click(cdp, session, '#connectModal button[onclick="requestNodeAccess()"]')
+            await text_is(cdp, session, "#toast", "请输入 8 位连接码" if zh else "Enter the 8-digit Connection Code")
+            assert not await cdp.evaluate(visible("#connectResult"), session)
+
+            # A real request against an offline fixture fails before any Node RPC.
+            await cdp.evaluate(f"connectNodeId.value={json.dumps(reconnect_id)};connectCode.value='12345678';true", session)
+            await click(cdp, session, '#connectModal button[onclick="requestNodeAccess()"]')
+            await text_is(cdp, session, "#connectResult", "Node is offline: " + reconnect_id)
+            await click(cdp, session, '#connectModal button[onclick="closeModal(\'connectModal\')"]')
+            await click(cdp, session, "#connectComputerBtn")
+            await wait_for(cdp, session, visible("#connectModal"))
+            assert await cdp.evaluate("({id:connectNodeId.value,code:connectCode.value,result:connectResult.textContent,hidden:connectResult.classList.contains('hidden')})", session) == {"id": "", "code": "", "result": "", "hidden": True}
+            await click(cdp, session, '#connectModal button[onclick="closeModal(\'connectModal\')"]')
+            reconnect = f'#nodeTable tr[data-node-key="{reconnect_id}"] button'
+            await click(cdp, session, reconnect)
+            await wait_for(cdp, session, visible("#connectModal"))
+            assert await cdp.evaluate("({id:connectNodeId.value,code:connectCode.value})", session) == {"id": reconnect_id, "code": ""}
+            await click(cdp, session, '#connectModal button[onclick="closeModal(\'connectModal\')"]')
+            assert await cdp.evaluate("location.pathname", session) == "/nodes"
+
+            # Extra offline bindings remain permitted; activation still replaces one slot.
+            seed_computer("computer-browser-offline-4")
+            await cdp.evaluate("refresh().then(()=>true)", session)
+            inactive = await cdp.evaluate("state.nodes.find(n=>n.plan_limited).node_id", session)
+            with pytest.raises(PermissionError, match="inactive for your plan"):
+                ensure_node_active(server.provider.auth.db_path, user_id, inactive)
+            await click(cdp, session, f'#nodeTable tr[data-node-key="{inactive}"] button')
+            await wait_for(cdp, session,
+                           f"state.nodes.find(n=>n.node_id==={json.dumps(inactive)})?.active === true")
+            assert await cdp.evaluate("({active:state.nodes.filter(n=>n.active).length,limited:state.nodes.filter(n=>n.plan_limited).length,connected:state.billing.nodes_connected,limit:state.billing.node_limit})", session) == {"active": 3, "limited": 1, "connected": 4, "limit": 3}
+            ensure_node_active(server.provider.auth.db_path, user_id, inactive)
+            demoted = await cdp.evaluate("state.nodes.find(n=>n.plan_limited).node_id", session)
+            with pytest.raises(PermissionError, match="inactive for your plan"):
+                ensure_node_active(server.provider.auth.db_path, user_id, demoted)
+            await click(cdp, session, "#connectComputerBtn")
+            await wait_for(cdp, session, visible("#connectModal"))
+            await click(cdp, session, '#connectModal button[onclick="closeModal(\'connectModal\')"]')
+
+            await click(cdp, session, '.nav[data-view="billing"]')
+            await wait_for(cdp, session, visible("#billingNotice"))
+            await text_is(cdp, session, "#billing .top p", expected["beta"])
+            await text_is(cdp, session, "#billing > p", expected["beta_footer"])
+            await text_is(cdp, session, "#billingNotice", expected["beta_notice"])
+            assert not await cdp.evaluate(visible("#billingError"), session)
+            assert await cdp.evaluate("({beta:state.billing.beta_free,operations:state.billing.request_limit,computers:state.billing.node_limit,ai:state.billing.ai_account_limit})", session) == {"beta": True, "operations": 100000, "computers": 3, "ai": 3}
+            assert await cdp.evaluate("document.querySelectorAll('#billingCardPro,#billingCardExpansion,#billingManage').length", session) == 0
+
+    asyncio.run(run())
+    assert gateway.registry.nodes == gateway.registry.pending_requests == {}
+    with server.provider.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM user_active_nodes WHERE user_id=?", (user_id,)).fetchone()[0] == 3
+        assert db.execute("SELECT COUNT(*) FROM audit_logs WHERE action='node.activate' AND user_id=?", (user_id,)).fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM audit_logs WHERE action='node.access_request' AND user_id=?", (user_id,)).fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("after_password", [False, True], ids=["initial-login", "pending-code"])

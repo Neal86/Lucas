@@ -31,7 +31,7 @@ ONBOARDING_SCRIPT = r'''
     coach.id = 'lucasCoach';
     coach.setAttribute('role','dialog');
     coach.setAttribute('aria-modal','true');
-    coach.setAttribute('aria-label','Getting Started');
+    coach.setAttribute('aria-label',wt('Getting Started'));
     document.body.appendChild(coach);
   };
 
