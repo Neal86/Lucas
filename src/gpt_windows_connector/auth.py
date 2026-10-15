@@ -18,6 +18,8 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 
+from . import oauth_grants
+
 
 _current_user: contextvars.ContextVar["User | None"] = contextvars.ContextVar("gwc_current_user", default=None)
 _passwords = PasswordHasher()
@@ -53,6 +55,7 @@ class AuthStore:
 
     def _init_db(self) -> None:
         with self._connect() as db:
+            oauth_grants.initialize(db)
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -219,17 +222,28 @@ class AuthStore:
             raise PermissionError("Account is disabled")
         return user
 
-    def issue_token(self, user: User, ttl_seconds: int | None = None, client_id: str | None = None) -> str:
+    def issue_token(self, user: User, ttl_seconds: int | None = None, client_id: str | None = None,
+                    *, connection: sqlite3.Connection | None = None) -> str:
         now = int(time.time())
         ttl = self.jwt_ttl_seconds if ttl_seconds is None else max(60, min(int(ttl_seconds), self.jwt_ttl_seconds))
         payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector"}
         if client_id:
             payload["azp"] = client_id
+            if connection is None:
+                with self._connect() as db:
+                    payload["ogv"] = oauth_grants.connection_generation(db, user.id, client_id)
+            else:
+                payload["ogv"] = oauth_grants.connection_generation(connection, user.id, client_id)
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
 
     def verify_token(self, token: str) -> User:
         try:
             payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"], issuer="gpt-windows-connector")
+            if "azp" in payload:
+                if not isinstance(payload["azp"], str) or not payload["azp"]:
+                    raise PermissionError("Invalid OAuth client identity")
+                with self._connect() as db:
+                    oauth_grants.verify_generation(db, str(payload["sub"]), payload["azp"], payload.get("ogv", 0))
             return replace(self.get_user(str(payload["sub"])), client_id=payload.get("azp"))
         except Exception as exc:
             raise PermissionError("Invalid or expired access token") from exc

@@ -22,6 +22,7 @@ from .seo_pages import public_info_page
 from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 from .legal_ui import privacy_html, terms_html, refund_html, contact_html
 from .node_docs_ui import computer_node_docs_html
+from .oauth_grants import revoke_connection
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -440,6 +441,9 @@ async def api_ai_connection(request: Request):
         if not row:
             return JSONResponse({"error": "AI connection not found"}, status_code=404)
         if request.method == "DELETE":
+            # The first write serializes disconnect with token redemption.
+            # Keep this tombstone even when this client is authorized again.
+            revoke_connection(db, user.id, client_id)
             db.execute("DELETE FROM oauth_refresh_tokens WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM oauth_codes WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM oauth_client_users WHERE client_id=? AND user_id=?", (client_id,user.id))

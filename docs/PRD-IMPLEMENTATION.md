@@ -68,3 +68,62 @@ Evidence:
 - `scripts/smoke_web_pages.py` passed all **28 routes** against an isolated local HTTP server. This is not deployed-staging evidence or visual/browser acceptance.
 - The four default skips are the optional browser smoke, two Windows PowerShell tests, and opt-in real extension integration. A separate real Chromium attempt failed before the browser started because this sandbox denies its process-singleton socket (`Operation not permitted`). The check is not counted as passing; exact-commit CI must establish Linux Chromium and Windows results.
 - Independent code review found no blocking defects; production release still requires deployed staging smoke, existing-subscription audit/handling, Windows Node/browser acceptance and explicit confirmation.
+
+## Development acceptance: OAuth disconnect revocation (2026-10-15)
+
+Follow-on to the atomic-admission change, based on draft PR #3 head
+`88ea02b2b3ccbbd420c2aff83562402f23c11ddb`. This implements the Security and
+Reliability requirement that an AI connection cannot keep operating after the
+user disconnects it. These are code/test results, not deployed acceptance.
+
+- `oauth_grants.py` owns durable per-user/per-client revocation generations.
+  Signed OAuth access tokens carry the current generation. Authentication
+  requires both an active connection and the matching generation, so Disconnect
+  blocks subsequent authenticated requests immediately. Reconnecting the same
+  client never restores its old access tokens. Browser-login tokens and other
+  users/clients remain unaffected. Already-dispatched operations and existing
+  `/ws/events` subscriptions are not cancelled; new WebSocket handshakes are checked.
+- The dashboard increments the generation and removes ownership, codes, refresh
+  tokens and metadata in one transaction. Tombstones remain after reconnect.
+- Code redemption and refresh rotation validate, consume, issue replacements and
+  sign access tokens in one SQLite write transaction. An in-flight exchange
+  cannot recreate a disconnected relationship. Failed insertion/signing rolls
+  back consumption and replacement grants so the caller can retry.
+- Refresh retries retain the existing 30-second grace period, anchored to the
+  first rotation. Replaying a refresh token cannot extend that window indefinitely.
+- No routes, Beta limits/pricing, browser/Profile policy, device permissions,
+  billing records or deployment settings change.
+
+### Compatibility and migration
+
+- AuthStore initialization additively creates `oauth_revocations`; no existing
+  tables/records are dropped, rewritten or bulk-revoked. Startup is idempotent.
+- Existing signed OAuth access tokens without the generation claim are treated
+  as generation zero. They continue working for currently authorized connections
+  until that connection is disconnected under the new code. Existing valid
+  refresh tokens continue working and receive generation-bound replacements.
+- An access token for an absent connection is rejected even without a tombstone.
+  Fresh authorization is required after disconnect; it receives the next
+  generation. Revocation state survives gateway restart.
+- All gateway workers must run the new version for the guarantee to hold. An
+  older binary ignores revocation generations and still has the issuance race;
+  a rollback or mixed-version rollout must not be described as preserving this
+  security fix. Production rollout/migration has not been run or authorized here.
+
+### Verification
+
+- Seven new regressions failed against the unchanged PR #3 baseline, demonstrating
+  usable disconnected tokens, token revival, both grant/disconnect races,
+  indefinitely sliding refresh grace and grant loss after failed issuance.
+- `tests/test_oauth_revocation.py`: **16 passed**, including migration from a
+  pre-generation database, legacy tokens, repeated reconnect, user/client
+  isolation, rollback, orphan grants, invalid scope/client and actual dashboard
+  and MCP authentication rejection.
+- Local Linux/Python 3.12 full suite: **206 passed, 4 skipped**. Python compilation,
+  both extension JavaScript syntax checks and Git whitespace checks passed.
+- The isolated local HTTP smoke passed **28/28 routes**. This is not a deployed
+  staging smoke result. Windows and real Chromium checks require the exact-head
+  CI run linked in the PR before this follow-on is considered CI-verified.
+- The prior release gates remain open: deployed staging smoke, live Windows
+  Node/Edge/ixBrowser acceptance, existing Stripe subscription audit/handling and
+  explicit production approval.
