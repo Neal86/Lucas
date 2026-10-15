@@ -279,18 +279,106 @@ and composite gateways with the existing email-verification policy.
   forwarded-header handling; trusted ingress must remove/overwrite untrusted
   `cf-connecting-ip`/`x-forwarded-for` headers. This is not a claim of a global
   distributed rate limit or hardened direct-to-gateway proxy trust.
-- **Open follow-on security finding:** two independent `RegistrationSecurity`
+- **Historical finding, addressed by the next slice below:** two independent `RegistrationSecurity`
   instances can concurrently accept one login code and create two trusted tokens.
   The reproduced interleaving reads the challenge before either write, then the
   second unchecked DELETE affects zero rows but still creates trust. Serializing
   validation, attempt accounting, code consumption and trust creation, including
-  resend/verify races, is separate pending work. Sequential replay is tested here;
+  resend/verify races, was separate pending work at this head. Sequential replay was tested here;
   the authentication system is not claimed to be fully hardened by this slice.
 - A separate inherited dashboard `showRegister` string replacement also misses
   the expanded registration function. Auth-mode switching while code verification
-  is visible still needs dedicated UI reconciliation; the timer/Back regression
+  was visible required dedicated UI reconciliation (implemented below); the timer/Back regression
   here does not claim to cover that mode-switch path.
 - Beta pricing/navigation, historical billing data and non-mandatory browser
   Profile/Eva behavior are unchanged. Deployed staging smoke, live Windows Node,
   Edge/ixBrowser acceptance, existing Stripe subscription handling and explicit
   production approval remain outstanding release gates. No deployment occurred.
+
+
+## Development acceptance: atomic email challenges and auth-mode transitions (2026-10-15)
+
+Based on draft PR #3 head `7d1170c9a3898751ae17ad415c4fc419785c1c35`.
+This closes the two follow-on findings recorded above. It is development
+verification, not deployed staging or production acceptance.
+
+### Challenge transaction boundaries
+
+- Registration and login verification acquire a SQLite `BEGIN IMMEDIATE` writer
+  transaction before reading a challenge. Validation, the five-attempt limit,
+  consumption and user/trusted-device insertion are one transaction, including
+  independent gateway workers sharing the database. Only one concurrent login
+  verification can return success and receive access/trusted-device cookies.
+- Resend uses the same writer boundary. If verification consumes a challenge
+  first, resend fails instead of claiming to send a replacement for a deleted
+  challenge. If resend wins, verification checks the new hash and rejects the old
+  code. The latest committed resend/start code remains authoritative; outbound
+  delivery order is outside the transaction.
+- Registration hashes the password before taking the writer lock and then
+  rechecks that the email has not been registered before upserting pending state.
+  A start request waiting on hashing cannot recreate a consumed pending record
+  after another worker finishes registering that account.
+- Expiry is evaluated after the writer lock is acquired, so lock waiting cannot
+  extend a code's validity. Wrong-code counters and login expiry/network-change
+  invalidations still commit before their rejection errors. Unexpected write
+  errors roll back the complete operation, preserving a retryable challenge and
+  preventing partial user/trusted-device creation.
+- Existing behavior is retained: registration resend can renew expired pending
+  registration; login resend rejects expired challenges; resend resets attempts;
+  successful remembered-device sessions retain their existing 30-day lifetime.
+  No migration, token format, route or response-format change is introduced.
+
+### Dashboard transitions
+
+- `web_login_runtime.py` owns dashboard login/verification state and behavior.
+  Composition no longer depends on replacing an outdated full `showRegister`
+  function string. Mode switches and Back explicitly reset verification state.
+- Pending challenge, entered code and resend timers are cleared when leaving a
+  verification flow. Repeated submissions and late asynchronous responses are
+  guarded so an old flow cannot replace a newer login/signup view. Login stays
+  locked through dashboard boot. Initial boot and login-completion boot suppress
+  stale `/auth/me`, refresh and 401-navigation effects after an auth-mode reset.
+- These are browser-state safeguards. They do not revoke a code already issued
+  by the server or cancel an authentication response already processed by the
+  browser. Unused server challenges retain their normal expiry; no cancellation
+  endpoint or retroactive session revocation is added.
+
+### Verification boundaries
+
+- Fail-before challenge regressions were run against the unchanged parent head
+  with two independent service instances and a real temporary SQLite database.
+  The tests cover duplicate login/registration acceptance, attempt limits,
+  verify/resend ordering, registration start/verify, expiry after lock waiting,
+  rollback and HTTP cookie issuance. Synthetic test email addresses and codes
+  never leave the local test environment.
+- Rendered-JavaScript tests and opt-in real Chromium dashboard tests cover
+  interrupted/repeated login, Back, switching modes and late response handling.
+  Chromium uses loopback HTTP and captured synthetic email delivery; it is not
+  outbound SMTP/provider acceptance.
+- SQLite still serializes database writers, with the existing 30-second timeout.
+  This change does not implement distributed request-rate limits, ingress header
+  trust, retries on database exhaustion, or whole-session cancellation.
+- All serving workers must be upgraded to gain the atomicity guarantee. Existing
+  cookies/tokens remain valid under their existing expiry/revocation rules.
+- Beta pricing/navigation, historical billing and browser/Profile/Eva behavior
+  are unchanged. Deployed staging smoke, live Windows Node/Edge/ixBrowser,
+  existing Stripe subscription handling and explicit production approval remain
+  release gates. No production data, device configuration or deployment changed.
+
+### Final local evidence for this slice
+
+- **19 challenge cases passed**, including deterministic cross-worker event gates;
+  the unchanged parent failed **13** of those cases. Independent repeat runs
+  reproduced the same fail-before result and passed the candidate repeatedly.
+- **34 rendered dashboard runtime cases passed**; the unchanged parent failed
+  **29**, including mode reset, late responses and dashboard boot transitions.
+  The remaining cases protect compatibility, current errors and retry behavior.
+- Real Chromium coverage adds two dashboard flows (English and Chinese) to the
+  three existing OAuth cases. Local browser launch is blocked before page code
+  executes by the sandbox's process-singleton socket policy. Exact-head CI must
+  establish browser/Windows results; the PR records that run and its outcome.
+- Final local Linux/Python 3.12 aggregate: **374 passed, 9 skipped**. Python
+  compilation, rendered/extension JavaScript syntax and Git whitespace checks
+  passed. Isolated local HTTP smoke passed **28/28 routes**. Default skips are
+  the optional browser smoke, two Windows-only tests, the opt-in extension case
+  and five opt-in OAuth/dashboard Chromium cases. Deployed staging was not tested.

@@ -253,31 +253,14 @@ def test_existing_access_tokens_remain_valid(setup):
 
 
 def test_dashboard_login_verification_runtime_initializes_and_clears_state():
-    """Execute the rendered declarations/cooldown/back code, not source spelling."""
-    import re
-    import shutil
-    import subprocess
-    node = shutil.which("node")
-    if not node:
-        pytest.skip("Node.js is required for the rendered JavaScript runtime regression")
-    html = server.html
-    declarations = "\n".join(re.findall(r"^let pending[^\n]+", html, re.MULTILINE))
-    functions = "\n".join(re.findall(r"^function (?:renderLoginResendButton|startLoginResendCooldown|cancelLoginVerification)\([^\n]+", html, re.MULTILINE))
-    script = r'''
-const assert=require('node:assert/strict');
-const elements=new Map();
-const document={getElementById(id){if(!elements.has(id))elements.set(id,{disabled:false,textContent:'',classList:{add(){},remove(){}}});return elements.get(id)}};
-const WEB_LANG='en', loginVerifyCode={value:'123456'}, loginVerifyForm=document.getElementById('loginVerifyForm'), loginForm=document.getElementById('loginForm');
-let cleared=0;const clearInterval=()=>cleared++,setInterval=()=>42,authError=()=>{};
-'''+declarations+'\n'+functions+r'''
-startLoginResendCooldown(60);
-assert.equal(document.getElementById('loginResendBtn').disabled,true);
-assert.equal(loginResendCooldownTimer,42);
-pendingLoginChallenge='synthetic-challenge';
+    """Exercise the composed runtime rather than matching one-line functions."""
+    from test_dashboard_auth_modes import run_dashboard_js
+
+    run_dashboard_js("""
+await beginChallenge();
+assert.equal(loginResendBtn.disabled,true);
+assert.equal(intervals.size,1);
+loginVerifyCode.value='123456';
 cancelLoginVerification();
-assert.equal(pendingLoginChallenge,'');assert.equal(loginVerifyCode.value,'');
-assert.equal(loginResendCooldownTimer,null);assert.equal(loginResendCooldownUntil,0);
-assert.equal(loginResendBusy,false);assert.ok(cleared>=2);
-'''
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+assertMode('loginForm');assertReset();
+""")

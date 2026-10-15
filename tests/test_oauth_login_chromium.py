@@ -1,4 +1,4 @@
-"""Opt-in OAuth login regression using real Chromium, HTTP and SQLite.
+"""Opt-in OAuth and dashboard login regressions using Chromium, HTTP and SQLite.
 
 Run with RUN_LOGIN_E2E=1 and CHROME_BIN pointing to a Chromium binary.
 Only delivery of synthetic verification emails is replaced; login, challenge
@@ -25,7 +25,7 @@ import pytest
 import uvicorn
 from starlette.applications import Starlette
 from starlette.responses import HTMLResponse
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 from websockets.asyncio.client import connect
 
 from gpt_windows_connector.auth import AuthStore
@@ -69,6 +69,38 @@ class LoginResponses:
             self.records.append(record)
 
 
+class ResponseGate:
+    """Hold one real HTTP response at a deterministic boundary for UI races."""
+
+    def __init__(self, app):
+        self.app = app
+        self.path = None
+        self.ready = threading.Event()
+        self.release = threading.Event()
+
+    def arm(self, path):
+        assert self.path is None
+        self.ready.clear()
+        self.release.clear()
+        self.path = path
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("path") != self.path:
+            return await self.app(scope, receive, send)
+        self.path = None
+        messages = []
+
+        async def collect(message):
+            messages.append(message)
+
+        await self.app(scope, receive, collect)
+        self.ready.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.01)
+        for message in messages:
+            await send(message)
+
+
 @dataclass
 class LoginServer:
     base: str
@@ -77,6 +109,7 @@ class LoginServer:
     provider: OAuthProvider
     deliveries: list
     responses: list
+    gate: ResponseGate
 
     def authorization_url(self):
         return self.base + "/oauth/authorize?" + urlencode({
@@ -104,7 +137,8 @@ def login_server(tmp_path, monkeypatch):
     monkeypatch.delenv("GWC_BYPASS_LOGIN_VERIFICATION", raising=False)
     monkeypatch.setenv("GWC_SMTP_HOST", "unused.example.test")
     monkeypatch.setenv("GWC_SMTP_FROM", "lucas@example.test")
-    from gpt_windows_connector import gateway, login_policy
+    from gpt_windows_connector import gateway, login_policy, server as dashboard_server
+    from gpt_windows_connector.billing import BillingService
 
     deliveries, responses = [], []
     monkeypatch.setattr(login_policy, "send_verification_email",
@@ -118,7 +152,14 @@ def login_server(tmp_path, monkeypatch):
         listener.bind(("127.0.0.1", 0))
         base = f"http://127.0.0.1:{listener.getsockname()[1]}"
         provider = OAuthProvider(path, auth, base)
+        monkeypatch.setattr(gateway, "db_path", path)
         monkeypatch.setattr(gateway, "auth", auth)
+        monkeypatch.setattr(gateway, "oauth", provider)
+        monkeypatch.setattr(gateway, "billing", BillingService(path, base))
+        monkeypatch.setattr(gateway, "auth_store", gateway.NodeAuthStore(path))
+        bindings = gateway.UserNodeBindingStore(path)
+        monkeypatch.setattr(gateway, "bindings", bindings)
+        monkeypatch.setattr(gateway, "registry", gateway.NodeRegistry(bindings))
         monkeypatch.setattr(gateway, "registration_security", security)
         monkeypatch.setattr(gateway, "settings", replace(gateway.settings, public_base_url=base))
 
@@ -137,9 +178,18 @@ def login_server(tmp_path, monkeypatch):
             Route("/oauth/authorize/decision", provider.authorize_decision, methods=["POST"]),
             Route("/oauth/token", provider.token, methods=["POST"]),
             Route("/client/callback", callback),
+            Route("/dashboard", dashboard_server.webapp.dashboard),
+            Route("/api/logout", dashboard_server.webapp.api_logout, methods=["POST"]),
+            Route("/api/nodes", dashboard_server.webapp.api_nodes),
+            Route("/api/logs", dashboard_server.webapp.api_logs),
+            Route("/api/ai-connections", dashboard_server.webapp.api_ai_connections),
+            Mount("/", app=gateway.AuthMiddleware(Starlette(routes=[
+                Route("/auth/me", gateway.auth_me),
+            ]))),
         ])
+        gate = ResponseGate(LoginResponses(app, responses))
         server = uvicorn.Server(uvicorn.Config(
-            LoginResponses(app, responses), log_level="error", access_log=False, lifespan="off",
+            gate, log_level="error", access_log=False, lifespan="off",
         ))
         thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
         thread.start()
@@ -154,8 +204,9 @@ def login_server(tmp_path, monkeypatch):
                     "client_name": "Synthetic Browser Client", "redirect_uris": [redirect_uri],
                 })
             assert registered.status_code == 201, registered.text
-            yield LoginServer(base, redirect_uri, registered.json()["client_id"], provider, deliveries, responses)
+            yield LoginServer(base, redirect_uri, registered.json()["client_id"], provider, deliveries, responses, gate)
         finally:
+            gate.release.set()
             server.should_exit = True
             thread.join(timeout=10)
             assert not thread.is_alive(), "Local OAuth HTTP server did not stop"
@@ -198,6 +249,8 @@ async def chromium(tmp_path):
                 }))["sessionId"]
                 for domain in ("Page", "Runtime", "Network"):
                     await cdp.call(domain + ".enable", session=session)
+                # Dashboard tracking/Turnstile assets must never leave loopback.
+                await cdp.call("Network.setBlockedURLs", {"urls": ["https://*", "wss://*"]}, session)
                 yield cdp, session
         finally:
             if process.poll() is None:
@@ -367,5 +420,152 @@ def test_cancel_oauth_before_authentication_never_grants_access(login_server, tm
             }
             cookies = (await cdp.call("Network.getCookies", {"urls": [server.base]}, session))["cookies"]
             assert not any(cookie["name"] == "gwc_access_token" for cookie in cookies)
+
+    asyncio.run(run())
+
+
+async def wait_for_gate(gate):
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if gate.ready.is_set():
+            return
+        await asyncio.sleep(0.02)
+    pytest.fail("The isolated server did not prepare the held login response")
+
+
+async def dashboard_login(cdp, session, repeat=False):
+    await cdp.evaluate(f"""(() => {{
+        loginEmail.value = {json.dumps(EMAIL)};
+        loginPassword.value = {json.dumps(PASSWORD)};
+        loginRemember.checked = false;
+        window.dashboardRequest = login();
+        {'login(); login();' if repeat else ''}
+        return true;
+    }})()""", session)
+
+
+async def assert_dashboard_mode(cdp, session, mode):
+    for name in ("loginForm", "loginVerifyForm", "registerForm", "verifyForm"):
+        assert await cdp.evaluate(visible("#" + name), session) is (name == mode), name
+
+
+async def assert_dashboard_reset(cdp, session):
+    assert await cdp.evaluate("""({challenge:pendingLoginChallenge,code:loginVerifyCode.value,
+        email:loginVerifyEmailLabel.textContent,timer:loginResendCooldownTimer,
+        cooldown:loginResendCooldownUntil,busy:loginResendBusy,
+        submitDisabled:document.querySelector('#loginForm button[onclick="login()"]').disabled,
+        verifyDisabled:document.querySelector('#loginVerifyForm button[onclick="verifyLogin()"]').disabled,
+        error:document.getElementById('authError').textContent})""", session) == {
+        "challenge": "", "code": "", "email": "", "timer": None, "cooldown": 0,
+        "busy": False, "submitDisabled": False, "verifyDisabled": False, "error": "",
+    }
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_dashboard_modes_back_stale_responses_and_repeated_submits(login_server, tmp_path, language):
+    """Real rendered dashboard, real auth handlers/SQLite, synthetic mail only."""
+    server = login_server
+
+    async def signed_out(cdp, session):
+        cookies = (await cdp.call("Network.getCookies", {"urls": [server.base]}, session))["cookies"]
+        assert not any(cookie["name"] == "gwc_access_token" for cookie in cookies)
+        assert server.counts() == {
+            "oauth_requests": 0, "oauth_codes": 0, "oauth_client_users": 0, "oauth_refresh_tokens": 0,
+        }
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await cdp.call("Page.addScriptToEvaluateOnNewDocument", {"source":
+                "Object.defineProperty(navigator,'language',{value:" + json.dumps(language) + "});"}, session)
+            await cdp.call("Page.navigate", {"url": server.base + "/dashboard?signup=1"}, session)
+            await wait_for(cdp, session, visible("#registerForm"))
+            await assert_dashboard_mode(cdp, session, "registerForm")
+            signup_title = await cdp.evaluate("authTitle.textContent", session)
+            assert signup_title == "Start using Lucas for free"
+            await click(cdp, session, '#registerForm button[onclick="showRegister(false)"]')
+            await assert_dashboard_mode(cdp, session, "loginForm")
+            assert await cdp.evaluate("document.querySelector('#loginForm .primary').textContent", session) == (
+                "登录" if language == "zh-CN" else "Sign in")
+
+            # A late password response cannot resurrect verification over signup.
+            server.gate.arm("/auth/login")
+            await dashboard_login(cdp, session, repeat=True)
+            await wait_for_gate(server.gate)
+            assert len(server.responses) == len(server.deliveries) == 1
+            assert await cdp.evaluate("document.querySelector('#loginForm .primary').disabled", session)
+            await click(cdp, session, '#loginForm button[onclick="showRegister(true)"]')
+            server.gate.release.set()
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await assert_dashboard_mode(cdp, session, "registerForm")
+            await assert_dashboard_reset(cdp, session)
+            assert await cdp.evaluate("authTitle.textContent", session) == signup_title
+            await signed_out(cdp, session)
+
+            # Back clears a completed challenge, including the code and timer.
+            await click(cdp, session, '#registerForm button[onclick="showRegister(false)"]')
+            await dashboard_login(cdp, session)
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await assert_dashboard_mode(cdp, session, "loginVerifyForm")
+            old_challenge = await cdp.evaluate("pendingLoginChallenge", session)
+            assert await cdp.evaluate("loginResendBtn.disabled", session)
+            assert ("重新发送" if language == "zh-CN" else "Resend") in await cdp.evaluate("loginResendBtn.textContent", session)
+            await cdp.evaluate("loginVerifyCode.value='123456'; true", session)
+            await click(cdp, session, '#loginVerifyForm button[onclick="cancelLoginVerification()"]')
+            await assert_dashboard_mode(cdp, session, "loginForm")
+            await assert_dashboard_reset(cdp, session)
+
+            # A real resend response arriving after another mode change is inert.
+            await dashboard_login(cdp, session)
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            assert await cdp.evaluate("pendingLoginChallenge", session) != old_challenge
+            server.gate.arm("/auth/login/resend")
+            await cdp.evaluate("""loginResendCooldownUntil=0;renderLoginResendButton();
+                window.dashboardRequest=resendLoginVerification();resendLoginVerification();verifyLogin();true""", session)
+            await wait_for_gate(server.gate)
+            assert [r["path"] for r in server.responses].count("/auth/login/resend") == 1
+            assert not any(r["path"] == "/auth/login/verify" for r in server.responses)
+            if language == "en":
+                await cdp.evaluate("showRegister(true); true", session)
+                expected_mode = "registerForm"
+            else:
+                await click(cdp, session, '#loginVerifyForm button[onclick="cancelLoginVerification()"]')
+                expected_mode = "loginForm"
+            server.gate.release.set()
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await assert_dashboard_mode(cdp, session, expected_mode)
+            await assert_dashboard_reset(cdp, session)
+            await signed_out(cdp, session)
+
+            # Wrong codes remain retryable; a duplicate valid verify sends once.
+            await cdp.evaluate("showRegister(false); true", session)
+            await dashboard_login(cdp, session)
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            code = server.deliveries[-1][1]
+            wrong = "000000" if code != "000000" else "111111"
+            await cdp.evaluate(f"loginVerifyCode.value={json.dumps(wrong)};verifyLogin().then(()=>true)", session)
+            await assert_dashboard_mode(cdp, session, "loginVerifyForm")
+            assert server.responses[-1]["status"] == 400
+            assert await cdp.evaluate("document.getElementById('authError').textContent", session) == (
+                "验证码错误" if language == "zh-CN" else "Invalid verification code")
+            await signed_out(cdp, session)
+            server.gate.arm("/auth/login/verify")
+            before = len(server.responses)
+            await cdp.evaluate(f"""loginVerifyCode.value={json.dumps(code)};
+                window.dashboardRequest=verifyLogin();verifyLogin();resendLoginVerification();true""", session)
+            await wait_for_gate(server.gate)
+            assert len(server.responses) == before + 1
+            assert server.responses[-1]["status"] == 200
+            assert await cdp.evaluate("document.querySelector('#loginVerifyForm .primary').disabled", session)
+            await signed_out(cdp, session)  # Cookie is still in the held response.
+            server.gate.release.set()
+            await cdp.evaluate("dashboardRequest.then(()=>true)", session)
+            await wait_for(cdp, session, visible("#app"))
+            assert not await cdp.evaluate(visible("#auth"), session)
+            await assert_dashboard_reset(cdp, session)
+            cookies = (await cdp.call("Network.getCookies", {"urls": [server.base]}, session))["cookies"]
+            token = next(cookie for cookie in cookies if cookie["name"] == "gwc_access_token")
+            assert token["httpOnly"] and token["sameSite"] == "Lax"
+            assert server.provider.auth.verify_token(token["value"]).email == EMAIL
+            assert await cdp.evaluate("localStorage.getItem('lucas_login_email')", session) is None
 
     asyncio.run(run())

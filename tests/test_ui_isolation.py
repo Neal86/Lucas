@@ -28,7 +28,7 @@ def test_web_assembly_keeps_critical_contracts():
     for required in (
         'id="landing"', 'id="auth"', 'id="app"',
         'id="nodeModal"', 'id="aiModal"', 'id="connectModal"',
-        "function boot()", "function startRealtime()", "function adminTab(",
+        "function boot(", "function startRealtime()", "function adminTab(",
         "function loadBillingView()", "__TURNSTILE_SITE_KEY__", "__TURNSTILE_CLASS__",
         'class="token-section"', 'id="security"', 'id="how"', 'class="final-cta"', 'class="landing-footer"',
     ):
