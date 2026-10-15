@@ -1,4 +1,5 @@
 import {GrantLifecycle} from './grant_lifecycle.js';
+import {pageAction} from './page_actions.js';
 
 let socket, owners=[], status='Disconnected', canGrant=false;
 let connectionAttempt=0, connecting=0, pairingWrites=Promise.resolve();
@@ -91,52 +92,6 @@ chrome.runtime.onMessage.addListener((msg,sender,reply)=>{
   })().then(reply).catch(error=>reply({error:error.message})); return true;
 });
 
-// Only this fixed function executes in a page. Remote callers cannot supply JS.
-function pageAction(action,p) {
-  const info=()=>({url:location.href,title:document.title});
-  const norm=x=>String(x||'').replace(/\s+/g,' ').trim().toLowerCase();
-  const all='button,a,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"]';
-  const visible=e=>!!e.getClientRects().length;
-  const human=!!document.querySelector('iframe[src*="recaptcha"],iframe[src*="hcaptcha"],iframe[src*="challenges.cloudflare.com"],input[autocomplete="one-time-code"]') || /verify (your identity|you are human)|security key|passkey/i.test(document.body?.innerText||'');
-  if(human && !['inspect','observe'].includes(action)) return {handoff_required:true,reason:'Complete verification manually in the authorized tab'};
-  if(action==='inspect') return {...info(),text:(document.querySelector(p.selector||'body')?.innerText||'').slice(0,Math.min(Math.max(Number(p.max_chars)||30000,1),100000))};
-  if(action==='observe') return {...info(),handoff_required:human,elements:[...document.querySelectorAll(all)].filter(visible).slice(0,Math.min(Number(p.limit)||300,1000)).map((e,index)=>({index,tag:e.tagName.toLowerCase(),id:e.id,role:e.getAttribute('role')||'',text:(e.type==='password'?'':e.innerText||e.value||'').slice(0,300),aria_label:e.getAttribute('aria-label')||'',placeholder:e.getAttribute('placeholder')||'',disabled:!!e.disabled}))};
-  if(action==='scroll'){window.scrollBy(Number(p.x)||0,Number(p.y)||0);return {...info(),x:scrollX,y:scrollY};}
-  let element;
-  if(action.startsWith('semantic_')){
-    const target=norm(p.target); if(!target) throw Error('target is required');
-    const editable=action==='semantic_type';
-    const candidates=[...document.querySelectorAll(editable?'input,textarea,[contenteditable="true"]':all)].filter(visible);
-    const score=e=>{
-      const labels=[e.getAttribute('aria-label'),e.getAttribute('placeholder'),e.innerText,...(e.labels||[])].map(x=>norm(x?.textContent||x)).filter(Boolean);
-      return labels.some(x=>x===target)?2:labels.some(x=>x.includes(target))?1:0;
-    };
-    const ranked=candidates.map(e=>({e,score:score(e)})).filter(x=>x.score).sort((a,b)=>b.score-a.score);
-    if(!ranked.length) throw Error('No matching control');
-    if(ranked.length>1&&ranked[0].score===ranked[1].score) throw Error('Ambiguous control; use a precise selector');
-    element=ranked[0].e;
-  }else element=document.querySelector(p.selector);
-  if(!element||!visible(element)||element.disabled) throw Error('Control missing, hidden or disabled');
-  if(action==='click'||action==='semantic_click'){
-    if(element.closest('a')?.target==='_blank'||element.form?.target==='_blank') return {handoff_required:true,reason:'This control opens another tab; open and authorize it manually'};
-    element.click();return info();
-  }
-  if(action==='type'||action==='semantic_type'){
-    const text=String(p.text||'');
-    if(element.isContentEditable) element.textContent=(p.clear===false?element.textContent:'')+text;
-    else {
-      if(!['INPUT','TEXTAREA'].includes(element.tagName)||element.type==='file') throw Error('Not a text input');
-      const setter=Object.getOwnPropertyDescriptor(element.tagName==='INPUT'?HTMLInputElement.prototype:HTMLTextAreaElement.prototype,'value').set;
-      setter.call(element,(p.clear===false?element.value:'')+text);
-    }
-    element.dispatchEvent(new Event('input',{bubbles:true})); element.dispatchEvent(new Event('change',{bubbles:true})); return {...info(),characters:text.length};
-  }
-  if(action==='select'){
-    if(element.tagName!=='SELECT'||![...element.options].some(o=>o.value===p.value)) throw Error('Unknown option');
-    element.value=p.value; element.dispatchEvent(new Event('change',{bubbles:true})); return {...info(),selected:[p.value]};
-  }
-  throw Error('Unsupported page action');
-}
 async function evaluate(tab,action,p,dispatch) {
   const result=await dispatch('Runtime.evaluate',{expression:`(${pageAction.toString()})(${JSON.stringify(action)},${JSON.stringify(p)})`,returnByValue:true,awaitPromise:true});
   if(result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description||result.exceptionDetails.text);

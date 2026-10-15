@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+from pathlib import Path
 import time
 from zipfile import ZipFile
 
@@ -23,9 +24,20 @@ def test_token_persists_and_archive_is_installable(tmp_path):
         assert manifest['manifest_version'] == 3
         assert 'debugger' in manifest['permissions']
         assert 'host_permissions' not in manifest
-        assert z.read('Lucas-Browser/background.js')
-        assert z.read('Lucas-Browser/grant_lifecycle.js')
-        assert b"'./grant_lifecycle.js'" in z.read('Lucas-Browser/background.js')
+        assert manifest['background'] == {'service_worker': 'background.js', 'type': 'module'}
+        expected = {
+            'manifest.json', 'background.js', 'grant_lifecycle.js', 'page_actions.js',
+            'popup.html', 'popup.js', 'popup.css',
+        }
+        assert set(z.namelist()) == {'Lucas-Browser/' + name for name in expected}
+        assert z.testzip() is None
+        source = Path(__file__).resolve().parents[1] / 'extensions' / 'lucas-browser'
+        for name in expected:
+            assert z.read('Lucas-Browser/' + name) == (source / name).read_bytes()
+        background = z.read('Lucas-Browser/background.js')
+        assert b"'./grant_lifecycle.js'" in background
+        assert b"'./page_actions.js'" in background
+        assert b'export function pageAction(' in z.read('Lucas-Browser/page_actions.js')
 
 
 def test_bridge_rejects_bad_origin_and_token():
