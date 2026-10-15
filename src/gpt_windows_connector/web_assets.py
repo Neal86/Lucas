@@ -10,6 +10,7 @@ from .web_i18n_runtime import I18N_SCRIPT
 from .web_referral_runtime import REFERRAL_SCRIPT
 from .web_landing import LANDING_HTML
 from .web_onboarding_runtime import ONBOARDING_SCRIPT
+from .web_operation_usage_runtime import OPERATION_USAGE_SCRIPT
 from .web_styles import WEB_STYLE
 
 DASHBOARD_HTML = (
@@ -20,6 +21,8 @@ DASHBOARD_HTML = (
     + AUTH_HTML
     + DASHBOARD_MARKUP
     + I18N_SCRIPT
+    + "<script>\n"
+    + OPERATION_USAGE_SCRIPT
     + BILLING_SCRIPT
     + REFERRAL_SCRIPT
     + CORE_SCRIPT

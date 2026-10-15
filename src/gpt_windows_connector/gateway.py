@@ -39,9 +39,11 @@ from .auth import (
 from .config import GatewaySettings
 from .billing import BillingService
 from .meta_capi import MetaConversionsAPI
-from .entitlements import ensure_node_active, ensure_node_capacity, ensure_request_capacity
+from .entitlements import ensure_node_active, ensure_node_capacity
+from .operation_admission import OperationAdmissionStore
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
+from . import login_policy
 from .task_runs import TaskRunStore
 from .gateway_readiness import readiness_checks, critical_ready
 from .gateway_referral import claim_referral_cookie
@@ -65,6 +67,8 @@ class AuthMiddleware:
         "/auth/verify-email",
         "/auth/resend-verification",
         "/auth/login",
+        "/auth/login/resend",
+        "/auth/login/verify",
         "/auth/google/start",
         "/auth/google/callback",
     }
@@ -117,7 +121,7 @@ def _token_digest(token: str) -> str:
 bindings = UserNodeBindingStore(db_path)
 
 
-from .gateway_registry import DISCONNECT_GRACE_SECONDS, NodeConnection, NodeRegistry
+from .gateway_registry import ConfirmedNodeError, DISCONNECT_GRACE_SECONDS, NodeConnection, NodeRegistry
 
 registry = NodeRegistry(bindings)
 
@@ -362,43 +366,44 @@ async def _node_rpc(node_id: str, workspace: str, method: str, params: dict | No
     trace_shell = method == "shell.run" and shell_type in {"powershell", "pwsh"} and "Set-PSDebug" not in original_command
     if trace_shell:
         payload["command"] = _instrument_powershell(original_command)
-    # A shell may execute a dynamic number of actions. Require at least one unit up front;
-    # the exact runtime count is recorded after execution and the next call enforces quota.
-    ensure_request_capacity(db_path, user.id, 1 if method == "shell.run" else operation_count)
     ensure_node_active(db_path, user.id, node_id)
     workspace = str(workspace or "").strip()
     if not workspace:
         raise ValueError("workspace is required and must be inside an Allowed folder")
     task_title = " ".join(str(task_title or "").split())[:180] or None
-    run_context = workspace
     if include_workspace:
         payload["workspace"] = workspace
-    wall_started = time.time()
+    rpc_timeout = 180.0
+    if method == "shell.run":
+        try:
+            rpc_timeout = max(180.0, min(float(payload.get("timeout") or 120) + 60.0, 3660.0))
+        except (TypeError, ValueError):
+            pass
+    admission = OperationAdmissionStore(db_path, auth_store=auth, task_store=task_runs)
+    # Shell admission reserves its minimum; confirmed runtime/static counts can
+    # exceed that minimum. No database lock is held during the remote call.
+    reservation = admission.reserve(owner_id=user.id, node_id=node_id, action=method, target=workspace,
+        requested_operations=1 if method == "shell.run" else operation_count, timeout_seconds=rpc_timeout,
+        details=audit_context, context_key=workspace, task_title=task_title)
     started = time.monotonic()
     try:
-        rpc_timeout = 180.0
-        if method == "shell.run":
-            try:
-                rpc_timeout = max(180.0, min(float(payload.get("timeout") or 120) + 60.0, 3660.0))
-            except (TypeError, ValueError):
-                rpc_timeout = 180.0
         result = await registry.rpc(node_id, user.id, method, payload, actor={**_actor(user), "task_title":task_title}, timeout=rpc_timeout)
-        if trace_shell and isinstance(result, dict):
-            clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""), original_command)
-            result["stdout"] = clean_stdout
-            if runtime_operations:
-                sub_operations = runtime_operations
-                operation_count = len(runtime_operations)
-    except Exception as exc:
-        duration = time.monotonic() - started; wall_ended = time.time()
-        auth.record_operation(user.id, False, duration, operation_count)
-        auth.audit(user.id, method, workspace, {**audit_context, "node_id": node_id, "status": "failed", "duration_ms": round(duration * 1000), "operation_count": operation_count, "error_type": type(exc).__name__})
-        task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="failed",details={**audit_context,"error_type":type(exc).__name__,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+    except ConfirmedNodeError as exc:
+        admission.complete(reservation["id"], status="failed", operation_count=operation_count,
+            duration_seconds=time.monotonic()-started,
+            details={**audit_context, "error_type":type(exc).__name__, "sub_operations":sub_operations})
         raise
-    duration = time.monotonic() - started; wall_ended = time.time()
-    auth.record_operation(user.id, True, duration, operation_count)
-    auth.audit(user.id, method, workspace, {**audit_context, "node_id": node_id, "status": "success", "duration_ms": round(duration * 1000), "operation_count": operation_count})
-    task_runs.record_operation(owner_id=user.id,node_id=node_id,action=method,target=workspace,started_at=wall_started,ended_at=wall_ended,status="success",details={**audit_context,"sub_operations":sub_operations},operation_count=operation_count,context_key=run_context,task_title=task_title)
+    except (Exception, asyncio.CancelledError) as exc:
+        admission.retain_unconfirmed(reservation["id"], error_type=type(exc).__name__)
+        raise
+    if trace_shell and isinstance(result, dict):
+        clean_stdout, runtime_operations = _extract_runtime_shell_operations(str(result.get("stdout") or ""), original_command)
+        result["stdout"] = clean_stdout
+        if runtime_operations:
+            sub_operations = runtime_operations
+            operation_count = len(runtime_operations)
+    admission.complete(reservation["id"], status="success", operation_count=operation_count,
+        duration_seconds=time.monotonic()-started, details={**audit_context, "sub_operations":sub_operations})
     return result
 
 
@@ -512,16 +517,15 @@ async def auth_resend_verification(request: Request):
 
 
 async def auth_login(request: Request):
-    try:
-        body = await request.json()
-        user = auth.login(body.get("email", ""), body.get("password", ""))
-        token = auth.issue_token(user)
-        auth.audit(user.id, "auth.login")
-        response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
-        response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
-        return response
-    except PermissionError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=401)
+    return await login_policy.login(request, auth, registration_security, settings, _client_ip)
+
+
+async def auth_login_resend(request: Request):
+    return await login_policy.resend(request, auth, registration_security, settings, _client_ip)
+
+
+async def auth_login_verify(request: Request):
+    return await login_policy.verify(request, auth, registration_security, settings, _client_ip)
 
 
 async def auth_me(_: Request):
@@ -834,6 +838,8 @@ app = Starlette(
         Route("/oauth/register", oauth.register, methods=["POST"]),
         Route("/oauth/authorize", oauth.authorize, methods=["GET"]),
         Route("/oauth/authorize/login", oauth.authorize_login, methods=["POST"]),
+        Route("/oauth/authorize/resume", oauth.authorize_resume, methods=["GET"]),
+        Route("/oauth/authorize/cancel", oauth.authorize_cancel, methods=["POST"]),
         Route("/oauth/authorize/decision", oauth.authorize_decision, methods=["POST"]),
         Route("/oauth/token", oauth.token, methods=["POST"]),
         Route("/live", live, methods=["GET"]),
@@ -842,6 +848,8 @@ app = Starlette(
         Route("/auth/verify-email", auth_verify_email, methods=["POST"]),
         Route("/auth/resend-verification", auth_resend_verification, methods=["POST"]),
         Route("/auth/login", auth_login, methods=["POST"]),
+        Route("/auth/login/resend", auth_login_resend, methods=["POST"]),
+        Route("/auth/login/verify", auth_login_verify, methods=["POST"]),
         Route("/auth/me", auth_me, methods=["GET"]),
         Route("/auth/google/start", auth_google_start, methods=["GET"]),
         Route("/auth/google/callback", auth_google_callback, methods=["GET"]),

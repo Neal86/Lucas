@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
+from .domain_policy import host_allowed as _host_allowed, is_restricted
+
 
 DEFAULT_SECURITY: dict[str, Any] = {
     "approval_policy": {
@@ -69,15 +71,15 @@ HIGH_RISK_PATTERNS = [
     r"\breg(?:\.exe)?\s+(?:add|delete)\b", r"\bbcdedit\b", r"\bdiskpart\b", r"\bformat(?:\.com)?\b",
     r"\bmanage-bde\b", r"\bnet\s+user\b", r"\bnet\s+localgroup\b", r"\bsc(?:\.exe)?\s+(?:delete|config)\b",
     r"\bSet-MpPreference\b", r"\bAdd-MpPreference\b", r"\bDisable-WindowsOptionalFeature\b",
-    r"\bRemove-WindowsCapability\b", r"\bStop-Computer\b", r"\bRestart-Computer\b",
+    r"\bRemove-WindowsCapability\b", r"\bStop-Computer\b", r"\bRestart-Computer\b", r"\bshutdown(?:\.exe)?\b",
     r"Remove-Item[^\n]*(?:-Recurse|-Force)[^\n]*(?:Windows|Program Files|System32|Users\\)",
 ]
 SERVICE_PATTERNS = [
     r"\b(?:Start|Stop|Restart|Set)-Service\b", r"\bsc(?:\.exe)?\s+(?:start|stop|pause|continue)\b",
-    r"\bnet\s+(?:start|stop)\b",
+    r"\bnet(?:\.exe)?\s+(?:start|stop)\b",
 ]
 REGISTRY_SYSTEM_PATTERNS = [r"\breg(?:\.exe)?\s+(?:add|delete|import)\b", r"\bSet-ItemProperty\b[^\n]*(?:HKLM:|HKCU:|Registry::)", r"\bpowercfg\b", r"\bbcdedit\b"]
-SOFTWARE_INSTALL_PATTERNS = [r"\bwinget\s+(?:install|uninstall|upgrade)\b", r"\bchoco(?:latey)?\s+(?:install|uninstall|upgrade)\b", r"\bmsiexec(?:\.exe)?\b", r"\bpip\s+install\b", r"\bnpm\s+(?:install|uninstall)\s+-g\b"]
+SOFTWARE_INSTALL_PATTERNS = [r"\bwinget(?:\.exe)?\s+(?:install|uninstall|upgrade)\b", r"\bchoco(?:latey)?(?:\.exe)?\s+(?:install|uninstall|upgrade)\b", r"\bmsiexec(?:\.exe)?\b", r"\bpip(?:\.exe)?\s+install\b", r"\bnpm(?:\.cmd)?\s+(?:install|uninstall)\s+-g\b"]
 NETWORK_COMMAND_PATTERNS = [
     r"\bInvoke-WebRequest\b", r"\bInvoke-RestMethod\b", r"\bcurl(?:\.exe)?\b", r"\bwget(?:\.exe)?\b",
     r"\bStart-BitsTransfer\b", r"\bgit\s+(?:clone|pull|push|fetch)\b", r"https?://",
@@ -90,7 +92,7 @@ def _merge_security(raw: Any) -> dict[str, Any]:
         if "foreground_confirmation" not in raw and "foreground_control_confirmation" in raw:
             legacy = str(raw.get("foreground_control_confirmation") or "").lower()
             merged["foreground_confirmation"] = legacy not in {"allow", "off", "false", "0"}
-        for key in ("foreground_confirmation", "remember_approvals", "network_external", "network_lan", "allowed_domains", "block_silent_network", "rules_text", "show_rule_summary"):
+        for key in ("foreground_confirmation", "remember_approvals", "network_external", "network_lan", "allowed_domains", "domain_allowlist_restricted", "block_silent_network", "rules_text", "show_rule_summary"):
             if key in raw:
                 merged[key] = raw[key]
         policy = raw.get("approval_policy")
@@ -111,6 +113,15 @@ def _matches(patterns: list[str], text: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def _command_categories(command: str) -> list[str]:
+    # Detection is deliberately conservative, not an exhaustive shell parser.
+    # Return every matched gate: the first match must not hide a later block.
+    patterns = (("software_install", SOFTWARE_INSTALL_PATTERNS),
+                ("registry_system", REGISTRY_SYSTEM_PATTERNS),
+                ("high_risk", HIGH_RISK_PATTERNS), ("service_control", SERVICE_PATTERNS))
+    return [category for category, rules in patterns if command and _matches(rules, command)]
+
+
 def _extract_url(method: str, params: dict[str, Any]) -> str | None:
     if method in {"browser.navigate", "browser.new_page"}:
         return str(params.get("url") or "").strip() or None
@@ -128,23 +139,6 @@ def _is_lan_host(host: str) -> bool:
         return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
     except ValueError:
         return False
-
-
-def _host_allowed(host: str, allowed: list[str]) -> bool:
-    if not allowed:
-        return True
-    host = host.lower().rstrip(".")
-    for item in allowed:
-        rule = str(item).strip().lower().rstrip(".")
-        if not rule:
-            continue
-        if rule.startswith("*."):
-            suffix = rule[1:]
-            if host.endswith(suffix):
-                return True
-        elif host == rule or host.endswith("." + rule):
-            return True
-    return False
 
 
 @dataclass
@@ -191,15 +185,9 @@ class LocalSecurityPolicy:
             return "file_write"
         if method in FILE_DELETE_METHODS:
             return "file_delete"
-        command = _command_text(method, params)
-        if command and _matches(SOFTWARE_INSTALL_PATTERNS, command):
-            return "software_install"
-        if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
-            return "registry_system"
-        if command and _matches(HIGH_RISK_PATTERNS, command):
-            return "high_risk"
-        if command and _matches(SERVICE_PATTERNS, command):
-            return "service_control"
+        risks = _command_categories(_command_text(method, params))
+        if risks:
+            return risks[0]
         if method == "shell.run":
             return "shell"
         return "shell"
@@ -209,14 +197,18 @@ class LocalSecurityPolicy:
         is_network = method in NETWORK_METHODS or (command and _matches(NETWORK_COMMAND_PATTERNS, command))
         if not is_network:
             return None
+        domains = self.security.get("allowed_domains", [])
+        restricted = bool(self.security.get("domain_allowlist_restricted", False))
         url = _extract_url(method, params)
         if url:
             parsed = urlparse(url)
             host = (parsed.hostname or "").lower()
-            if host and not _host_allowed(host, [str(v) for v in self.security.get("allowed_domains", [])]):
+            if not _host_allowed(host, domains, restricted):
                 raise PermissionError(f"Network domain is not in the local allowlist: {host}")
             lan = _is_lan_host(host) if host else False
             return (str(self.security.get("network_lan" if lan else "network_external", "ask")), f"Network access to {host or url}")
+        if is_restricted(domains, restricted):
+            raise PermissionError("Network destination cannot be checked against the local allowlist")
         if self.security.get("block_silent_network", True):
             return ("ask", "Network-capable command without a detectable destination")
         return (str(self.security.get("network_external", "ask")), "Network-capable operation")
@@ -267,8 +259,9 @@ class LocalSecurityPolicy:
 
     def authorize(self, method: str, params: dict[str, Any]) -> None:
         category = self._category(method, params)
-        category_decision = str(self.security.get("approval_policy", {}).get(category, "ask"))
-        if category == "desktop_control":
+        policy = self.security.get("approval_policy", {})
+        category_decision = str(policy.get(category, "ask")).lower()
+        if category == "desktop_control" and category_decision != "block":
             category_decision = "always_ask" if bool(self.security.get("foreground_confirmation", True)) else "allow"
         network = self._network_decision(method, params)
         summary_map = {
@@ -290,11 +283,20 @@ class LocalSecurityPolicy:
             "git_push": "向 Git 远端推送内容",
             "high_risk": "执行其他高风险系统操作",
         }
+        rank = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
         decision = category_decision
-        summary = summary_map.get(category, method)
+        categories = [category]
+        if method in {"shell.run", "process.start"}:
+            categories += _command_categories(_command_text(method, params))
+            categories.append("shell" if method == "shell.run" else "process_control")
+        categories = list(dict.fromkeys(categories))
+        summary = "；".join(summary_map.get(item, item) for item in categories)
+        for item in categories:
+            candidate = str(policy.get(item, "ask")).lower()
+            if item != category and rank.get(candidate, 1) > rank.get(decision, 1):
+                decision, category = candidate, item
         if network:
             network_decision, network_summary = network
-            rank = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
             if rank.get(str(network_decision).lower(), 1) > rank.get(str(decision).lower(), 1):
                 decision = str(network_decision)
             if str(network_decision).lower() != "allow":

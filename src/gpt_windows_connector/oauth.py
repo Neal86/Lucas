@@ -7,6 +7,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from .auth import AuthStore, User
 from .entitlements import ensure_ai_capacity
+from .oauth_grants import connection_generation
+from .oauth_login_ui import login_page
 
 
 class OAuthProvider:
@@ -82,7 +84,7 @@ class OAuthProvider:
         return HTMLResponse(f'''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize Lucas</title><style>body{{font:15px Segoe UI,Arial;background:#f6f7fb;padding:24px;color:#101828}}.c{{max-width:520px;margin:8vh auto;background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:28px}}.m{{color:#667085}}button{{padding:11px 16px;border-radius:9px;border:1px solid #d0d5dd;font-weight:650}}.a{{background:#155eef;color:#fff;border:0}}.x{{display:flex;justify-content:flex-end;gap:10px}}</style><div class=c><h1>Lucas</h1><h2>Connect {html.escape(client)}?</h2><p class=m>Signed in as {html.escape(user.email)}. ChatGPT/MCP will be able to use Lucas tools for your authorized projects and Windows nodes.</p><p><b>Scope:</b> {html.escape(scope)}</p><form method=post action=/oauth/authorize/decision><input type=hidden name=request_id value="{html.escape(rid,quote=True)}"><div class=x><button name=decision value=deny>Cancel</button><button class=a name=decision value=allow>Authorize</button></div></form></div>''')
 
     def login(self, rid: str):
-        return HTMLResponse(f'''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in to Lucas</title><style>body{{font:15px Segoe UI,Arial;background:#f6f7fb;padding:24px}}.c{{max-width:440px;margin:8vh auto;background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:28px}}input{{width:100%;box-sizing:border-box;padding:11px;margin:6px 0 14px;border:1px solid #d0d5dd;border-radius:9px}}button{{width:100%;padding:11px;border:0;border-radius:9px;background:#155eef;color:#fff;font-weight:650}}</style><div class=c><h2>Sign in to Lucas</h2><form method=post action=/oauth/authorize/login><input type=hidden name=request_id value="{html.escape(rid,quote=True)}"><label>Email</label><input name=email type=email required><label>Password</label><input name=password type=password required><button>Sign in and continue</button></form></div>''')
+        return HTMLResponse(login_page(rid), headers={"Cache-Control": "no-store"})
 
     async def authorize(self, request: Request):
         self.clean(); q=request.query_params; cid=q.get("client_id",""); uri=q.get("redirect_uri",""); state=q.get("state",""); scope=(q.get("scope","") or "lucas offline_access").strip(); challenge=q.get("code_challenge",""); c=self.client(cid)
@@ -101,67 +103,125 @@ class OAuthProvider:
         return r if r and float(r["expires_at"])>=time.time() else None
 
     async def authorize_login(self, request: Request):
-        f=await self.form(request); r=self.req(f.get("request_id",""))
-        if not r: return JSONResponse({"error":"authorization_request_expired"},400)
-        try: u=self.auth.login(f.get("email",""),f.get("password",""))
-        except Exception: return HTMLResponse("<h2>Invalid email or password</h2>",401)
-        c=self.client(str(r["client_id"])); resp=self.consent(str(r["request_id"]),u,str(c["client_name"] if c else "MCP Client"),str(r["scope"])); resp.set_cookie("gwc_access_token",self.auth.issue_token(u),httponly=True,secure=True,samesite="lax",max_age=self.auth.jwt_ttl_seconds); return resp
+        # Old password forms must never be a second authentication mechanism.
+        # Validate their opaque request and show the shared verification flow.
+        f = await self.form(request)
+        r = self.req(f.get("request_id", ""))
+        if not r:
+            return JSONResponse({"error": "authorization_request_expired"}, 400)
+        return self.login(str(r["request_id"]))
+
+    async def authorize_resume(self, request: Request):
+        r = self.req(request.query_params.get("request_id", ""))
+        if not r:
+            return JSONResponse({"error": "authorization_request_expired"}, 400)
+        u = self.user(request)
+        if not u:
+            return self.login(str(r["request_id"]))
+        c = self.client(str(r["client_id"]))
+        return self.consent(str(r["request_id"]), u,
+                            str(c["client_name"] if c else "MCP Client"), str(r["scope"]))
+
+    async def authorize_cancel(self, request: Request):
+        # Cancellation needs no login and can only return to the already
+        # validated, stored redirect URI. Consume the request atomically.
+        f = await self.form(request)
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            r = db.execute("SELECT * FROM oauth_requests WHERE request_id=?",
+                           (f.get("request_id", ""),)).fetchone()
+            if not r or float(r["expires_at"]) < time.time():
+                return JSONResponse({"error": "authorization_request_expired"}, 400)
+            db.execute("DELETE FROM oauth_requests WHERE request_id=?", (r["request_id"],))
+        return self.err(str(r["redirect_uri"]), "access_denied", str(r["state"] or ""))
 
     async def authorize_decision(self, request: Request):
         f=await self.form(request); rid=f.get("request_id",""); r=self.req(rid); u=self.user(request)
         if not r: return JSONResponse({"error":"authorization_request_expired"},400)
         if not u: return self.login(rid)
         uri=str(r["redirect_uri"]); state=str(r["state"] or "")
-        if f.get("decision")!="allow":
-            with self.db() as db: db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
-            return self.err(uri,"access_denied",state)
         try:
-            ensure_ai_capacity(self.db_path,u.id,str(r["client_id"]))
+            with self.db() as db:
+                # Serialize consent consumption and quota admission, including
+                # simultaneous connections from different gateway workers.
+                db.execute("BEGIN IMMEDIATE")
+                r=db.execute("SELECT * FROM oauth_requests WHERE request_id=?",(rid,)).fetchone()
+                if not r or float(r["expires_at"])<time.time():
+                    return JSONResponse({"error":"authorization_request_expired"},400)
+                if f.get("decision")!="allow":
+                    db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
+                    return self.err(uri,"access_denied",state)
+                ensure_ai_capacity(self.db_path,u.id,str(r["client_id"]),connection=db)
+                code=secrets.token_urlsafe(32)
+                db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
+                db.execute("INSERT INTO oauth_codes VALUES(?,?,?,?,?,?,?)",(self.h(code),r["client_id"],u.id,uri,r["scope"],r["code_challenge"],time.time()+300))
+                db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
         except PermissionError as exc:
             return HTMLResponse(f"<h2>Lucas AI account limit reached</h2><p>{html.escape(str(exc))}</p><p><a href='/billing'>Open Plan & Billing</a></p>",403)
-        code=secrets.token_urlsafe(32)
-        with self.db() as db:
-            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(r["client_id"],u.id,time.time()))
-            db.execute("INSERT INTO oauth_codes VALUES(?,?,?,?,?,?,?)",(self.h(code),r["client_id"],u.id,uri,r["scope"],r["code_challenge"],time.time()+300)); db.execute("DELETE FROM oauth_requests WHERE request_id=?",(rid,))
         self.auth.audit(u.id,"oauth.authorize",str(r["client_id"]),{"scope":str(r["scope"])}); q={"code":code}; q.update({"state":state} if state else {}); return RedirectResponse(uri+("&" if "?" in uri else "?")+urlencode(q),302)
 
     @staticmethod
     def pkce(verifier: str, challenge: str) -> bool:
         actual=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("="); return bool(verifier) and secrets.compare_digest(actual,challenge)
 
-    def refresh(self,cid: str,uid: str,scope: str) -> str:
-        ensure_ai_capacity(self.db_path,uid,cid)
+    def refresh(self,cid: str,uid: str,scope: str, *, connection: sqlite3.Connection | None = None) -> str:
+        if connection is None:
+            with self.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                return self.refresh(cid,uid,scope,connection=db)
         t=secrets.token_urlsafe(48); now=time.time()
-        with self.db() as db:
-            # A refresh token proves a client is authorized for this user. Keep
-            # the durable ownership index in sync here as well as in consent so
-            # every token creation path preserves dashboard/user isolation.
-            db.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(cid,uid,now))
-            db.execute("INSERT INTO oauth_refresh_tokens VALUES(?,?,?,?,?,NULL)",(self.h(t),cid,uid,scope,now+7776000))
+        ensure_ai_capacity(self.db_path,uid,cid,connection=connection)
+        connection.execute("INSERT OR IGNORE INTO oauth_client_users(client_id,user_id,authorized_at) VALUES(?,?,?)",(cid,uid,now))
+        connection.execute("INSERT INTO oauth_refresh_tokens VALUES(?,?,?,?,?,NULL)",(self.h(t),cid,uid,scope,now+7776000))
         return t
 
-    def tokens(self,u: User,cid: str,scope: str,want_refresh: bool):
-        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600,client_id=cid),"token_type":"Bearer","expires_in":3600,"scope":scope}
-        if want_refresh: out["refresh_token"]=self.refresh(cid,u.id,scope)
+    def tokens(self,u: User,cid: str,scope: str,want_refresh: bool, *, connection: sqlite3.Connection | None = None):
+        if connection is None:
+            with self.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                return self.tokens(u,cid,scope,want_refresh,connection=db)
+        # Insert and sign before committing: disconnect cannot slip between
+        # consuming a grant and issuing its replacement, or restore ownership.
+        refresh_token=self.refresh(cid,u.id,scope,connection=connection) if want_refresh else None
+        out={"access_token":self.auth.issue_token(u,ttl_seconds=3600,client_id=cid,connection=connection),"token_type":"Bearer","expires_in":3600,"scope":scope}
+        if refresh_token: out["refresh_token"]=refresh_token
         return out
 
     async def token(self, request: Request):
         self.clean(); f=await self.form(request); grant=f.get("grant_type",""); cid=f.get("client_id","")
         if not self.client(cid): return JSONResponse({"error":"invalid_client"},401)
-        if grant=="authorization_code":
-            ch=self.h(f.get("code",""))
-            with self.db() as db: r=db.execute("SELECT * FROM oauth_codes WHERE code_hash=?",(ch,)).fetchone()
-            if not r or float(r["expires_at"])<time.time() or str(r["client_id"])!=cid or f.get("redirect_uri","")!=str(r["redirect_uri"]) or not self.pkce(f.get("code_verifier",""),str(r["code_challenge"])): return JSONResponse({"error":"invalid_grant"},400)
-            with self.db() as db: db.execute("DELETE FROM oauth_codes WHERE code_hash=?",(ch,))
-            u=self.auth.get_user(str(r["user_id"])); scope=str(r["scope"]); self.auth.audit(u.id,"oauth.token",cid); return JSONResponse(self.tokens(u,cid,scope,True),headers={"Cache-Control":"no-store","Pragma":"no-cache"})
-        if grant=="refresh_token":
-            th=self.h(f.get("refresh_token",""))
-            with self.db() as db: r=db.execute("SELECT * FROM oauth_refresh_tokens WHERE token_hash=?",(th,)).fetchone()
-            now=time.time()
-            if not r or float(r["expires_at"])<now or str(r["client_id"])!=cid or (r["revoked_at"] is not None and now-float(r["revoked_at"])>30): return JSONResponse({"error":"invalid_grant"},400)
-            scope=str(r["scope"]); requested=f.get("scope","").strip()
-            if requested and not set(requested.split()).issubset(set(scope.split())): return JSONResponse({"error":"invalid_scope"},400)
-            if requested: scope=requested
-            with self.db() as db: db.execute("UPDATE oauth_refresh_tokens SET revoked_at=? WHERE token_hash=?",(time.time(),th))
-            u=self.auth.get_user(str(r["user_id"])); self.auth.audit(u.id,"oauth.refresh",cid); return JSONResponse(self.tokens(u,cid,scope,True),headers={"Cache-Control":"no-store","Pragma":"no-cache"})
-        return JSONResponse({"error":"unsupported_grant_type"},400)
+        if grant not in {"authorization_code","refresh_token"}:
+            return JSONResponse({"error":"unsupported_grant_type"},400)
+        try:
+            with self.db() as db:
+                # Validate, consume/rotate and issue in one transaction. Every
+                # competing worker and dashboard disconnect uses the same lock.
+                db.execute("BEGIN IMMEDIATE")
+                now=time.time()
+                if grant=="authorization_code":
+                    ch=self.h(f.get("code",""))
+                    r=db.execute("SELECT * FROM oauth_codes WHERE code_hash=?",(ch,)).fetchone()
+                    if not r or float(r["expires_at"])<now or str(r["client_id"])!=cid or f.get("redirect_uri","")!=str(r["redirect_uri"]) or not self.pkce(f.get("code_verifier",""),str(r["code_challenge"])):
+                        return JSONResponse({"error":"invalid_grant"},400)
+                    scope=str(r["scope"])
+                    db.execute("DELETE FROM oauth_codes WHERE code_hash=?",(ch,))
+                else:
+                    th=self.h(f.get("refresh_token",""))
+                    r=db.execute("SELECT * FROM oauth_refresh_tokens WHERE token_hash=?",(th,)).fetchone()
+                    if not r or float(r["expires_at"])<now or str(r["client_id"])!=cid or (r["revoked_at"] is not None and now-float(r["revoked_at"])>30):
+                        return JSONResponse({"error":"invalid_grant"},400)
+                    scope=str(r["scope"]); requested=f.get("scope","").strip()
+                    if requested and not set(requested.split()).issubset(set(scope.split())):
+                        return JSONResponse({"error":"invalid_scope"},400)
+                    if requested: scope=requested
+                    # Retries share a fixed grace window; replay cannot slide
+                    # the timestamp forward indefinitely.
+                    db.execute("UPDATE oauth_refresh_tokens SET revoked_at=COALESCE(revoked_at,?) WHERE token_hash=?",(now,th))
+                uid=str(r["user_id"])
+                connection_generation(db,uid,cid)
+                u=self.auth.get_user(uid)
+                result=self.tokens(u,cid,scope,True,connection=db)
+        except PermissionError:
+            return JSONResponse({"error":"invalid_grant"},400)
+        self.auth.audit(u.id,"oauth.token" if grant=="authorization_code" else "oauth.refresh",cid)
+        return JSONResponse(result,headers={"Cache-Control":"no-store","Pragma":"no-cache"})

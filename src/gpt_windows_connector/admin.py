@@ -11,6 +11,7 @@ from starlette.routing import Route
 
 from . import gateway
 from .entitlements import snapshot
+from .operation_admission import list_unresolved
 
 
 def _db() -> sqlite3.Connection:
@@ -96,6 +97,10 @@ async def users(request: Request):
 async def user_detail(request: Request):
     try:
         _admin(request); user_id = request.path_params["user_id"]
+        limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
+        node_id = request.query_params.get("node_id", "").strip() or None
+        days_raw = request.query_params.get("days", "all").strip().lower()
+        since = time.time() - int(days_raw) * 86400 if days_raw in {"7", "30", "90"} else None
         with _db() as db:
             user = db.execute("SELECT id,email,name,provider,role,status,created_at,last_login_at FROM users WHERE id=?", (user_id,)).fetchone()
             if not user: return JSONResponse({"error": "User not found"}, status_code=404)
@@ -103,12 +108,17 @@ async def user_detail(request: Request):
             _ensure_entitlement_override_schema(db)
             override = db.execute("SELECT bonus_requests,bonus_nodes,bonus_ai_accounts,expires_at,updated_at FROM entitlement_overrides WHERE user_id=?",(user_id,)).fetchone()
             nodes = db.execute("SELECT n.node_id,n.name,n.updated_at FROM user_node_bindings b JOIN nodes n ON n.node_id=b.node_id WHERE b.user_id=? ORDER BY b.approved_at ASC",(user_id,)).fetchall()
-            ops = db.execute("SELECT id,action,target,details,operation_count,started_at AS created_at,status FROM task_steps WHERE owner_id=? ORDER BY started_at DESC LIMIT 100", (user_id,)).fetchall()
+            where = "owner_id=?"; params: list[object] = [user_id]
+            if node_id:
+                where += " AND node_id=?"; params.append(node_id)
+            if since is not None:
+                where += " AND started_at>=?"; params.append(since)
+            ops = db.execute(f"SELECT id,action,target,details,operation_count,started_at AS created_at,status FROM task_steps WHERE {where} ORDER BY started_at DESC LIMIT ?", [*params, limit]).fetchall()
             counts = db.execute("SELECT COALESCE(SUM(operation_count),0) total,SUM(CASE WHEN started_at>=? THEN operation_count ELSE 0 END) last30 FROM task_steps WHERE owner_id=?", (time.time()-30*86400,user_id)).fetchone()
         ent=snapshot(gateway.db_path,user_id).as_dict()
         override_data=dict(override) if override else {"bonus_requests":0,"bonus_nodes":0,"bonus_ai_accounts":0,"expires_at":None,"updated_at":None}
         override_data["expired"]=bool(override_data.get("expires_at") and float(override_data["expires_at"])<=time.time())
-        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "entitlements":ent, "admin_overrides":override_data, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
+        return JSONResponse({"user": dict(user), "subscription": dict(sub) if sub else {"plan":"free","status":"inactive"}, "entitlements":ent, "unresolved_operations":list_unresolved(gateway.db_path, user_id, limit=limit, node_id=node_id, since=since), "admin_overrides":override_data, "nodes": [dict(r) for r in nodes], "usage": dict(counts), "operations": [{**dict(r), "details": _safe_details(r["details"])} for r in ops]})
     except Exception as exc: return _error(exc)
 
 

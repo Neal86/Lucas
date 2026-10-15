@@ -16,6 +16,13 @@ _passwords = PasswordHasher()
 
 
 class RegistrationSecurity:
+    """Email challenges with cross-worker atomic consumption and attempt limits.
+
+    Read/check/write challenge operations must acquire a SQLite writer lock
+    before reading. Rejection paths explicitly commit security mutations such
+    as attempt increments; unexpected errors roll back the complete operation.
+    """
+
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self._buckets: dict[str, list[float]] = {}
@@ -90,9 +97,12 @@ class RegistrationSecurity:
                 raise ValueError("Email is already registered")
         code = f"{secrets.randbelow(1_000_000):06d}"
         code_hash = hashlib.sha256(code.encode()).hexdigest()
-        now = time.time()
         password_hash = _passwords.hash(password)
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = time.time()
+            if db.execute("SELECT 1 FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone():
+                raise ValueError("Email is already registered")
             db.execute(
                 """
                 INSERT INTO pending_registrations(email,name,password_hash,code_hash,expires_at,attempts,created_at,updated_at)
@@ -108,6 +118,7 @@ class RegistrationSecurity:
     def resend(self, email: str) -> tuple[str, str]:
         email = self._normalize_email(email)
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT * FROM pending_registrations WHERE email=? COLLATE NOCASE", (email,)).fetchone()
             if not row:
                 raise ValueError("No pending verification for this email")
@@ -122,8 +133,9 @@ class RegistrationSecurity:
         code = str(code or "").strip()
         if len(code) != 6 or not code.isdigit():
             raise ValueError("Invalid verification code")
-        now = time.time()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = time.time()
             row = db.execute("SELECT * FROM pending_registrations WHERE email=? COLLATE NOCASE", (email,)).fetchone()
             if not row:
                 raise ValueError("No pending verification for this email")
@@ -178,8 +190,9 @@ class RegistrationSecurity:
         challenge_id = str(challenge_id or "").strip()
         if not challenge_id:
             raise ValueError("Login verification session is missing")
-        now = time.time()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = time.time()
             row = db.execute("SELECT * FROM login_verifications WHERE challenge_id=?", (challenge_id,)).fetchone()
             if not row:
                 raise ValueError("Login verification session expired")
@@ -205,8 +218,9 @@ class RegistrationSecurity:
             raise ValueError("Login verification session is missing")
         if len(code) != 6 or not code.isdigit():
             raise ValueError("Invalid verification code")
-        now = time.time()
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            now = time.time()
             row = db.execute("SELECT * FROM login_verifications WHERE challenge_id=?", (challenge_id,)).fetchone()
             if not row:
                 raise ValueError("Login verification session expired")

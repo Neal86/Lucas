@@ -11,6 +11,7 @@ def test_oauth_client_identity_survives_verified_access_token(tmp_path):
     auth=AuthStore(tmp_path/'auth.db','source-audit-secret-'*4)
     user=auth.register('audit@example.com','valid-password-123')
     provider=OAuthProvider(tmp_path/'auth.db',auth,'http://localhost')
+    provider.refresh('client-exact',user.id,'lucas')
     token=provider.tokens(user,'client-exact','lucas',False)['access_token']
     assert auth.verify_token(token).client_id=='client-exact'
     assert auth.verify_token(auth.issue_token(user)).client_id is None

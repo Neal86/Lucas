@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -59,22 +60,32 @@ class ExtensionBridge:
             if hello.get("type") != "hello" or not secrets.compare_digest(str(hello.get("token", "")), self.token):
                 await connection.close(code=1008, reason="Pairing failed")
                 return
-            await connection.send(json.dumps({"type": "ready", "owners": self.owners()}))
+            await connection.send(json.dumps({"type": "ready", "owners": self.owners(), "capabilities": ["grant_request_id"]}))
             async for raw in connection:
                 msg = json.loads(raw)
                 if msg.get("type") == "ping":
                     await connection.send(json.dumps({"type":"pong"}))
                 elif msg.get("type") == "grant":
+                    # New extensions correlate local permission intent across
+                    # cancellation/reconnect. Legacy clients remain supported,
+                    # but need the updated extension for that race protection.
+                    correlation = {}
+                    if "request_id" in msg:
+                        request_id = msg["request_id"]
+                        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id):
+                            await connection.send(json.dumps({"type": "grant_error", "error": "Invalid grant request ID"}))
+                            continue
+                        correlation = {"request_id": request_id}
                     owner = str(msg.get("owner_id") or "")
                     if owner not in {str(x["user_id"]) for x in self.owners()}:
-                        await connection.send(json.dumps({"type": "grant_error", "error": "Account must first be approved in Lucas Settings"}))
+                        await connection.send(json.dumps({"type": "grant_error", **correlation, "error": "Account must first be approved in Lucas Settings"}))
                         continue
                     tab = msg.get("tab_id")
                     if not isinstance(tab, int) or isinstance(tab, bool) or tab < 0:
                         raise ValueError("Invalid tab")
                     sid = "ext-" + secrets.token_hex(16)
                     self.sessions[sid] = TabGrant(owner, tab, connection, time.time() + 8 * 3600, str(msg.get("title", ""))[:300], str(msg.get("url", ""))[:2000])
-                    await connection.send(json.dumps({"type": "granted", "session_id": sid, "tab_id": tab, "owner_id": owner}))
+                    await connection.send(json.dumps({"type": "granted", **correlation, "session_id": sid, "tab_id": tab, "owner_id": owner}))
                 elif msg.get("type") == "revoke":
                     sid = str(msg.get("session_id") or "")
                     grant = self.sessions.get(sid)
