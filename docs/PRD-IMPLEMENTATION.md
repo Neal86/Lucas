@@ -35,7 +35,7 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 ## Verification
 
 - `python -m pytest -q`: normal regression suite and real loopback bridge tests.
-- `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. No Playwright automation is used by this test.
+- `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. Extension actions use raw CDP; the same isolated browser fixture also exercises the production Playwright-backed CDP fallback for password-observation redaction.
 - `python -m compileall -q src` and `node --check` on both extension scripts.
 - Build a wheel and confirm the complete extension asset set is packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
@@ -480,3 +480,38 @@ browser, device, credential, deployment or production data is changed.
   subscription handling and explicit production approval remain release gates.
   PR #2 is a divergent browser implementation, not a prerequisite to merge
   wholesale: its additional capabilities require selective permission review.
+
+- Exact-head [CI 38667864932](https://github.com/Neal86/Lucas/actions/runs/38667864932)
+  passed for `84fd8e485acc59c56c2824181e1f0921f4ca173c`: Linux Python
+  3.11/3.12 each **415 passed, 9 skipped**, Windows Python 3.11 **417 passed,
+  7 skipped**, real Chromium extension **1 passed** and OAuth/dashboard
+  **5 passed**. Extension acceptance includes revoke/re-grant and foreground-tab
+  preservation; OAuth email delivery remains synthetic.
+
+## Development acceptance: password-control observation redaction (2026-10-15)
+
+The explicit CDP fallback now omits entered password-control values from the
+structured `browser.observe` element text, matching the extension's protection.
+Control identity, labels, type, visibility and disabled state remain available;
+ordinary input values and page text retain their existing behavior. This does
+not add arbitrary-page, screenshot or general sensitive-content redaction.
+
+- The unchanged evaluator exposed a synthetic password through the actual
+  Executor/observe path. Regression tests execute the production evaluator
+  against synthetic controls and preserve account/session ownership checks.
+- The existing isolated Chromium fixture connects an additional production CDP
+  session to its test browser, observes real DOM controls, then detaches without
+  closing the browser or changing foreground selection. No user browser or
+  credentials are involved.
+- No MCP response shape, route, schema, permissions, Profile requirements,
+  pairing behavior, device configuration or deployment changes are made. Only
+  the password control's text is withheld.
+- Dedicated regression suite: **9 passed**, with **6 failing on the unchanged
+  parent** and **3 compatibility controls passing**. Independent browser-focused
+  verification passed **11 tests**, with the opt-in real Chromium integration
+  explicitly skipped locally. Its extended fixture verifies both extension and
+  production Playwright-backed CDP observation, including mixed-case password
+  types, ownership checks and browser/foreground preservation after detach.
+- Independent review found no remaining blocker. Real Chromium execution is
+  pending published exact-head CI; local synthetic tests alone do not establish
+  browser integration acceptance.

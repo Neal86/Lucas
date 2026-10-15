@@ -1,4 +1,4 @@
-"""Real extension + browser test using raw Chromium CDP, without Playwright."""
+"""Real extension via raw CDP, plus the production Playwright CDP observer."""
 import asyncio
 import json
 import os
@@ -12,7 +12,7 @@ import httpx
 import pytest
 from websockets.asyncio.client import connect
 
-from gpt_windows_connector import browser_extension
+from gpt_windows_connector import browser, browser_extension
 from gpt_windows_connector.browser_extension import ExtensionBridge
 from gpt_windows_connector.executor import Executor
 from gpt_windows_connector.access_control import preset_security
@@ -39,7 +39,7 @@ class CDP:
 
 
 def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
-    (tmp_path/'index.html').write_text('''<title>Lucas test</title><h1>Fixture</h1><label>Name<input id="name" aria-label="Name"></label><button id="click" onclick="document.querySelector('h1').textContent='Clicked'">Submit</button><input id="file" type="file"><a id="download" href="payload.txt" download>Download</a><select id="pick"><option value="a">A</option><option value="b">B</option></select><div style="height:3000px"></div>''')
+    (tmp_path/'index.html').write_text('''<title>Lucas test</title><h1>Fixture</h1><label>Name<input id="name" aria-label="Name"></label><label>Password<input id="password" type="password" name="password" aria-label="Password" placeholder="Enter password"></label><label>Confirm password<input id="confirm-password" type="PASSWORD" aria-label="Confirm password"></label><button id="click" onclick="document.querySelector('h1').textContent='Clicked'">Submit</button><input id="file" type="file"><a id="download" href="payload.txt" download>Download</a><select id="pick"><option value="a">A</option><option value="b">B</option></select><div style="height:3000px"></div>''')
     (tmp_path/'payload.txt').write_text('browser download content')
     (tmp_path/'upload.txt').write_text('upload content')
     class Quiet(SimpleHTTPRequestHandler):
@@ -55,6 +55,7 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
         extension=Path('extensions/lucas-browser').resolve()
         profile=tmp_path/'chrome-profile'
         proc=subprocess.Popen([os.environ['CHROME_BIN'],'--headless=new','--no-sandbox','--disable-dev-shm-usage','--remote-debugging-port=0',f'--user-data-dir={profile}',f'--disable-extensions-except={extension}',f'--load-extension={extension}',base],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        cdp_sid=None
         try:
             for _ in range(100):
                 if proc.poll() is not None:
@@ -112,8 +113,15 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                     return await executor.call('browser.'+name,{'session_id':sid,'workspace':str(tmp_path),**params})
                 assert 'Fixture' in (await action('inspect'))['text']
                 await action('semantic_type',target='Name',text='Neal')
+                password='SYNTHETIC-PASSWORD-DO-NOT-USE'
+                confirmation='SYNTHETIC-CONFIRMATION-DO-NOT-USE'
+                await action('type',selector='#password',text=password)
+                await action('type',selector='#confirm-password',text=confirmation)
                 observed=await action('observe')
                 assert next(x for x in observed['elements'] if x['id']=='name')['text']=='Neal'
+                assert next(x for x in observed['elements'] if x['id']=='password')['text']==''
+                assert next(x for x in observed['elements'] if x['id']=='confirm-password')['text']==''
+                assert password not in json.dumps(observed) and confirmation not in json.dumps(observed)
                 await action('semantic_click',target='Submit')
                 assert 'Clicked' in (await action('inspect'))['text']
                 await action('select',selector='#pick',value='b')
@@ -156,8 +164,48 @@ def test_real_extension_controls_only_granted_tab(tmp_path, monkeypatch):
                 active=await cdp.evaluate("chrome.tabs.query({active:true}).then(t=>t.map(x=>x.id))",session)
                 assert other in active and tab_id not in active
                 await cdp.evaluate("chrome.runtime.sendMessage({type:'revoke'})",session)
+                for _ in range(30):
+                    target=await cdp.evaluate(f"chrome.debugger.getTargets().then(targets=>targets.find(t=>t.tabId==={tab_id}))",session)
+                    if target and not target['attached'] and not bridge.list_sessions('owner')['sessions']:
+                        break
+                    await asyncio.sleep(.1)
+                assert target and not target['attached']
+                assert not bridge.list_sessions('owner')['sessions']
+                # Exercise the actual fallback adapter against the same isolated
+                # Chromium after releasing the extension's debugger grant.
+                connected=await executor.call('browser.connect_cdp',{'endpoint':f'http://127.0.0.1:{debug_port}'})
+                cdp_sid=connected['session_id']
+                pages=await executor.call('browser.pages',{'session_id':cdp_sid})
+                page_index=next(page['index'] for page in pages if page['url']==base+'/index.html')
+                async def cdp_action(name,**params):
+                    return await executor.call('browser.'+name,{'session_id':cdp_sid,'page_index':page_index,**params})
+                await cdp_action('semantic_type',target='#name',text='Synthetic user')
+                await cdp_action('semantic_type',target='#password',text=password)
+                await cdp_action('semantic_type',target='#confirm-password',text=confirmation)
+                observed=await cdp_action('observe')
+                elements={item['id']:item for item in observed['elements']}
+                assert elements['name']['text']=='Synthetic user'
+                assert elements['password']['text']=='' and elements['confirm-password']['text']==''
+                assert elements['password']['name']=='password' and elements['password']['type']=='password'
+                assert elements['password']['aria_label']=='Password'
+                assert elements['password']['placeholder']=='Enter password'
+                assert elements['confirm-password']['type']=='PASSWORD'
+                assert password not in json.dumps(observed) and confirmation not in json.dumps(observed)
+                with pytest.raises(PermissionError,match='another Lucas account'):
+                    await Executor((tmp_path,),{'security':preset_security('full_access')},owner_id='other').call('browser.observe',{'session_id':cdp_sid})
+                assert await executor.call('browser.close',{'session_id':cdp_sid})=={'closed':True}
+                cdp_sid=None
+                assert proc.poll() is None
+                active=await cdp.evaluate("chrome.tabs.query({active:true}).then(t=>t.map(x=>x.id))",session)
+                assert other in active and tab_id not in active
+                targets=(await cdp.call('Target.getTargets'))['targetInfos']
+                assert any(target['url']==base+'/index.html' for target in targets)
         finally:
-            proc.terminate();proc.wait(timeout=10)
-            await bridge.stop()
+            try:
+                if cdp_sid is not None:
+                    await browser.close(cdp_sid)
+            finally:
+                proc.terminate();proc.wait(timeout=10)
+                await bridge.stop()
     try: asyncio.run(run())
     finally: httpd.shutdown();httpd.server_close()
