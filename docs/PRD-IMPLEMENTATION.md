@@ -15,7 +15,7 @@ This is a trace of implementation and evidence, not a production acceptance decl
 | No mandatory isolated Profile | gateway.py, browser.py | ALI/Eva hard-coded target removed; explicitly selected CDP remains supported; CDP failure never restarts browser |
 | Existing user browser preservation | browser.close | CDP disconnect does not close existing context/browser; regression test |
 | Windows local Node, updates, reconnect and Allowed Folders | existing Node/installer + executor.py | Regression suite; Windows tray pairing UI and actual Node update require Windows acceptance |
-| Source, agent, task, session, approval and result audit | auth.py, oauth.py, gateway.py, node.py, security.py | OAuth client ID comes from verified signed token; task/session propagated; local approval outcomes recorded; secrets and payload text excluded |
+| Source, agent, task, session, approval and result audit | auth.py, oauth.py, gateway.py, node.py, security.py, task_audit.py | Verified OAuth identity, task/session and approval outcomes retained; raw sub-operation commands excluded from stored/displayed task steps |
 | Staging then approved production release | PROJECT_RULES.md, CI and smoke_web_pages.py | Production release remains blocked until CI, deployed staging smoke and explicit production confirmation |
 | Existing Stripe subscriptions | Existing billing summary warning and retained records | Live subscription audit/handling still required. Free Beta does not automatically cancel or pause already active Stripe subscriptions |
 | macOS | PRD explicitly marks this as planned | Not part of current Windows P0 acceptance |
@@ -127,3 +127,78 @@ user disconnects it. These are code/test results, not deployed acceptance.
 - The prior release gates remain open: deployed staging smoke, live Windows
   Node/Edge/ixBrowser acceptance, existing Stripe subscription audit/handling and
   explicit production approval.
+
+## Development acceptance: local policy and task-audit privacy (2026-10-15)
+
+Based on PR #3 head `3b0dfc511cde48d50992096b97b1d4e415c79d25`.
+This slice addresses acceptance criterion 5 and the local-authority/audit-privacy
+requirements. No running Node configuration or device setting was changed.
+
+### Behavior
+
+- `domain_policy.py` computes the shared scope of machine and account domain
+  grants. Parent domains include their descendants; `*.example.com` excludes
+  the apex. Case and trailing-dot normalization are retained. Disjoint restricted
+  lists produce an explicit deny-all policy rather than an unrestricted empty
+  list. That marker survives subsequent intersections and Executor preflight.
+- Configured grants must be a list/tuple of strings. Malformed containers or
+  entries fail closed rather than becoming character-level or coerced host grants.
+- Originally empty domain lists retain their unrestricted meaning. A configured
+  domain restriction now rejects a detected network operation when its destination
+  cannot be checked, such as a `git.push` without an identifiable destination or
+  a non-host browser URL. This is intentionally fail-closed and may require a more
+  explicit supported workflow under restrictive configurations.
+- `process.start` and `shell.run` combine their primary operation policy with
+  every detected software-installation, registry, service and high-risk gate.
+  The strictest decision wins, including explicit blocks. A first matching
+  category cannot hide a later blocked category in a compound command. Common
+  Windows executable variants and PowerShell/cmd wrappers have regression coverage.
+- An explicit `desktop_control=block` remains authoritative whether foreground
+  confirmation is enabled or disabled, including UIA foreground fallback and
+  visible browser launch. Existing non-blocked focus-toggle behavior is preserved.
+- `task_audit.py` sanitizes TaskRunStore write and read boundaries. Each
+  sub-operation is represented by the constant `shell.run`; command names,
+  arguments, URLs, paths and literal values are never copied into that field.
+  String-array shape, cardinality and separately recorded operation counts remain
+  intact. Source, agent, task, device, session, approval, result and timing metadata
+  remain available. Execution commands and internal accounting are not modified.
+
+### Boundaries and compatibility
+
+- These changes tighten source-code policy checks only; installing/updating a
+  real Node and verifying its local prompt behavior remain release work.
+- Command-risk and network-destination detection are conservative checks, not an
+  exhaustive shell parser or operating-system sandbox/firewall. Indirect or
+  obfuscated execution requires appropriate OS/network authority boundaries.
+- Previously stored command details are projected safely on read without
+  rewriting historical SQLite rows. Sensitive values may remain in historical
+  databases/backups; removal requires separately authorized cleanup. The sanitizer
+  covers `sub_operations`, not arbitrary user-entered metadata.
+- No schema migration, API route change, live settings mutation, subscription
+  action, billing/pricing change, required Eva/Profile isolation or deployment
+  is included. Browser PR #2 remains separate; its corresponding policy paths
+  still have the defects fixed here and must be reconciled without replacing
+  the current OAuth or audit implementation wholesale.
+
+### Verification
+
+- Unchanged-baseline tests demonstrated **38 policy failures** and **13 audit
+  privacy failures**, including actual Executor preflight and real SQLite
+  persistence/display paths. No dangerous command or device action was executed.
+- Review exposed a related malformed-configuration gap; all **12** added
+  regressions failed before type validation and passed afterward.
+- New focused suites: **87 passed**, covering domain intersection and 729
+  domain/host truth-table combinations, compound risk/block precedence, focus
+  blocks, raw database inspection, legacy non-mutation, malformed details and
+  gateway success/error/runtime-trace paths with only execution dispatch stubbed.
+- Final local Linux/Python 3.12 aggregate suite: **293 passed, 4 skipped**,
+  including existing accounting, OAuth and Beta acceptance cases. Compilation,
+  both extension JavaScript syntax checks and Git whitespace checks passed.
+- Isolated local HTTP smoke: **28/28 routes passed**. Independent review found
+  no blocking defects, independently passed the full suite, and passed a further
+  **5,488-case** domain truth-table probe. Exact final Windows/Chromium CI evidence
+  is recorded in the PR; local HTTP smoke is not deployed-staging acceptance.
+- The production gates remain unchanged: deployed staging smoke, actual Windows
+  Node/Edge/ixBrowser acceptance, existing-subscription handling and explicit
+  production approval. Passing synthetic/stubbed policy tests does not satisfy
+  those live acceptance gates.

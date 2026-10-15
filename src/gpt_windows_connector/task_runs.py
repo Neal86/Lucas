@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .task_audit import sanitize_task_details
+
 
 class TaskRunStore:
     """SQLite-backed Lucas task/subtask timing store."""
@@ -70,6 +72,7 @@ class TaskRunStore:
         started_at=float(started_at); ended_at=max(started_at,float(ended_at))
         duration_ms=max(0,round((ended_at-started_at)*1000))
         operation_count=max(1,int(operation_count or 1))
+        details = sanitize_task_details(details)
         with self._connect() as db:
             if task_title:
                 row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,titled_context)).fetchone()
@@ -112,6 +115,7 @@ class TaskRunStore:
                     sub=dict(step)
                     try: sub["details"]=json.loads(sub.get("details") or "{}")
                     except Exception: sub["details"]={}
+                    sub["details"] = sanitize_task_details(sub["details"])
                     steps.append(sub)
                 item["steps"]=steps; out.append(item)
         return out
