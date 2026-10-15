@@ -9,7 +9,6 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 from . import gateway, webapp
-from .registration_security import email_verification_enabled, send_verification_email
 
 
 WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"
@@ -77,14 +76,14 @@ html = html.replace(
     "if(r.status===401){showAuth();throw new Error('Please sign in')}if(!r.ok)throw new Error(d.error||('Request failed: '+r.status));return d",
     "if(r.status===401&&url!='/auth/login'){showAuth()}if(!r.ok)throw new Error(d.error||('Request failed: '+r.status));return d",
 )
-html = html.replace("let pendingVerificationEmail='',resendCooldownTimer=null,resendCooldownUntil=0,resendVerificationBusy=false;", "let pendingVerificationEmail='',resendCooldownTimer=null,resendCooldownUntil=0,resendVerificationBusy=false,pendingLoginChallenge='',loginResendCooldownTimer=null,loginResendCooldownUntil=0,loginResendBusy=false;")
 html = html.replace(
     "function showRegister(v){authError('');document.getElementById('verifyForm').classList.add('hidden');document.getElementById('loginForm').classList.toggle('hidden',v);document.getElementById('registerForm').classList.toggle('hidden',!v)}",
     "function showRegister(v){authError('');document.getElementById('verifyForm').classList.add('hidden');document.getElementById('loginVerifyForm').classList.add('hidden');document.getElementById('loginForm').classList.toggle('hidden',v);document.getElementById('registerForm').classList.toggle('hidden',!v)}",
 )
 html = html.replace(
     "async function login(){try{await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});await boot()}catch(e){authError(e.message)}}",
-    """async function rememberCredential(){try{if(loginRemember.checked){localStorage.setItem('lucas_login_email',loginEmail.value.trim());if(window.PasswordCredential&&navigator.credentials){await navigator.credentials.store(new PasswordCredential({id:loginEmail.value.trim(),password:loginPassword.value,name:loginEmail.value.trim()}))}}else{localStorage.removeItem('lucas_login_email')}}catch{}}
+    """let pendingLoginChallenge='',loginResendCooldownTimer=null,loginResendCooldownUntil=0,loginResendBusy=false;
+async function rememberCredential(){try{if(loginRemember.checked){localStorage.setItem('lucas_login_email',loginEmail.value.trim());if(window.PasswordCredential&&navigator.credentials){await navigator.credentials.store(new PasswordCredential({id:loginEmail.value.trim(),password:loginPassword.value,name:loginEmail.value.trim()}))}}else{localStorage.removeItem('lucas_login_email')}}catch{}}
 function renderLoginResendButton(){const b=document.getElementById('loginResendBtn');if(!b)return;const left=Math.max(0,Math.ceil((loginResendCooldownUntil-Date.now())/1000));b.disabled=loginResendBusy||left>0;if(loginResendBusy)b.textContent=WEB_LANG==='zh'?'发送中…':'Sending…';else if(left>0)b.textContent=WEB_LANG==='zh'?`重新发送 (${left}秒)`:`Resend (${left}s)`;else b.textContent=WEB_LANG==='zh'?'重新发送':'Resend'}
 function startLoginResendCooldown(seconds=60){loginResendCooldownUntil=Date.now()+seconds*1000;clearInterval(loginResendCooldownTimer);renderLoginResendButton();loginResendCooldownTimer=setInterval(()=>{renderLoginResendButton();if(Date.now()>=loginResendCooldownUntil){clearInterval(loginResendCooldownTimer);loginResendCooldownTimer=null}},250)}
 async function login(){authError('');try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginEmail.value,password:loginPassword.value,remember:!!loginRemember.checked})});if(d.verification_required){pendingLoginChallenge=d.challenge_id;loginVerifyEmailLabel.textContent=d.email||loginEmail.value;loginForm.classList.add('hidden');registerForm.classList.add('hidden');loginVerifyForm.classList.remove('hidden');startLoginResendCooldown(60);setTimeout(()=>loginVerifyCode.focus(),50);return}await rememberCredential();await boot()}catch(e){authError(e.message)}}
@@ -123,96 +122,10 @@ async def blue_logo_asset(request):
     )
 
 
-def _login_ip(request: Request) -> str:
-    return gateway._client_ip(request)
-
-
-def _set_access_cookie(response: JSONResponse, user) -> JSONResponse:
-    token = gateway.auth.issue_token(user)
-    response.set_cookie(
-        "gwc_access_token",
-        token,
-        httponly=True,
-        secure=gateway.settings.public_base_url.startswith("https://"),
-        samesite="lax",
-        max_age=gateway.settings.jwt_ttl_seconds,
-    )
-    return response
-
-
-async def secure_auth_login(request: Request):
-    try:
-        body = await request.json()
-        email = str(body.get("email") or "").strip().lower()
-        password = str(body.get("password") or "")
-        remember = bool(body.get("remember"))
-        ip_address = _login_ip(request)
-        if not gateway.registration_security.allow(f"login:{ip_address}:{email}", 10, 600):
-            return JSONResponse({"error": "Too many login attempts. Try again later."}, status_code=429)
-        user = gateway.auth.login(email, password)
-        bypass_login_verification = gateway.os.getenv("GWC_BYPASS_LOGIN_VERIFICATION", "").strip().lower() in {"1", "true", "yes", "on"}
-        if bypass_login_verification:
-            gateway.auth.audit(user.id, "auth.login_staging_bypass")
-            return _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user)
-        trusted_cookie = request.cookies.get("gwc_trusted_login_device", "")
-        if remember and gateway.registration_security.is_trusted_login(user.id, trusted_cookie, ip_address):
-            gateway.auth.audit(user.id, "auth.login_trusted_device", details={"ip_changed": False})
-            return _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user)
-        if not email_verification_enabled():
-            return JSONResponse({"error": "Email verification is required but email service is not configured"}, status_code=503)
-        challenge_id, code = gateway.registration_security.start_login_verification(user.id, user.email, ip_address, remember)
-        send_verification_email(user.email, code)
-        gateway.auth.audit(user.id, "auth.login_verification_sent", details={"remember_device": remember})
-        return JSONResponse({"verification_required": True, "challenge_id": challenge_id, "email": user.email}, status_code=202)
-    except PermissionError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=401)
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    except RuntimeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
-
-
-async def secure_auth_login_resend(request: Request):
-    try:
-        body = await request.json()
-        challenge_id = str(body.get("challenge_id") or "").strip()
-        ip_address = _login_ip(request)
-        if not gateway.registration_security.allow(f"login-resend:{ip_address}:{challenge_id}", 6, 3600):
-            return JSONResponse({"error": "Too many resend attempts. Try again later."}, status_code=429)
-        user_id, email, code = gateway.registration_security.resend_login_verification(challenge_id, ip_address)
-        send_verification_email(email, code)
-        gateway.auth.audit(user_id, "auth.login_verification_resent")
-        return JSONResponse({"ok": True, "email": email})
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    except RuntimeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
-
-
-async def secure_auth_login_verify(request: Request):
-    try:
-        body = await request.json()
-        ip_address = _login_ip(request)
-        user_id, remember, trusted_token = gateway.registration_security.verify_login(str(body.get("challenge_id") or ""), str(body.get("code") or ""), ip_address)
-        user = gateway.auth.get_user(user_id)
-        gateway.auth.audit(user.id, "auth.login_verified", details={"remember_device": remember})
-        response = _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user)
-        if remember and trusted_token:
-            response.set_cookie(
-                "gwc_trusted_login_device",
-                trusted_token,
-                httponly=True,
-                secure=gateway.settings.public_base_url.startswith("https://"),
-                samesite="lax",
-                max_age=60 * 60 * 24 * 30,
-            )
-        else:
-            response.delete_cookie("gwc_trusted_login_device")
-        return response
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    except PermissionError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=401)
+# Keep the composite server's route names, but never fork authentication policy.
+secure_auth_login = gateway.auth_login
+secure_auth_login_resend = gateway.auth_login_resend
+secure_auth_login_verify = gateway.auth_login_verify
 
 
 for path, handler, methods in (

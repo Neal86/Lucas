@@ -202,3 +202,95 @@ requirements. No running Node configuration or device setting was changed.
   Node/Edge/ixBrowser acceptance, existing-subscription handling and explicit
   production approval. Passing synthetic/stubbed policy tests does not satisfy
   those live acceptance gates.
+
+## Development acceptance: shared password-login policy (2026-10-15)
+
+Based on PR #3 head `5f4a06a934d8150953fe0e81b925b85379a2ca22`.
+This slice closes the OAuth password-only login bypass and aligns the standalone
+and composite gateways with the existing email-verification policy.
+
+### Behavior and compatibility
+
+- `login_policy.py` is the single implementation of password login, login-code
+  verification and resend. Both gateway entry points and the OAuth browser UI
+  use `/auth/login`, `/auth/login/verify` and `/auth/login/resend`. Password
+  attempts share the existing 10-per-600-second IP/email bucket in each worker.
+- A new/untrusted device receives HTTP 202 with `verification_required`,
+  `challenge_id` and `email`, without an access cookie. A valid email code then
+  sets the HttpOnly, SameSite=Lax access cookie (Secure on configured HTTPS).
+  Remembered devices still require the password and the same network address;
+  an address change invalidates remembered trust and requires a new code.
+- **Standalone setup/API change:** direct use of
+  `gpt_windows_connector.gateway:app` (or its module entry point) now fails closed
+  with HTTP 503 when verification is required but SMTP is absent. The documented
+  `gwc-gateway` command already targets the composite `server:main` and retains
+  its verification policy.
+  Configure `GWC_SMTP_HOST` and `GWC_SMTP_FROM`, plus the existing port/TLS and
+  optional username/password settings from `.env.example`, before normal use.
+  The already-supported explicit `GWC_BYPASS_LOGIN_VERIFICATION` development
+  override remains recognized and audited; this patch does not enable it.
+  Successful password/verification responses use `access_token: "cookie"`, as
+  the composite server already did. Clients of the old standalone password-to-JWT
+  response must handle the challenge and retain cookies. MCP OAuth clients still
+  obtain their bearer tokens through the unchanged consent/PKCE token flow.
+- `oauth_login_ui.py` supports password errors, code errors, remember choice,
+  resend cooldown, Back and pre-authentication cancellation. It stores no password
+  or code in browser storage and loads no external resources. Authentication
+  returns only to the fixed same-origin resume route with an opaque request ID.
+  Resume renders the existing explicit consent screen; signing in does not grant
+  an AI connection. Cancellation atomically consumes the request and returns only
+  to its previously validated registered redirect, preserving its original state.
+- Old `/oauth/authorize/login` forms no longer authenticate submitted passwords.
+  A valid old request renders the new sign-in flow so the user can restart safely;
+  invalid/expired resume, cancel or legacy requests fail locally without redirect.
+- The dashboard login-verification state is initialized in its own injected
+  runtime rather than through a stale match against registration-state text.
+  This fixes the reproduced `loginResendCooldownTimer` ReferenceError when a
+  challenge starts and preserves the registration metadata state.
+- No schema migration or token-format change is introduced. Existing web cookies,
+  remembered-device rows, OAuth grants and tokens remain valid subject to their
+  existing expiry/revocation checks, including sessions minted before this fix.
+  This patch does not retrospectively reauthenticate or revoke those sessions.
+  All serving workers must be upgraded to remove the old route bypass everywhere.
+
+### Verification and remaining boundaries
+
+- Before implementation, all three dedicated bypass regressions failed on the
+  unchanged head: OAuth minted a cookie without email verification, the standalone
+  gateway did so without SMTP, and alternating login routes escaped the limit.
+- A separate rendered-JavaScript runtime regression reproduced the dashboard
+  ReferenceError before the declaration fix. The final focused suite has
+  **28 passing tests**, including actual gateway middleware/routes, new/trusted
+  devices, changed networks, bad/expired/replayed codes, disabled accounts,
+  resend rotation/limit, safe cancellation/resume, malformed input and old tokens.
+- Final local Linux/Python 3.12 aggregate suite: **321 passed, 7 skipped**.
+  Python compilation, both extension scripts and the OAuth script syntax checks,
+  Git whitespace checks and isolated HTTP smoke (**28/28 routes**) passed.
+  Independent review re-ran the aggregate suite and examined route/redirect and
+  compatibility behavior. Exact-head CI is tracked in the PR.
+- Three new opt-in real Chromium tests use real loopback HTTP, SQLite, password
+  verification, cookies, consent and PKCE exchange. Only synthetic verification
+  email delivery is captured instead of sent. They cover wrong passwords/codes,
+  success, replay, Back/restart and cancellation before login/during a challenge.
+  They run in CI with `RUN_LOGIN_E2E=1`; local Chromium startup was blocked by the
+  environment's socket policy, while the real loopback HTTP flow was separately
+  verified. This is **not** evidence of outbound email/provider delivery.
+- Rate buckets remain process-local. Client IP still depends on the existing
+  forwarded-header handling; trusted ingress must remove/overwrite untrusted
+  `cf-connecting-ip`/`x-forwarded-for` headers. This is not a claim of a global
+  distributed rate limit or hardened direct-to-gateway proxy trust.
+- **Open follow-on security finding:** two independent `RegistrationSecurity`
+  instances can concurrently accept one login code and create two trusted tokens.
+  The reproduced interleaving reads the challenge before either write, then the
+  second unchecked DELETE affects zero rows but still creates trust. Serializing
+  validation, attempt accounting, code consumption and trust creation, including
+  resend/verify races, is separate pending work. Sequential replay is tested here;
+  the authentication system is not claimed to be fully hardened by this slice.
+- A separate inherited dashboard `showRegister` string replacement also misses
+  the expanded registration function. Auth-mode switching while code verification
+  is visible still needs dedicated UI reconciliation; the timer/Back regression
+  here does not claim to cover that mode-switch path.
+- Beta pricing/navigation, historical billing data and non-mandatory browser
+  Profile/Eva behavior are unchanged. Deployed staging smoke, live Windows Node,
+  Edge/ixBrowser acceptance, existing Stripe subscription handling and explicit
+  production approval remain outstanding release gates. No deployment occurred.

@@ -8,6 +8,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from .auth import AuthStore, User
 from .entitlements import ensure_ai_capacity
 from .oauth_grants import connection_generation
+from .oauth_login_ui import login_page
 
 
 class OAuthProvider:
@@ -83,7 +84,7 @@ class OAuthProvider:
         return HTMLResponse(f'''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize Lucas</title><style>body{{font:15px Segoe UI,Arial;background:#f6f7fb;padding:24px;color:#101828}}.c{{max-width:520px;margin:8vh auto;background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:28px}}.m{{color:#667085}}button{{padding:11px 16px;border-radius:9px;border:1px solid #d0d5dd;font-weight:650}}.a{{background:#155eef;color:#fff;border:0}}.x{{display:flex;justify-content:flex-end;gap:10px}}</style><div class=c><h1>Lucas</h1><h2>Connect {html.escape(client)}?</h2><p class=m>Signed in as {html.escape(user.email)}. ChatGPT/MCP will be able to use Lucas tools for your authorized projects and Windows nodes.</p><p><b>Scope:</b> {html.escape(scope)}</p><form method=post action=/oauth/authorize/decision><input type=hidden name=request_id value="{html.escape(rid,quote=True)}"><div class=x><button name=decision value=deny>Cancel</button><button class=a name=decision value=allow>Authorize</button></div></form></div>''')
 
     def login(self, rid: str):
-        return HTMLResponse(f'''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in to Lucas</title><style>body{{font:15px Segoe UI,Arial;background:#f6f7fb;padding:24px}}.c{{max-width:440px;margin:8vh auto;background:#fff;border:1px solid #e4e7ec;border-radius:16px;padding:28px}}input{{width:100%;box-sizing:border-box;padding:11px;margin:6px 0 14px;border:1px solid #d0d5dd;border-radius:9px}}button{{width:100%;padding:11px;border:0;border-radius:9px;background:#155eef;color:#fff;font-weight:650}}</style><div class=c><h2>Sign in to Lucas</h2><form method=post action=/oauth/authorize/login><input type=hidden name=request_id value="{html.escape(rid,quote=True)}"><label>Email</label><input name=email type=email required><label>Password</label><input name=password type=password required><button>Sign in and continue</button></form></div>''')
+        return HTMLResponse(login_page(rid), headers={"Cache-Control": "no-store"})
 
     async def authorize(self, request: Request):
         self.clean(); q=request.query_params; cid=q.get("client_id",""); uri=q.get("redirect_uri",""); state=q.get("state",""); scope=(q.get("scope","") or "lucas offline_access").strip(); challenge=q.get("code_challenge",""); c=self.client(cid)
@@ -102,11 +103,37 @@ class OAuthProvider:
         return r if r and float(r["expires_at"])>=time.time() else None
 
     async def authorize_login(self, request: Request):
-        f=await self.form(request); r=self.req(f.get("request_id",""))
-        if not r: return JSONResponse({"error":"authorization_request_expired"},400)
-        try: u=self.auth.login(f.get("email",""),f.get("password",""))
-        except Exception: return HTMLResponse("<h2>Invalid email or password</h2>",401)
-        c=self.client(str(r["client_id"])); resp=self.consent(str(r["request_id"]),u,str(c["client_name"] if c else "MCP Client"),str(r["scope"])); resp.set_cookie("gwc_access_token",self.auth.issue_token(u),httponly=True,secure=True,samesite="lax",max_age=self.auth.jwt_ttl_seconds); return resp
+        # Old password forms must never be a second authentication mechanism.
+        # Validate their opaque request and show the shared verification flow.
+        f = await self.form(request)
+        r = self.req(f.get("request_id", ""))
+        if not r:
+            return JSONResponse({"error": "authorization_request_expired"}, 400)
+        return self.login(str(r["request_id"]))
+
+    async def authorize_resume(self, request: Request):
+        r = self.req(request.query_params.get("request_id", ""))
+        if not r:
+            return JSONResponse({"error": "authorization_request_expired"}, 400)
+        u = self.user(request)
+        if not u:
+            return self.login(str(r["request_id"]))
+        c = self.client(str(r["client_id"]))
+        return self.consent(str(r["request_id"]), u,
+                            str(c["client_name"] if c else "MCP Client"), str(r["scope"]))
+
+    async def authorize_cancel(self, request: Request):
+        # Cancellation needs no login and can only return to the already
+        # validated, stored redirect URI. Consume the request atomically.
+        f = await self.form(request)
+        with self.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            r = db.execute("SELECT * FROM oauth_requests WHERE request_id=?",
+                           (f.get("request_id", ""),)).fetchone()
+            if not r or float(r["expires_at"]) < time.time():
+                return JSONResponse({"error": "authorization_request_expired"}, 400)
+            db.execute("DELETE FROM oauth_requests WHERE request_id=?", (r["request_id"],))
+        return self.err(str(r["redirect_uri"]), "access_denied", str(r["state"] or ""))
 
     async def authorize_decision(self, request: Request):
         f=await self.form(request); rid=f.get("request_id",""); r=self.req(rid); u=self.user(request)

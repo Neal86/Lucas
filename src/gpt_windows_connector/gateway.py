@@ -42,6 +42,7 @@ from .meta_capi import MetaConversionsAPI
 from .entitlements import ensure_node_active, ensure_node_capacity, ensure_request_capacity
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
+from . import login_policy
 from .task_runs import TaskRunStore
 from .gateway_readiness import readiness_checks, critical_ready
 from .gateway_referral import claim_referral_cookie
@@ -65,6 +66,8 @@ class AuthMiddleware:
         "/auth/verify-email",
         "/auth/resend-verification",
         "/auth/login",
+        "/auth/login/resend",
+        "/auth/login/verify",
         "/auth/google/start",
         "/auth/google/callback",
     }
@@ -512,16 +515,15 @@ async def auth_resend_verification(request: Request):
 
 
 async def auth_login(request: Request):
-    try:
-        body = await request.json()
-        user = auth.login(body.get("email", ""), body.get("password", ""))
-        token = auth.issue_token(user)
-        auth.audit(user.id, "auth.login")
-        response = JSONResponse({"access_token": token, "token_type": "bearer", "user": user.__dict__})
-        response.set_cookie("gwc_access_token", token, httponly=True, secure=settings.public_base_url.startswith("https://"), samesite="lax", max_age=settings.jwt_ttl_seconds)
-        return response
-    except PermissionError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=401)
+    return await login_policy.login(request, auth, registration_security, settings, _client_ip)
+
+
+async def auth_login_resend(request: Request):
+    return await login_policy.resend(request, auth, registration_security, settings, _client_ip)
+
+
+async def auth_login_verify(request: Request):
+    return await login_policy.verify(request, auth, registration_security, settings, _client_ip)
 
 
 async def auth_me(_: Request):
@@ -834,6 +836,8 @@ app = Starlette(
         Route("/oauth/register", oauth.register, methods=["POST"]),
         Route("/oauth/authorize", oauth.authorize, methods=["GET"]),
         Route("/oauth/authorize/login", oauth.authorize_login, methods=["POST"]),
+        Route("/oauth/authorize/resume", oauth.authorize_resume, methods=["GET"]),
+        Route("/oauth/authorize/cancel", oauth.authorize_cancel, methods=["POST"]),
         Route("/oauth/authorize/decision", oauth.authorize_decision, methods=["POST"]),
         Route("/oauth/token", oauth.token, methods=["POST"]),
         Route("/live", live, methods=["GET"]),
@@ -842,6 +846,8 @@ app = Starlette(
         Route("/auth/verify-email", auth_verify_email, methods=["POST"]),
         Route("/auth/resend-verification", auth_resend_verification, methods=["POST"]),
         Route("/auth/login", auth_login, methods=["POST"]),
+        Route("/auth/login/resend", auth_login_resend, methods=["POST"]),
+        Route("/auth/login/verify", auth_login_verify, methods=["POST"]),
         Route("/auth/me", auth_me, methods=["GET"]),
         Route("/auth/google/start", auth_google_start, methods=["GET"]),
         Route("/auth/google/callback", auth_google_callback, methods=["GET"]),
