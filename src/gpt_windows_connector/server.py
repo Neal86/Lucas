@@ -13,7 +13,8 @@ from . import gateway, webapp
 
 WHITE_LOGO_URL = "/assets/lucas-logo-horizontal-white.png?v=exact-f0e1b4a6"
 BLUE_LOGO_URL = "/assets/lucas-logo-horizontal-blue.png?v=source-20260901b"
-html = webapp.DASHBOARD_HTML
+# Remove the public component before logo replacements can change its identity.
+html = webapp.DASHBOARD_HTML.replace(webapp.LANDING_HTML, "", 1)
 
 html = html.replace(
     '.landing-links a,.landing-footer{color:#8e98ae}',

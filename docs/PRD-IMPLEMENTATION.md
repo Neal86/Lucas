@@ -382,3 +382,36 @@ verification, not deployed staging or production acceptance.
   passed. Isolated local HTTP smoke passed **28/28 routes**. Default skips are
   the optional browser smoke, two Windows-only tests, the opt-in extension case
   and five opt-in OAuth/dashboard Chromium cases. Deployed staging was not tested.
+
+### Final-HTML correction discovered by real Chromium
+
+- Exact-head CI run [38665194648](https://github.com/Neal86/Lucas/actions/runs/38665194648)
+  for `eb75a459f4f804f34af5c6c808c5de4d778dd53a` passed the normal
+  Linux/Windows suites, three OAuth browser cases and extension integration,
+  but both new dashboard browser cases failed before the signup form appeared.
+- Investigation reproduced two inherited assembly defects on the unchanged
+  parent: dashboard runtime followed the closed i18n script without a new
+  opening script tag, and server branding modified the landing component before
+  its exact-match removal. The final dashboard rendered JavaScript as body text
+  and retained the marketing landing. Syntax-only fragment checks missed this.
+- The correction adds the runtime script boundary at composition and removes
+  the dashboard's landing component before branding. Public-home composition
+  remains separate. No route, authentication API, schema, permission, billing,
+  persistent data or deployment behavior is changed.
+- Regression checks parse the final server-composed HTML, require the complete
+  runtime inside one executable script, reject unmatched script ends/body-text
+  JavaScript, syntax-check all inline scripts together and separately, and check
+  actual landing DOM exclusion while preserving public-home content. The
+  unchanged parent fails three new assembly checks, with five controls passing.
+- The failed CI run is retained as evidence. Browser acceptance requires the
+  corrective commit's exact-head CI outcome; local syntax/unit checks alone do
+  not establish real-browser success.
+- Corrective local validation: **54 focused tests passed** and **377 passed,
+  9 skipped** in the full suite. Python compilation, final-HTML JavaScript syntax,
+  whitespace checks and isolated HTTP smoke **28/28 routes** passed. The public
+  landing output is byte-identical to the parent. The smoke fixture had no
+  super-admin account, so its separate readiness endpoint remained unavailable;
+  these results establish page-route rendering, not deployment readiness.
+- Independent corrective review passed **55 focused tests** and found no
+  actionable source-level correctness/security/compatibility blockers. Real
+  Chromium remains the final integration gate for this correction.

@@ -20,6 +20,7 @@ DASHBOARD_HTML = (
     + AUTH_HTML
     + DASHBOARD_MARKUP
     + I18N_SCRIPT
+    + "<script>\n"
     + BILLING_SCRIPT
     + REFERRAL_SCRIPT
     + CORE_SCRIPT
