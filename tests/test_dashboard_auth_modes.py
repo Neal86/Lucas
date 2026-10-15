@@ -27,6 +27,7 @@ def run_dashboard_js(body: str, language: str = "en", *, real_boot=False, real_r
         runtime += html[html.index("async function boot("):html.index("async function refresh(")]
     if real_refresh:
         runtime += html[html.index("async function refresh("):html.index("function updateNodeMetrics(")]
+    i18n = html[html.index("const WEB_ZH="):html.index("function localizeWeb(")]
     ids = re.findall(r'\bid="([^"]+)"', html)
     script = r'''
 const assert = require('node:assert/strict');
@@ -42,8 +43,9 @@ function element(id) {
 ''' + "\n".join(f"element({json.dumps(id)});" for id in ids) + r'''
 const focused=[],requests=[],intervals=new Map(),timeouts=[];
 const submitButton=element('testLoginSubmit'),verifyButton=element('testLoginVerify');
+const registerButton=element('testRegisterSubmit'),registrationVerifyButton=element('testRegistrationVerify'),turnstileInput=element('testTurnstileResponse');
 const document={getElementById:id=>elements.get(id)||null,
-  querySelector:selector=>selector.includes('loginForm')?submitButton:selector.includes('loginVerifyForm')?verifyButton:null};
+  querySelector:selector=>selector.includes('loginForm')?submitButton:selector.includes('loginVerifyForm')?verifyButton:selector.includes('registerForm')?registerButton:selector.includes('verifyForm')?registrationVerifyButton:selector==='[name="cf-turnstile-response"]'?turnstileInput:null};
 const window=globalThis,location={search:''},state={user:null},stopRealtime=()=>{};
 const stored=new Map(),localStorage={setItem:(k,v)=>stored.set(k,v),removeItem:k=>stored.delete(k)};
 const navigator={};
@@ -74,7 +76,7 @@ async function beginChallenge(id='challenge-one'){
   const index=requests.length,p=login();response(index,{verification_required:true,challenge_id:id,email:'synthetic@example.test'},202);await p;
   assertMode('loginVerifyForm');return id;
 }
-''' + f"const WEB_LANG={json.dumps(language)};\n" + runtime + r'''
+''' + f"const WEB_LANG={json.dumps(language)};\n" + i18n + runtime + r'''
 (async()=>{
 loginEmail.value='synthetic@example.test';loginPassword.value='synthetic-password';loginRemember.checked=false;
 showAuth();

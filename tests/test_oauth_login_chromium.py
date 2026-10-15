@@ -1,8 +1,8 @@
-"""Opt-in OAuth and dashboard regressions using Chromium, HTTP and SQLite.
+"""Opt-in OAuth, registration and dashboard regressions using Chromium/SQLite.
 
 Run with RUN_LOGIN_E2E=1 and CHROME_BIN pointing to a Chromium binary.
-Only delivery of synthetic verification emails is replaced; login, challenge
-validation, OAuth consent, cookies and code redemption use production handlers.
+Only delivery of synthetic verification emails is replaced; authentication,
+challenge validation, OAuth consent, cookies and redemption use real handlers.
 The browser has a fresh temporary profile and can reach only the loopback app.
 Computer onboarding uses synthetic offline SQLite records, never a live Node.
 """
@@ -43,6 +43,7 @@ pytestmark = pytest.mark.skipif(
 
 EMAIL = "oauth-browser@example.test"
 PASSWORD = "synthetic-oauth-browser-password"
+REGISTRATION_EMAIL = "registration-browser@example.test"
 STATE = "preserved browser state /+&=?"
 VERIFIER = "synthetic-browser-pkce-verifier-with-at-least-forty-three-characters"
 CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest()).decode().rstrip("=")
@@ -51,12 +52,21 @@ CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest())
 class LoginResponses:
     """Observe real responses without changing the application behavior."""
 
-    def __init__(self, app, records):
-        self.app, self.records = app, records
+    def __init__(self, app, records, requests):
+        self.app, self.records, self.requests = app, records, requests
 
     async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+        self.requests.append({"path": scope.get("path"), "method": scope.get("method")})
         record = {"path": scope.get("path"), "status": None, "headers": []}
-        body = bytearray()
+        body, request_body = bytearray(), bytearray()
+
+        async def observe_request():
+            message = await receive()
+            if message["type"] == "http.request":
+                request_body.extend(message.get("body", b""))
+            return message
 
         async def observe(message):
             if message["type"] == "http.response.start":
@@ -65,9 +75,13 @@ class LoginResponses:
                 body.extend(message.get("body", b""))
             await send(message)
 
-        await self.app(scope, receive, observe)
-        if str(record["path"]).startswith("/auth/login"):
+        await self.app(scope, observe_request, observe)
+        if str(record["path"]).startswith("/auth/login") or record["path"] in (
+            "/auth/register", "/auth/verify-email", "/auth/resend-verification",
+        ):
             record["json"] = json.loads(body)
+            # Configuration failures can return before consuming the body.
+            record["request_json"] = json.loads(request_body) if request_body else None
             self.records.append(record)
 
 
@@ -112,6 +126,7 @@ class LoginServer:
     deliveries: list
     responses: list
     gate: ResponseGate
+    requests: list
 
     def authorization_url(self):
         return self.base + "/oauth/authorize?" + urlencode({
@@ -139,12 +154,20 @@ def login_server(tmp_path, monkeypatch):
     monkeypatch.delenv("GWC_BYPASS_LOGIN_VERIFICATION", raising=False)
     monkeypatch.setenv("GWC_SMTP_HOST", "unused.example.test")
     monkeypatch.setenv("GWC_SMTP_FROM", "lucas@example.test")
+    # These tests must never contact a CAPTCHA, analytics or email provider,
+    # even if a developer's surrounding environment configures one.
+    for key in ("GWC_TURNSTILE_SECRET_KEY", "GWC_TURNSTILE_SITE_KEY",
+                "META_PIXEL_ID", "META_CAPI_ACCESS_TOKEN", "META_TEST_EVENT_CODE"):
+        monkeypatch.delenv(key, raising=False)
     from gpt_windows_connector import admin, gateway, login_policy, server as dashboard_server
     from gpt_windows_connector.billing import BillingService
     from gpt_windows_connector.task_runs import TaskRunStore
+    from gpt_windows_connector.meta_capi import MetaConversionsAPI
 
-    deliveries, responses = [], []
+    deliveries, responses, requests = [], [], []
     monkeypatch.setattr(login_policy, "send_verification_email",
+                        lambda email, code: deliveries.append((email, code)))
+    monkeypatch.setattr(gateway, "send_verification_email",
                         lambda email, code: deliveries.append((email, code)))
     path = tmp_path / "oauth-login.db"
     auth = AuthStore(path, "synthetic-oauth-login-signing-secret-" * 2)
@@ -165,6 +188,7 @@ def login_server(tmp_path, monkeypatch):
         monkeypatch.setattr(gateway, "bindings", bindings)
         monkeypatch.setattr(gateway, "registry", gateway.NodeRegistry(bindings))
         monkeypatch.setattr(gateway, "registration_security", security)
+        monkeypatch.setattr(gateway, "meta_capi", MetaConversionsAPI(base))
         monkeypatch.setattr(gateway, "settings", replace(gateway.settings, public_base_url=base))
 
         async def callback(_request):
@@ -172,6 +196,9 @@ def login_server(tmp_path, monkeypatch):
 
         # Bind the isolated provider explicitly, not the module's global routes.
         app = Starlette(routes=[
+            Route("/auth/register", gateway.auth_register, methods=["POST"]),
+            Route("/auth/verify-email", gateway.auth_verify_email, methods=["POST"]),
+            Route("/auth/resend-verification", gateway.auth_resend_verification, methods=["POST"]),
             Route("/auth/login", gateway.auth_login, methods=["POST"]),
             Route("/auth/login/verify", gateway.auth_login_verify, methods=["POST"]),
             Route("/auth/login/resend", gateway.auth_login_resend, methods=["POST"]),
@@ -183,6 +210,8 @@ def login_server(tmp_path, monkeypatch):
             Route("/oauth/token", provider.token, methods=["POST"]),
             Route("/client/callback", callback),
             Route("/dashboard", dashboard_server.webapp.dashboard),
+            Route("/docs/computer-node", dashboard_server.webapp.computer_node_docs_page),
+            Route("/assets/{name:str}", dashboard_server.webapp.brand_asset),
             Route("/admin/users", dashboard_server.webapp.admin_page),
             Route("/api/logout", dashboard_server.webapp.api_logout, methods=["POST"]),
             Route("/api/nodes", dashboard_server.webapp.api_nodes),
@@ -198,7 +227,7 @@ def login_server(tmp_path, monkeypatch):
                 Route("/auth/me", gateway.auth_me),
             ]))),
         ])
-        gate = ResponseGate(LoginResponses(app, responses))
+        gate = ResponseGate(LoginResponses(app, responses, requests))
         server = uvicorn.Server(uvicorn.Config(
             gate, log_level="error", access_log=False, lifespan="off",
         ))
@@ -215,7 +244,8 @@ def login_server(tmp_path, monkeypatch):
                     "client_name": "Synthetic Browser Client", "redirect_uris": [redirect_uri],
                 })
             assert registered.status_code == 201, registered.text
-            yield LoginServer(base, redirect_uri, registered.json()["client_id"], provider, deliveries, responses, gate)
+            yield LoginServer(base, redirect_uri, registered.json()["client_id"], provider,
+                              deliveries, responses, gate, requests)
         finally:
             gate.release.set()
             server.should_exit = True
@@ -845,7 +875,7 @@ async def wait_for_gate(gate):
         if gate.ready.is_set():
             return
         await asyncio.sleep(0.02)
-    pytest.fail("The isolated server did not prepare the held login response")
+    pytest.fail("The isolated server did not prepare the held HTTP response")
 
 
 async def dashboard_login(cdp, session, repeat=False):
@@ -982,5 +1012,402 @@ def test_dashboard_modes_back_stale_responses_and_repeated_submits(login_server,
             assert token["httpOnly"] and token["sameSite"] == "Lax"
             assert server.provider.auth.verify_token(token["value"]).email == EMAIL
             assert await cdp.evaluate("localStorage.getItem('lucas_login_email')", session) is None
+
+    asyncio.run(run())
+
+
+def request_count(server, path):
+    return sum(request["path"] == path for request in server.requests)
+
+
+def fail_synthetic_delivery(_email, _code):
+    """Exercise the real handler's delivery-error path without an SMTP provider."""
+    raise RuntimeError("Synthetic email delivery unavailable")
+
+
+async def open_registration(cdp, session, server, language):
+    await cdp.call("Page.addScriptToEvaluateOnNewDocument", {"source":
+        "Object.defineProperty(navigator,'language',{value:" + json.dumps(language) + "});"}, session)
+    await cdp.call("Page.navigate", {"url": server.base + "/dashboard?signup=1"}, session)
+    await wait_for(cdp, session, visible("#registerForm"))
+    assert await cdp.evaluate("document.documentElement.lang", session) == language
+    await assert_dashboard_mode(cdp, session, "registerForm")
+    # Observe optional browser analytics and widget reset, never load a provider
+    # or solve a CAPTCHA. Server verification configuration remains explicit.
+    await cdp.evaluate("""window.registrationTracks=[];
+        window.lucasMetaTrack=(...args)=>registrationTracks.push(args);
+        window.turnstileResets=0;window.turnstile={reset(){turnstileResets++}};true""", session)
+
+
+async def dashboard_register(cdp, session, email=REGISTRATION_EMAIL, repeat=False):
+    await cdp.evaluate(f"""regName.value='Synthetic Registration';
+        regEmail.value={json.dumps(email)};regPassword.value={json.dumps(PASSWORD)};
+        window.registrationRequest=registerUser();
+        {'registerUser();registerUser();' if repeat else ''}true""", session)
+
+
+async def finish_registration_request(cdp, session):
+    await cdp.evaluate("registrationRequest.then(()=>true)", session)
+
+
+async def begin_registration_challenge(cdp, session, server, language):
+    await open_registration(cdp, session, server, language)
+    await dashboard_register(cdp, session)
+    await finish_registration_request(cdp, session)
+    await assert_dashboard_mode(cdp, session, "verifyForm")
+    assert server.responses[-1]["status"] == 202
+    assert server.deliveries[-1][0] == REGISTRATION_EMAIL
+
+
+async def registration_cookie(cdp, session, server):
+    cookies = (await cdp.call("Network.getCookies", {"urls": [server.base]}, session))["cookies"]
+    return next((cookie for cookie in cookies if cookie["name"] == "gwc_access_token"), None)
+
+
+async def assert_registration_reset(cdp, session):
+    assert await cdp.evaluate("""({email:pendingVerificationEmail,meta:pendingRegistrationMetaEventId,
+        code:verifyCode.value,label:verifyEmailLabel.textContent,timer:resendCooldownTimer,
+        cooldown:resendCooldownUntil,registerBusy:registrationBusy,verifyBusy:registrationVerifyBusy,
+        resendBusy:resendVerificationBusy,
+        registerDisabled:document.querySelector('#registerForm button[onclick="registerUser()"]').disabled,
+        verifyDisabled:document.querySelector('#verifyForm button[onclick="verifyEmail()"]').disabled,
+        resendDisabled:resendVerificationBtn.disabled})""", session) == {
+        "email": "", "meta": "", "code": "", "label": "", "timer": None, "cooldown": 0,
+        "registerBusy": False, "verifyBusy": False, "resendBusy": False,
+        "registerDisabled": False, "verifyDisabled": False, "resendDisabled": True,
+    }
+
+
+async def assert_stale_registration_ui(cdp, session, server, auth_me_before, mode="loginForm"):
+    await assert_dashboard_mode(cdp, session, mode)
+    await assert_registration_reset(cdp, session)
+    assert await cdp.evaluate("state.user", session) is None
+    assert not await cdp.evaluate(visible("#app"), session)
+    assert await cdp.evaluate(visible("#auth"), session)
+    assert await cdp.evaluate("document.getElementById('authError').textContent", session) == ""
+    assert await cdp.evaluate("document.getElementById('toast').textContent", session) == ""
+    assert await cdp.evaluate("registrationTracks.length", session) == 0
+    assert await cdp.evaluate("turnstileResets", session) == 0
+    assert request_count(server, "/auth/me") == auth_me_before
+    assert request_count(server, "/api/nodes") == 0
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_dashboard_registration_round_trip_is_single_flight_and_retryable(
+    login_server, tmp_path, monkeypatch, language,
+):
+    """A real account is created exactly once, after verification, in SQLite."""
+    server = login_server
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await open_registration(cdp, session, server, language)
+            assert await cdp.evaluate("({type:regPassword.type,autocomplete:regPassword.autocomplete})", session) == {
+                "type": "password", "autocomplete": "new-password",
+            }
+            # A configured CAPTCHA with no token is rejected locally by the
+            # production verifier, before it can contact the provider.
+            monkeypatch.setenv("GWC_TURNSTILE_SECRET_KEY", "synthetic-unused-secret")
+            await dashboard_register(cdp, session)
+            await finish_registration_request(cdp, session)
+            assert server.responses[-1]["status"] == 400
+            assert server.responses[-1]["json"]["error"] == "Human verification failed"
+            assert server.responses[-1]["request_json"]["turnstile_token"] == ""
+            assert not server.deliveries
+            assert await cdp.evaluate("turnstileResets", session) == 1
+            monkeypatch.delenv("GWC_TURNSTILE_SECRET_KEY")
+            # The honeypot and token fields still reach the real handler. This
+            # synthetic widget value is not a real CAPTCHA token or validation.
+            await cdp.evaluate("""regWebsite.value='synthetic-bot-field';
+                const widget=document.createElement('input');widget.type='hidden';
+                widget.name='cf-turnstile-response';widget.value='synthetic-widget-token';
+                registerForm.appendChild(widget);true""", session)
+            await dashboard_register(cdp, session)
+            await finish_registration_request(cdp, session)
+            assert server.responses[-1]["status"] == 400
+            assert server.responses[-1]["json"]["error"] == "Registration could not be completed"
+            assert await cdp.evaluate("turnstileResets", session) == 2
+            assert not server.deliveries
+            assert not await cdp.evaluate("document.querySelector('#registerForm .primary').disabled", session)
+            await cdp.evaluate("regWebsite.value='';true", session)
+
+            server.gate.arm("/auth/register")
+            await dashboard_register(cdp, session, repeat=True)
+            await wait_for_gate(server.gate)
+            assert request_count(server, "/auth/register") == 3  # Two rejected, one valid.
+            assert len(server.deliveries) == 1
+            challenge = server.responses[-1]
+            assert challenge["status"] == 202
+            assert challenge["json"] == {"verification_required": True, "email": REGISTRATION_EMAIL}
+            payload = challenge["request_json"]
+            meta_id = payload["meta_event_id"]
+            assert meta_id.startswith("email_registration_")
+            assert payload == {
+                "name": "Synthetic Registration", "email": REGISTRATION_EMAIL, "password": PASSWORD,
+                "website": "", "turnstile_token": "synthetic-widget-token", "meta_event_id": meta_id,
+            }
+            assert not any(name.lower() == b"set-cookie" for name, _ in challenge["headers"])
+            assert await registration_cookie(cdp, session, server) is None
+            assert await cdp.evaluate("document.querySelector('#registerForm .primary').disabled", session)
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            await assert_dashboard_mode(cdp, session, "verifyForm")
+            assert await cdp.evaluate("({email:pendingVerificationEmail,label:verifyEmailLabel.textContent,code:verifyCode.value,meta:pendingRegistrationMetaEventId})", session) == {
+                "email": REGISTRATION_EMAIL, "label": REGISTRATION_EMAIL, "code": "", "meta": meta_id,
+            }
+            assert await cdp.evaluate("resendVerificationBtn.disabled", session)
+            assert ("重新发送" if language == "zh-CN" else "Resend") in await cdp.evaluate("resendVerificationBtn.textContent", session)
+            await cdp.evaluate("resendVerification().then(()=>true)", session)
+            assert request_count(server, "/auth/resend-verification") == 0
+
+            code = server.deliveries[-1][1]
+            wrong = "000000" if code != "000000" else "111111"
+            server.gate.arm("/auth/verify-email")
+            await cdp.evaluate(f"""verifyCode.value={json.dumps(wrong)};
+                window.registrationRequest=verifyEmail();verifyEmail();resendVerification();true""", session)
+            await wait_for_gate(server.gate)
+            assert request_count(server, "/auth/verify-email") == 1
+            assert request_count(server, "/auth/resend-verification") == 0
+            assert await cdp.evaluate("document.querySelector('#verifyForm .primary').disabled && resendVerificationBtn.disabled", session)
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            assert server.responses[-1]["status"] == 400
+            assert await cdp.evaluate("document.getElementById('authError').textContent", session) == (
+                "验证码错误" if language == "zh-CN" else "Invalid verification code")
+            assert not await cdp.evaluate("document.querySelector('#verifyForm .primary').disabled", session)
+            await assert_dashboard_mode(cdp, session, "verifyForm")
+            assert await registration_cookie(cdp, session, server) is None
+
+            # Advance only client pacing; production rate limits and challenge
+            # validation still run. No minute-long sleeps or server bypasses.
+            await cdp.evaluate("resendCooldownUntil=Date.now()-1;renderResendVerificationButton();true", session)
+            await wait_for(cdp, session, "resendCooldownTimer === null")
+            server.gate.arm("/auth/resend-verification")
+            await cdp.evaluate("window.registrationRequest=resendVerification();resendVerification();verifyEmail();true", session)
+            await wait_for_gate(server.gate)
+            assert request_count(server, "/auth/resend-verification") == 1
+            assert request_count(server, "/auth/verify-email") == 1
+            assert len(server.deliveries) == 2
+            assert await cdp.evaluate("document.querySelector('#verifyForm .primary').disabled && resendVerificationBtn.disabled", session)
+            assert await cdp.evaluate("resendVerificationBtn.textContent", session) == (
+                "发送中…" if language == "zh-CN" else "Sending…")
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            assert server.responses[-1]["status"] == 200
+            assert server.responses[-1]["request_json"] == {"email": REGISTRATION_EMAIL}
+            assert await cdp.evaluate("resendVerificationBtn.disabled && resendCooldownUntil>Date.now()", session)
+            assert await cdp.evaluate("document.getElementById('authError').textContent", session) == ""
+            assert await cdp.evaluate("document.getElementById('toast').textContent", session) == (
+                "验证码已重新发送" if language == "zh-CN" else "Verification code resent")
+            server.gate.arm("/auth/verify-email")
+            await cdp.evaluate(f"""verifyCode.value={json.dumps(server.deliveries[-1][1])};
+                window.registrationRequest=verifyEmail();verifyEmail();resendVerification();true""", session)
+            await wait_for_gate(server.gate)
+            assert request_count(server, "/auth/verify-email") == 2
+            assert request_count(server, "/auth/resend-verification") == 1
+            assert server.responses[-1]["status"] == 200
+            assert server.responses[-1]["request_json"] == {
+                "email": REGISTRATION_EMAIL, "code": server.deliveries[-1][1], "meta_event_id": meta_id,
+            }
+            # Server creation has committed, but Set-Cookie is still held.
+            with server.provider.db() as db:
+                assert db.execute("SELECT COUNT(*) FROM users WHERE email=?", (REGISTRATION_EMAIL,)).fetchone()[0] == 1
+                assert db.execute("SELECT COUNT(*) FROM pending_registrations").fetchone()[0] == 0
+            assert await registration_cookie(cdp, session, server) is None
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            await wait_for(cdp, session, visible("#app"))
+            assert not await cdp.evaluate(visible("#auth"), session)
+            assert await cdp.evaluate("state.user.email", session) == REGISTRATION_EMAIL
+            await assert_registration_reset(cdp, session)
+            access = await registration_cookie(cdp, session, server)
+            assert access["httpOnly"] and access["sameSite"] == "Lax"
+            assert server.provider.auth.verify_token(access["value"]).email == REGISTRATION_EMAIL
+            assert await cdp.evaluate("registrationTracks", session) == [[
+                "CompleteRegistration", {"content_name": "Email Registration", "status": "verified"}, meta_id,
+            ]]
+            assert await cdp.evaluate("turnstileResets", session) == 2
+            assert await cdp.evaluate("localStorage.getItem('lucas_login_email')", session) is None
+            storage = await cdp.evaluate("JSON.stringify({local:{...localStorage},session:{...sessionStorage}})", session)
+            assert PASSWORD not in storage and REGISTRATION_EMAIL not in storage
+            assert {path: request_count(server, path) for path in (
+                "/auth/register", "/auth/verify-email", "/auth/resend-verification",
+            )} == {"/auth/register": 3, "/auth/verify-email": 2, "/auth/resend-verification": 1}
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize("outcome", ["challenge", "direct-success", "invalid", "delivery-failure"])
+def test_dashboard_stale_registration_response_cannot_replace_new_mode(
+    login_server, tmp_path, monkeypatch, language, outcome,
+):
+    from gpt_windows_connector import gateway
+
+    server = login_server
+    if outcome == "direct-success":
+        monkeypatch.delenv("GWC_SMTP_HOST")
+    elif outcome == "delivery-failure":
+        monkeypatch.setattr(gateway, "send_verification_email", fail_synthetic_delivery)
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await open_registration(cdp, session, server, language)
+            before = request_count(server, "/auth/me")
+            server.gate.arm("/auth/register")
+            await dashboard_register(cdp, session, email=EMAIL if outcome == "invalid" else REGISTRATION_EMAIL)
+            await wait_for_gate(server.gate)
+            assert server.responses[-1]["status"] == {
+                "challenge": 202, "direct-success": 201, "invalid": 400, "delivery-failure": 503,
+            }[outcome]
+            await click(cdp, session, '#registerForm button[onclick="showRegister(false)"]')
+            await assert_registration_reset(cdp, session)
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            await assert_stale_registration_ui(cdp, session, server, before)
+            cookie = await registration_cookie(cdp, session, server)
+            if outcome == "direct-success":
+                # UI invalidation does not revoke a response's session cookie,
+                # delete the server account, or cancel an already sent email.
+                assert cookie and cookie["httpOnly"] and cookie["sameSite"] == "Lax"
+                assert server.provider.auth.verify_token(cookie["value"]).email == REGISTRATION_EMAIL
+            else:
+                assert cookie is None
+            assert len(server.deliveries) == (1 if outcome == "challenge" else 0)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+def test_dashboard_old_registration_cannot_replace_new_challenge(login_server, tmp_path, language):
+    server = login_server
+    new_email = "newer-registration-browser@example.test"
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await open_registration(cdp, session, server, language)
+            server.gate.arm("/auth/register")
+            await dashboard_register(cdp, session)
+            await wait_for_gate(server.gate)
+            await cdp.evaluate("window.oldRegistrationRequest=registrationRequest;showRegister(false);showRegister(true);true", session)
+            await dashboard_register(cdp, session, email=new_email)
+            await finish_registration_request(cdp, session)
+            await assert_dashboard_mode(cdp, session, "verifyForm")
+            fresh = await cdp.evaluate("({email:pendingVerificationEmail,meta:pendingRegistrationMetaEventId,cooldown:resendCooldownUntil,timer:resendCooldownTimer})", session)
+            assert fresh["email"] == new_email
+            assert fresh["meta"] == server.responses[-1]["request_json"]["meta_event_id"]
+            server.gate.release.set()
+            await cdp.evaluate("oldRegistrationRequest.then(()=>true)", session)
+            await assert_dashboard_mode(cdp, session, "verifyForm")
+            assert await cdp.evaluate("({email:pendingVerificationEmail,meta:pendingRegistrationMetaEventId,cooldown:resendCooldownUntil,timer:resendCooldownTimer})", session) == fresh
+            assert await cdp.evaluate("verifyEmailLabel.textContent", session) == new_email
+            assert len(server.deliveries) == request_count(server, "/auth/register") == 2
+            assert await registration_cookie(cdp, session, server) is None
+            # Reset after a completed challenge clears its actual code and timer.
+            await cdp.evaluate("verifyCode.value='123456';showRegister(false);true", session)
+            await assert_registration_reset(cdp, session)
+            await assert_dashboard_mode(cdp, session, "loginForm")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize("operation,outcome", [
+    ("verify", "success"), ("verify", "invalid"), ("verify", "unconfigured"),
+    ("resend", "success"), ("resend", "invalid"), ("resend", "delivery-failure"),
+])
+def test_dashboard_stale_registration_verify_resend_results_are_inert(
+    login_server, tmp_path, monkeypatch, language, operation, outcome,
+):
+    from gpt_windows_connector import gateway
+
+    server = login_server
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            await begin_registration_challenge(cdp, session, server, language)
+            before = request_count(server, "/auth/me")
+            code = server.deliveries[-1][1]
+            if outcome == "invalid":
+                if operation == "verify":
+                    code = "000000" if code != "000000" else "111111"
+                else:
+                    # A disappeared pending challenge is a real handler error.
+                    # This affects only this test's disposable SQLite database.
+                    with server.provider.db() as db:
+                        db.execute("DELETE FROM pending_registrations WHERE email=?", (REGISTRATION_EMAIL,))
+            elif outcome == "unconfigured":
+                monkeypatch.delenv("GWC_SMTP_HOST")
+            elif outcome == "delivery-failure":
+                monkeypatch.setattr(gateway, "send_verification_email", fail_synthetic_delivery)
+            path = "/auth/verify-email" if operation == "verify" else "/auth/resend-verification"
+            server.gate.arm(path)
+            await cdp.evaluate(f"verifyCode.value={json.dumps(code)};resendCooldownUntil=0;renderResendVerificationButton();true", session)
+            await cdp.evaluate("window.registrationRequest=" + (
+                "verifyEmail();verifyEmail();resendVerification();true" if operation == "verify" else
+                "resendVerification();resendVerification();verifyEmail();true"), session)
+            await wait_for_gate(server.gate)
+            assert request_count(server, path) == 1
+            assert request_count(server, "/auth/resend-verification" if operation == "verify" else "/auth/verify-email") == 0
+            assert server.responses[-1]["status"] == (200 if outcome == "success" else 400 if outcome == "invalid" else 503)
+            assert await cdp.evaluate("document.querySelector('#verifyForm .primary').disabled && resendVerificationBtn.disabled", session)
+            await cdp.evaluate("showRegister(true);true", session)
+            await assert_registration_reset(cdp, session)
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            await assert_stale_registration_ui(cdp, session, server, before, mode="registerForm")
+            cookie = await registration_cookie(cdp, session, server)
+            if operation == "verify" and outcome == "success":
+                # Authentication was committed by the real server before the
+                # user changed modes. Only stale UI/boot effects are suppressed.
+                assert cookie and server.provider.auth.verify_token(cookie["value"]).email == REGISTRATION_EMAIL
+            else:
+                assert cookie is None
+            assert len(server.deliveries) == (2 if operation == "resend" and outcome == "success" else 1)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("language", ["en", "zh-CN"])
+@pytest.mark.parametrize("operation", ["register", "verify"])
+def test_dashboard_mode_change_during_registration_boot_suppresses_late_auth_me(
+    login_server, tmp_path, monkeypatch, language, operation,
+):
+    """Hold the real boot /auth/me response, not a stubbed boot implementation."""
+    server = login_server
+
+    async def run():
+        async with chromium(tmp_path) as (cdp, session):
+            if operation == "register":
+                monkeypatch.delenv("GWC_SMTP_HOST")
+                await open_registration(cdp, session, server, language)
+            else:
+                await begin_registration_challenge(cdp, session, server, language)
+            before = request_count(server, "/auth/me")
+            server.gate.arm("/auth/me")
+            if operation == "register":
+                await dashboard_register(cdp, session, repeat=True)
+            else:
+                await cdp.evaluate(f"""verifyCode.value={json.dumps(server.deliveries[-1][1])};
+                    window.registrationRequest=verifyEmail();verifyEmail();resendVerification();true""", session)
+            await wait_for_gate(server.gate)
+            assert request_count(server, "/auth/me") == before + 1
+            assert await cdp.evaluate("document.querySelector(" + json.dumps(
+                '#registerForm .primary' if operation == "register" else '#verifyForm .primary') + ").disabled", session)
+            cookie = await registration_cookie(cdp, session, server)
+            assert cookie and server.provider.auth.verify_token(cookie["value"]).email == REGISTRATION_EMAIL
+            assert await cdp.evaluate("registrationTracks.length", session) == 1
+            await cdp.evaluate("showRegister(false);true", session)
+            server.gate.release.set()
+            await finish_registration_request(cdp, session)
+            await assert_dashboard_mode(cdp, session, "loginForm")
+            await assert_registration_reset(cdp, session)
+            assert await cdp.evaluate("state.user", session) is None
+            assert not await cdp.evaluate(visible("#app"), session)
+            assert await cdp.evaluate(visible("#auth"), session)
+            assert request_count(server, "/api/nodes") == 0
+            assert request_count(server, "/auth/me") == before + 1
+            assert await cdp.evaluate("registrationTracks.length", session) == 1
+            assert await cdp.evaluate("document.getElementById('authError').textContent", session) == ""
 
     asyncio.run(run())
