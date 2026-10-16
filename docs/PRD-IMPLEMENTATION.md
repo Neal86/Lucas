@@ -1058,3 +1058,29 @@ They make no real HTTP, OAuth, clipboard or navigation calls. The existing
 composed-page regressions and hosted browser tests remain required. API routes,
 backend permissions, schema, persistent data, dependencies and deployment
 configuration are unchanged; deployed and real-device acceptance remain open.
+
+
+## AI-connection metadata editor response ownership (2026-10-16)
+
+The metadata editor now lives in `web_ai_connection_editor_runtime.py`, composed
+by the AI-connection module. Each Save captures its target and trimmed name/note
+once, with modal, account/login, request and input ownership. Repeated Save calls
+within one active attempt dispatch one PUT. Close/Escape, another selection,
+navigation, auth/account replacement or edited fields invalidate old success,
+error and 401 UI effects. An old finalizer cannot unlock a newer save. Delayed
+focus also belongs to the editor that requested it.
+
+A current successful PUT still hides the editor and refreshes the dashboard;
+its busy lock and response ownership remain through that read. Current failures
+are visible, current 401s still return to authentication, and deliberate retry
+is available. Dispatched saves may already have updated server metadata; UI
+suppression does not cancel, undo, automatically retry or guarantee ordering of
+those writes across reopened editors. The exact PUT route/payload and backend
+authorization remain unchanged. Delete/Disconnect, OAuth grants and revocation,
+setup/help, list rendering and clipboard behavior are outside this change.
+
+Dedicated actual-composed-runtime regressions and isolated Chromium cases cover
+interrupted and repeated flows in English and Chinese. Browser metadata PUTs use
+explicit fixture-only synthetic responses; no real OAuth connection or user
+record is modified. These checks do not establish deployed or real-device
+acceptance. No schema, permission, dependency or deployment change is included.

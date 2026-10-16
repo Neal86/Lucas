@@ -56,13 +56,13 @@ function fixture(){
   const calls=[],toasts=[],timers=[],prompts=[],clipboard=[],fallback=[],closed=[];
   let clipboardFailure=false,answer=true,refreshes=0,refreshFailure=null;
   const ctx={console,encodeURIComponent,decodeURIComponent,location:{href:'/dashboard'},
-    state:{aiClients:[],billing:null},
+    loginGeneration:0,state:{user:{id:'synthetic-user'},aiClients:[],billing:null},
     esc:value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;'),
     timefmt:value=>'date:'+value,
     toast:value=>toasts.push(value),
     setTimeout:(fn,delay)=>{timers.push({fn,delay});return timers.length},
     navigator:{clipboard:{writeText:async value=>{clipboard.push(value);if(clipboardFailure)throw new Error('clipboard unavailable')}}},
-    document:{execCommand:value=>fallback.push(value)},
+    document:{execCommand:value=>fallback.push(value),getElementById:id=>ctx[id]||null,addEventListener(){}},
     closeModal:id=>{closed.push(id);ctx[id].classList.add('hidden')},
     refresh:async()=>{refreshes++;if(refreshFailure)throw new Error(refreshFailure)},
     api:(url,options={})=>{
@@ -71,9 +71,9 @@ function fixture(){
       return new Promise((resolve,reject)=>calls.push({url,options,resolve,reject}));
     }};
   ctx.window={confirm:text=>{prompts.push(text);return answer}};
-  for(const name of ['aiClientTable','mcpUrl','aiModal','aiModalUrl','aiClientType','aiHelp','aiManageName','aiManageNote','aiManageModal','metricAiClients']){
+  for(const name of ['aiClientTable','mcpUrl','aiModal','aiModalUrl','aiClientType','aiHelp','aiManageName','aiManageNote','aiManageModal','aiManageSave','metricAiClients']){
     const classes=new Set(['hidden']);
-    ctx[name]={value:'',textContent:'',innerHTML:'',focused:false,selected:false,
+    ctx[name]={value:'',textContent:'',innerHTML:'',focused:false,selected:false,disabled:false,setAttribute(){},
       focus(){this.focused=true},select(){this.selected=true},
       classList:{contains:c=>classes.has(c),add:c=>classes.add(c),remove:c=>classes.delete(c)}};
   }
@@ -152,8 +152,8 @@ test('save dispatches exact captured target/trimmed payload and preserves refres
   const f=fixture(),c=edit(f);f.ctx.aiManageName.value='  Updated name  ';f.ctx.aiManageNote.value='  新备注  ';const p=f.ctx.saveAiConnection();
   assert.equal(f.calls.length,1);assert.equal(f.calls[0].url,'/api/ai-connections/'+encodeURIComponent(c.client_id));assert.equal(f.calls[0].options.method,'PUT');
   assert.deepEqual(JSON.parse(f.calls[0].options.body),{display_name:'Updated name',note:'新备注'});assert.equal(f.refreshes(),0);assert.ok(shown(f.ctx.aiManageModal));
-  f.ctx.aiManageName.value='later edit';assert.equal(JSON.parse(f.calls[0].options.body).display_name,'Updated name');f.settle(0);await p;
-  assert.deepEqual(f.closed,['aiManageModal']);assert.equal(f.refreshes(),1);assert.deepEqual(f.toasts,['AI connection saved']);
+  assert.equal(JSON.parse(f.calls[0].options.body).display_name,'Updated name');f.settle(0);await p;
+  assert.equal(shown(f.ctx.aiManageModal),false);assert.equal(f.refreshes(),1);assert.deepEqual(f.toasts,['AI connection saved']);
 });
 test('save failure preserves the modal and shows the error',async()=>{
   const f=fixture();edit(f);const p=f.ctx.saveAiConnection();f.fail(0,'Synthetic save failure');await p;assert.ok(shown(f.ctx.aiManageModal));assert.deepEqual(f.closed,[]);assert.equal(f.refreshes(),0);assert.deepEqual(f.toasts,['Synthetic save failure']);
