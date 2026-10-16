@@ -1374,3 +1374,26 @@ and deployed smoke, real Windows/Edge/ixBrowser, email/provider configuration,
 historical paid subscriptions and the paused Node/files security findings remain
 open. No release branch merge, live deployment, canceled wheel-session read,
 backend/schema/permission change or security-audit resumption is part of this batch.
+
+### Collected hosted responsive failures and correction
+
+The first complete hosted run for `f3265c8` passed the ordinary matrix (Linux
+985 passed/123 skipped on each Python version; Windows 987 passed/121 skipped),
+extension integration (1 passed), and 113 web Chromium cases. Six mobile rendered
+cases failed: the public landing and navigation in EN/ZH, plus Admin in EN/ZH.
+All lifecycle and management browser cases passed. The failing rendered assertions
+are retained unchanged; the run is not presented as green acceptance.
+
+The landing's non-interactive glow used a 650px width plus a 15% left offset,
+expanding a 375px viewport to 706px. The two decorative boxes now use bounded
+`min()` widths while retaining their existing desktop dimensions and offsets.
+No foreground content is hidden or clipped to make the viewport check pass.
+
+The English Admin tab row and operation-filter controls did not wrap at mobile
+width. `web_admin_styles.py` supplies a separate, Admin-scoped responsive module,
+composed by `web_styles.py`: toolbars wrap, and inputs/selects can shrink within
+their container. Existing table scrolling, desktop styling, content, handlers,
+authorization and filter payloads remain. Dedicated structural contracts protect
+scope/bounds/composition; the unchanged real Chromium route/viewport matrix is
+still required to validate rendered behavior. The complete available matrix is
+rerun on the combined correction, with exact results recorded in PR evidence.
