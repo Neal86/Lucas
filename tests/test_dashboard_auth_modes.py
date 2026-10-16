@@ -26,6 +26,7 @@ def run_dashboard_js(body: str, language: str = "en", *, real_boot=False, real_r
     if real_boot:
         runtime += html[html.index("async function boot("):html.index("async function refresh(")]
     if real_refresh:
+        runtime += html[html.index("const BILLING_PLAN_RANK="):html.index("async function billingChangePlan(")]
         runtime += html[html.index("async function refresh("):html.index("function updateNodeMetrics(")]
     i18n = html[html.index("const WEB_ZH="):html.index("function localizeWeb(")]
     ids = re.findall(r'\bid="([^"]+)"', html)
@@ -34,7 +35,7 @@ const assert = require('node:assert/strict');
 const elements = new Map();
 function element(id) {
   const classes = new Set(['hidden']);
-  const e = {id, value:'', textContent:'', disabled:false, checked:false, type:'password',
+  const e = {id, value:'', textContent:'', style:{}, disabled:false, checked:false, type:'password',
     focus(){ focused.push(id) }, setAttribute(){},
     classList:{add(x){classes.add(x)}, remove(x){classes.delete(x)},
       contains(x){return classes.has(x)}, toggle(x,v){if(v===undefined)v=!classes.has(x);v?classes.add(x):classes.delete(x)}}};

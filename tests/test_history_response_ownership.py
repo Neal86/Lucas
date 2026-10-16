@@ -23,6 +23,7 @@ def run_history_js(body: str, loader: str = "tasks"):
     # Account reset in core reuses the real usage renderer; keep the history
     # unresolved-record observer below independent of that renderer.
     runtime += html[html.index("function operationNumber("):html.index("function unresolvedOperationsHtml(")]
+    runtime += html[html.index("const BILLING_PLAN_RANK="):html.index("async function billingChangePlan(")]
     runtime += html[html.index("async function api("):html.index("function adminMetric(")]
     # Use the rendered API/auth/history code, including final localization changes.
     ids = re.findall(r'\bid="([^"]+)"', html)
@@ -32,7 +33,7 @@ const elements=new Map(),requests=[],listeners={};
 function element(id){
   const classes=new Set(['hidden']);
   const e={id,value:'',innerHTML:'',textContent:'',style:{},disabled:false,
-    focus(){},setAttribute(){},querySelectorAll(){return []},
+    focus(){},setAttribute(){},querySelector(){return null},querySelectorAll(){return []},
     classList:{add(c){classes.add(c)},remove(c){classes.delete(c)},contains(c){return classes.has(c)},
       toggle(c,on){on=on===undefined?!classes.has(c):on;on?classes.add(c):classes.delete(c);return on}}};
   elements.set(id,e);globalThis[id]=e;return e;

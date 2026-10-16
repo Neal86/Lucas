@@ -272,7 +272,7 @@ def test_beta_explanations_use_catalog_without_changing_limits_or_subscription_s
     run_computer_js(f"""
 assert.ok(billing.textContent.includes({json.dumps(intro)}));assert.ok(billing.textContent.includes({json.dumps(footer)}));
 const summary={{beta_free:true,existing_paid_subscription:{str(paid).lower()},plan:'free',plan_name:'Lucas Beta',requests_used:5,request_limit:100000,nodes_used:3,node_limit:3,nodes_connected:5,ai_accounts_used:1,ai_account_limit:3}};
-const pending=loadBillingView();assert.equal(requests.length,1);assert.equal(requests[0].url,'/api/billing/summary');
+signIn();const pending=loadBillingView();assert.equal(requests.length,1);assert.equal(requests[0].url,'/api/billing/summary');
 response(0,summary);await pending;flushMutations();assert.equal(billingNotice.textContent,{json.dumps(notice)});
 assert.deepEqual(state.billing,summary);assert.equal(billingPrice.textContent,'$0');
 assert.equal(requests.length,1);assert.equal(location.href,'/nodes');

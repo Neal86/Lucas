@@ -1149,3 +1149,40 @@ deployment or live-data change is included. Dedicated real SQLite/admission and
 authenticated local HTTP regressions cover the collisions, valid joins, filter
 scope, accounting totals and failed-settlement rollback/retry. Real device and
 deployed acceptance remain separate gates.
+
+
+## Billing read ownership and shared quota projection (2026-10-16)
+
+Billing-summary requests now belong to the current authenticated user object,
+login generation and a shared snapshot sequence. The dashboard's `/api/nodes`
+response contains the same BillingService summary and participates in that same
+sequence. Only the latest-started eligible read can replace the shared billing
+cache. A late Billing result cannot overwrite a newer dashboard quota, and a
+late dashboard result cannot overwrite a newer Billing quota. Existing dashboard
+ownership still governs its other rows and HTTP/authentication effects.
+
+Each accepted billing snapshot renders both dashboard usage and Billing usage,
+limits, price and subscription notice from one value. A newer failed request
+retains the previous committed same-account snapshot; it does not authorize an
+older request to commit afterward. Current Billing failures remain visible and
+allow explicit retry. Obsolete Billing failures and 401s cannot replace feedback
+or sign out a newer session. Account reset or a new-account boot clears prior
+Billing price/renewal/usage/limit/notice/error displays before pending reads can
+expose them; unrelated form drafts, filters and local storage are preserved.
+
+The isolated module is `web_billing_read_runtime.py`; existing Billing and
+Dashboard modules compose it. Paid checkout/expansion/portal callbacks and their
+payloads are unchanged. This is frontend read-result ownership, not cancellation
+of requests, server authorization, quota policy or subscription handling. The
+Beta page stays visible and free; no API/schema, dependency, permission,
+backend mutation, persistent-data or deployment change is included.
+
+Dedicated deterministic cases execute the actual composed page, including
+cross-source ordering, delayed JSON, account/login changes, stale/current errors,
+cache/DOM agreement and legacy paid rendering. Existing partial auth/history/onboarding
+fixtures load the real dependency and enter a signed-in state for billing reads.
+The separate English/Chinese Chromium suite runs against disposable loopback
+accounts and synthetic email, with held real reads and explicitly synthetic
+read outcomes where stated. It does not establish provider-email, historical
+Stripe, real Windows/browser or deployed-staging acceptance. Those gates and
+previously paused security work remain open.
