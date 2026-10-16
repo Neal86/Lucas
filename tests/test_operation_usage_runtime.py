@@ -41,7 +41,7 @@ def run_usage_js(body: str, language: str = "en"):
         between("const state=", "async function billingChangePlan("),
         between("function esc(", "async function boot("),
         between("async function refresh(", "function updateNodeMetrics("),
-        between("function durationfmt(", "function renderRecent("),
+        between("const historyRequestSequences=", "function renderRecent("),
         between("function adminMetric(", "async function adminTab("),
         between("function renderAdminOps(", "async function adminFilterOps("),
         between("async function showAdminUser(", "if(WEB_LANG==='zh'){localizeWeb();"),
@@ -99,6 +99,7 @@ const NodeFilter={SHOW_TEXT:4};
 async function api(url,opt={}){requests.push({url,opt});assert.equal(opt.method,undefined,'Rendering must be read-only');assert.ok(responses.has(url),'Unexpected API request '+url);return responses.get(url)}
 function renderNodes(){}function renderRecent(){}function renderAiClients(){}function updateNodeMetrics(){}
 function counter(root,key){return root.querySelector('[data-operation-count="'+key+'"]').textContent}
+let loginGeneration=0;
 const snapshot={plan:'free',plan_name:'Lucas Beta',beta_free:true,request_limit:100000,requests_used:10,
   requests_pending:5,requests_unconfirmed:11,request_remaining:99974,period_end:1793491200,
   node_limit:3,nodes_used:1,ai_account_limit:3,ai_accounts_used:1};
@@ -107,7 +108,7 @@ const unknown={...pending,id:'unknown',status:'outcome_unconfirmed',reserved_ope
 const historical={...unknown,id:'historical',reserved_operations:71,period_end:1790812800,currently_held:false};
 document.body.innerHTML=MARKUP;
 '''.replace("LANGUAGE", json.dumps(language)).replace("MARKUP", json.dumps(markup))
-    script = harness + "\n" + runtime + "\n(async()=>{\n" + body + r'''
+    script = harness + "\n" + runtime + "\n(async()=>{\nstate.user={id:123};\n" + body + r'''
 console.log('operation-usage-complete');
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''

@@ -1,6 +1,6 @@
 # Lucas PRD V2.1 implementation and acceptance
 
-Updated: 2026-10-15. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
+Updated: 2026-10-16. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
 
 This is a trace of implementation and evidence, not a production acceptance declaration.
 
@@ -954,3 +954,21 @@ synthetic email; source checks do not replace staging or real-device acceptance.
   to the previous transport, and a greater-than-1-MiB Unicode stdin stress probe
   passes. Python compile and whitespace checks pass; the unchanged product wheel
   still matches all **80** Python modules and **7** extension assets.
+
+
+## Task and activity history response ownership (2026-10-16)
+
+Task Run period/refresh requests and Activity Log filter requests now keep independent
+latest-request generations. Only the latest request in the same authenticated user
+and login generation may render rows, totals, or unresolved-operation evidence. An
+obsolete success, failure, or 401 cannot replace a newer view or reopen authentication
+after a later successful request. Current network/server failures remain observable;
+a current 401 still opens authentication and invalidates pending history requests. No API, schema, quota, permission, or stored
+audit-data contract changes. The implementation lives in `web_history_runtime.py`,
+composed by `web_core_runtime.py`.
+
+`tests/test_history_response_ownership.py` executes the actual composed dashboard
+runtime with controlled response ordering, auth mode changes, account replacement,
+repeated navigation, and independent task/activity requests. These deterministic
+regressions are not real Windows/device, provider-email, or deployed staging evidence.
+The approved staging deployment remains pinned to the separately reviewed commit.
