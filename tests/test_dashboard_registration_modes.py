@@ -302,7 +302,7 @@ const index=requests.length,pending={action}();response(index,{{}});await settle
 response(index+1,{{user:{{email:'old@example.test',role:'user',provider:'email'}}}});await settle();
 assert.equal(requests.length,index+5);assert.equal(visible('app'),true);
 showAuth();response(index+2,{{nodes:[],error:'late refresh error'}},{status});response(index+3,{{logs:[]}});response(index+4,{{clients:[]}});await pending;
-assertMode('loginForm');assertRegistrationReset();assert.equal(state.user,null);assert.equal(state.nodes,undefined);
+assertMode('loginForm');assertRegistrationReset();assert.equal(state.user,null);assert.deepEqual(state.nodes,[]);assert.deepEqual(state.aiClients,[]);assert.equal(state.billing,null);
 assert.equal(visible('app'),false);assert.equal(visible('auth'),true);assert.equal(routes,0);assert.equal(realtime,0);assert.equal(onboarding,0);
 assert.equal(document.getElementById('toast').textContent,'');assert.equal(document.getElementById('authError').textContent,'');
 """, real_boot=True, real_refresh=True)

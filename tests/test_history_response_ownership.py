@@ -20,6 +20,9 @@ def run_history_js(body: str, loader: str = "tasks"):
     assert node, "Node.js is required for dashboard history race regressions"
     html = server.webapp._dashboard_html()
     runtime = html[html.index("const WEB_ZH="):html.index("function localizeWeb(")]
+    # Account reset in core reuses the real usage renderer; keep the history
+    # unresolved-record observer below independent of that renderer.
+    runtime += html[html.index("function operationNumber("):html.index("function unresolvedOperationsHtml(")]
     runtime += html[html.index("async function api("):html.index("function adminMetric(")]
     # Use the rendered API/auth/history code, including final localization changes.
     ids = re.findall(r'\bid="([^"]+)"', html)

@@ -53,6 +53,7 @@ let bootCount=0;
 async function boot(){bootCount++}
 let routes=0,realtime=0,onboarding=0;
 async function refresh(){}
+function renderNodes(){}function renderRecent(){}function renderAiClients(){}function updateNodeMetrics(){}function renderOperationUsage(){}
 function routeFromLocation(){routes++}
 function startRealtime(){realtime++}
 function maybeStartOnboarding(){onboarding++}
@@ -253,7 +254,7 @@ assert.equal(requests.length,5);assert.equal(visible('app'),true);
 location.search='?signup=1';showAuth();
 response(2,{{nodes:[],error:'late refresh error'}},{status});response(3,{{logs:[]}});response(4,{{clients:[]}});
 await pending;assertMode('registerForm');assertReset();assert.equal(state.user,null);
-assert.equal(state.nodes,undefined);assert.equal(visible('app'),false);assert.equal(visible('auth'),true);
+assert.deepEqual(state.nodes,[]);assert.deepEqual(state.aiClients,[]);assert.equal(state.billing,null);assert.equal(visible('app'),false);assert.equal(visible('auth'),true);
 assert.equal(routes,0);assert.equal(realtime,0);assert.equal(onboarding,0);
 assert.equal(document.getElementById('toast').textContent,'');
 """, real_boot=True, real_refresh=True)

@@ -993,3 +993,25 @@ server authorization, schema, stored data, dependencies or deployment config cha
 The read module is `web_admin_read_runtime.py`; dedicated synthetic runtime regressions
 cover response ordering and interrupted UI lifecycles. Deterministic mocks and hosted
 CI remain separate from real device, provider-email and deployed staging acceptance.
+
+
+## Dashboard snapshot response ownership (2026-10-16)
+
+Dashboard refreshes now bind the nodes, recent activity, AI-connection list and
+usage snapshot to the latest read in the same authenticated account and login
+generation. The existing boot caller predicate is retained. An obsolete success,
+error or 401 cannot replace newer data or reopen authentication for a newer
+session. Current non-auth failures remain visible to callers; a current 401
+still returns to authentication. Guest refreshes dispatch no reads.
+
+Authentication reset and a new-account boot clear these account-owned caches and
+displays before the new account's pending refresh can expose previous rows. This
+does not clear unrelated form drafts, filters or local storage. Existing renderers,
+API routes/payloads, quota calculations, backend mutations/authorization, local
+Node policy and realtime behavior are retained. This is UI response ownership,
+not request cancellation or a server access-control change.
+
+The isolated module is `web_dashboard_read_runtime.py`; deterministic regressions
+execute the actual composed runtime with controlled HTTP/JSON ordering and
+auth/visibility/logout transitions. Synthetic fixtures and hosted CI remain
+separate from deployed staging, provider-email and real-device acceptance.
