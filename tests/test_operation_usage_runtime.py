@@ -42,9 +42,7 @@ def run_usage_js(body: str, language: str = "en"):
         between("function esc(", "async function boot("),
         between("async function refresh(", "function updateNodeMetrics("),
         between("const historyRequestSequences=", "function renderRecent("),
-        between("function adminMetric(", "async function adminTab("),
-        between("function renderAdminOps(", "async function adminFilterOps("),
-        between("async function showAdminUser(", "if(WEB_LANG==='zh'){localizeWeb();"),
+        between("function adminMetric(", "if(WEB_LANG==='zh'){localizeWeb();"),
     ))
     markup = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", html, flags=re.S)
     harness = r'''
@@ -108,7 +106,7 @@ const unknown={...pending,id:'unknown',status:'outcome_unconfirmed',reserved_ope
 const historical={...unknown,id:'historical',reserved_operations:71,period_end:1790812800,currently_held:false};
 document.body.innerHTML=MARKUP;
 '''.replace("LANGUAGE", json.dumps(language)).replace("MARKUP", json.dumps(markup))
-    script = harness + "\n" + runtime + "\n(async()=>{\nstate.user={id:123};\n" + body + r'''
+    script = harness + "\n" + runtime + "\n(async()=>{\nstate.user={id:123};document.getElementById('admin').classList.remove('hidden');\n" + body + r'''
 console.log('operation-usage-complete');
 })().catch(error=>{console.error(error);process.exitCode=1});
 '''

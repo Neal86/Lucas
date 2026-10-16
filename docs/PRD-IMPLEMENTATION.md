@@ -972,3 +972,24 @@ runtime with controlled response ordering, auth mode changes, account replacemen
 repeated navigation, and independent task/activity requests. These deterministic
 regressions are not real Windows/device, provider-email, or deployed staging evidence.
 The approved staging deployment remains pinned to the separately reviewed commit.
+
+
+## Administrative read-response ownership (2026-10-16)
+
+Admin tabs, their user-search/operation-filter reads, and the selected-user detail
+modal now bind responses to the current view, request, authenticated user and login
+generation. A newer selection, Close/Escape, navigation away, or authentication reset
+invalidates older UI responses, including obsolete errors/401s. Selecting a different
+user clears the previous edit view while loading. Search/filter responses also belong
+to the exact parent tab instance. Existing renderer escaping, account controls, API
+URLs/payloads, backend authorization, and entitlement behavior remain unchanged.
+
+A dispatched account-save request still executes normally. Its captured UI owner only
+controls response-side authentication, notifications and subsequent detail refresh.
+Closing/replacing the modal does not cancel, undo, retry or promise failure of that
+mutation; a stale save completion cannot open a fresh selection. No mutation effects,
+server authorization, schema, stored data, dependencies or deployment config change.
+
+The read module is `web_admin_read_runtime.py`; dedicated synthetic runtime regressions
+cover response ordering and interrupted UI lifecycles. Deterministic mocks and hosted
+CI remain separate from real device, provider-email and deployed staging acceptance.
