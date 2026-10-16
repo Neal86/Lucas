@@ -38,7 +38,7 @@ def test_dashboard_has_billing_entry_points():
 
 
 def test_billable_request_guard_is_before_node_rpc():
-    text=Path("src/gpt_windows_connector/gateway.py").read_text(encoding="utf-8"); start=text.index("async def _node_rpc"); end=text.index("registry.rpc",start); prefix=text[start:end]; assert "ensure_request_capacity" in prefix and "ensure_node_active" in prefix
+    text=Path("src/gpt_windows_connector/gateway.py").read_text(encoding="utf-8"); start=text.index("async def _node_rpc"); end=text.index("registry.rpc",start); prefix=text[start:end]; assert "admission.reserve" in prefix and "ensure_node_active" in prefix
 
 
 def test_annual_billing_backend_contract_remains_available():

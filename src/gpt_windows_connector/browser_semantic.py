@@ -61,7 +61,7 @@ async def observe(session_id: str, page_index: int = 0, limit: int = 300) -> dic
     items = await page.locator("button,a,input,textarea,select,[role=button],[role=link],[contenteditable=true]").evaluate_all(
         """(els, limit) => els.slice(0, limit).map((e, i) => ({
           index:i, tag:e.tagName.toLowerCase(), role:e.getAttribute('role')||'',
-          text:(e.innerText||e.value||'').trim().slice(0,300), name:e.getAttribute('name')||'',
+          text:(e.type==='password'?'':e.innerText||e.value||'').trim().slice(0,300), name:e.getAttribute('name')||'',
           aria_label:e.getAttribute('aria-label')||'', placeholder:e.getAttribute('placeholder')||'',
           type:e.getAttribute('type')||'', id:e.id||'', disabled:!!e.disabled,
           visible:!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length)

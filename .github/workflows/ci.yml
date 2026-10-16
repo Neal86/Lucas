@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging]
   pull_request:
-    branches: [main]
+    branches: [main, staging]
 
 jobs:
   test:
@@ -42,3 +42,12 @@ jobs:
           export CHROME_BIN
           export RUN_EXTENSION_E2E=1
           pytest -q tests/test_extension_chromium.py
+      - name: Chromium web onboarding integration (direct CDP, synthetic email delivery)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          CHROME_BIN="$(find ~/.cache/ms-playwright -type f -name chrome | head -n 1)"
+          test -n "$CHROME_BIN"
+          export CHROME_BIN
+          export RUN_LOGIN_E2E=1
+          pytest -q tests/test_oauth_login_chromium.py tests/test_computer_node_docs_chromium.py tests/test_computer_connection_chromium.py tests/test_ai_connection_editor_chromium.py tests/test_billing_read_chromium.py tests/test_session_lifecycle_chromium.py tests/test_computer_management_chromium.py tests/test_web_acceptance_chromium.py

@@ -15,19 +15,24 @@ Lucas is an MCP-native bridge that lets compatible AI assistants work on compute
 
 Previously approved accounts remain connected until their local access is revoked. A computer can authorize multiple Lucas accounts.
 
-## Plans
+## Lucas Beta — $0/month
 
-| Plan | Monthly | Annual | Requests / month | Active Computers | AI accounts |
-|---|---:|---:|---:|---:|---:|
-| Free | $0 | — | 1,000 | 1 | 1 |
-| Pro | $9.99 | $99.99 | 25,000 | 3 | 1 |
-| Pro+ | $19.99 | $199.99 | 100,000 | 6 | 3 |
+**Free during Beta. Plans and limits may change.** The public [Pricing page](https://lucasmcp.com/pricing) remains available.
 
-Expansion Pack (Pro+ only): **$14.99/month or $149.99/year**, adding **100,000 Requests, 6 active Computers, and 1 AI account**.
+New and existing accounts receive the same base Beta access:
+
+- 100,000 Operations per month
+- 3 active computers and 3 AI accounts
+- Multiple concurrent tasks and full Lucas execution
+- No additional Lucas model-token fee; your AI provider's plan and usage limits still apply
+
+Operations are distinct from model tokens. Connecting an additional computer does not raise the active-computer limit: choose which authorized computers are active from the dashboard. Connection codes and local approval are still required. Existing explicit bonuses remain supported.
+
+New paid checkout, upgrades and expansion purchases are disabled during Beta. Historical subscription data and billing code are retained. Beta does not automatically cancel or pause existing Stripe subscriptions; those must be audited and handled separately before release to prevent unintended charges.
 
 ## Referral rewards
 
-When a new account is created through a referral link, both users receive **1,000 bonus Requests**. When the referred user first becomes a paid customer, the referrer receives an additional **10,000 Requests**.
+A qualifying referral signup grants both accounts 1,000 bonus Operations. Historical paid-referral rewards and records are retained, but new paid purchases are disabled during Beta.
 
 ## Security model
 
@@ -81,7 +86,7 @@ The production deployment uses the included Dockerfile. Keep `GWC_DATA_DIR` on p
 - Keep `GWC_DATA_DIR` on persistent storage.
 - Configure Turnstile and SMTP/email verification.
 - Configure Google OAuth redirect URI exactly.
-- Configure all six Stripe Price IDs and the Stripe webhook secret.
+- Confirm Beta paid-checkout blocking and separately audit/handle existing Stripe subscriptions; preserve historical billing records.
 - Confirm `/health` reports critical readiness.
 - Require the latest `main` CI to pass on Windows and Ubuntu before deployment.
 

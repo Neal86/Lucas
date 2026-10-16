@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import time
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,8 @@ import httpx
 import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+
+from . import oauth_grants
 
 
 _current_user: contextvars.ContextVar["User | None"] = contextvars.ContextVar("gwc_current_user", default=None)
@@ -53,6 +56,7 @@ class AuthStore:
 
     def _init_db(self) -> None:
         with self._connect() as db:
+            oauth_grants.initialize(db)
             db.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -219,17 +223,28 @@ class AuthStore:
             raise PermissionError("Account is disabled")
         return user
 
-    def issue_token(self, user: User, ttl_seconds: int | None = None, client_id: str | None = None) -> str:
+    def issue_token(self, user: User, ttl_seconds: int | None = None, client_id: str | None = None,
+                    *, connection: sqlite3.Connection | None = None) -> str:
         now = int(time.time())
         ttl = self.jwt_ttl_seconds if ttl_seconds is None else max(60, min(int(ttl_seconds), self.jwt_ttl_seconds))
         payload = {"sub": user.id, "email": user.email, "iat": now, "exp": now + ttl, "iss": "gpt-windows-connector"}
         if client_id:
             payload["azp"] = client_id
+            if connection is None:
+                with self._connect() as db:
+                    payload["ogv"] = oauth_grants.connection_generation(db, user.id, client_id)
+            else:
+                payload["ogv"] = oauth_grants.connection_generation(connection, user.id, client_id)
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")
 
     def verify_token(self, token: str) -> User:
         try:
             payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"], issuer="gpt-windows-connector")
+            if "azp" in payload:
+                if not isinstance(payload["azp"], str) or not payload["azp"]:
+                    raise PermissionError("Invalid OAuth client identity")
+                with self._connect() as db:
+                    oauth_grants.verify_generation(db, str(payload["sub"]), payload["azp"], payload.get("ogv", 0))
             return replace(self.get_user(str(payload["sub"])), client_id=payload.get("azp"))
         except Exception as exc:
             raise PermissionError("Invalid or expired access token") from exc
@@ -255,17 +270,20 @@ class AuthStore:
         with self._connect() as db:
             db.execute("INSERT INTO usage_daily(user_id,day,request_count) VALUES(?,?,1) ON CONFLICT(user_id,day) DO UPDATE SET request_count=request_count+1", (user_id, day))
 
-    def record_operation(self, user_id: str, success: bool, duration_seconds: float, operation_count: int = 1) -> None:
-        day = time.strftime("%Y-%m-%d", time.gmtime())
+    def record_operation(self, user_id: str, success: bool, duration_seconds: float, operation_count: int = 1, *,
+                         connection: sqlite3.Connection | None = None, started_at: float | None = None) -> None:
+        # Admission time keeps late completion in its original usage day.
+        day = time.strftime("%Y-%m-%d", time.gmtime(time.time() if started_at is None else started_at))
         count = max(1, int(operation_count or 1))
-        with self._connect() as db:
+        with (self._connect() if connection is None else nullcontext(connection)) as db:
             db.execute("INSERT INTO usage_daily(user_id,day,operation_count,success_count,error_count,execution_seconds) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,day) DO UPDATE SET operation_count=operation_count+excluded.operation_count,success_count=success_count+excluded.success_count,error_count=error_count+excluded.error_count,execution_seconds=execution_seconds+excluded.execution_seconds", (user_id, day, count, count if success else 0, 0 if success else count, max(0.0, duration_seconds)))
 
-    def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None) -> None:
-        with self._connect() as db:
+    def audit(self, user_id: str | None, action: str, target: str | None = None, details: dict[str, Any] | None = None, *,
+              connection: sqlite3.Connection | None = None, created_at: float | None = None) -> None:
+        with (self._connect() if connection is None else nullcontext(connection)) as db:
             db.execute(
                 "INSERT INTO audit_logs(user_id,action,target,details,created_at) VALUES(?,?,?,?,?)",
-                (user_id, action, target, json.dumps(details or {}, ensure_ascii=False), time.time()),
+                (user_id, action, target, json.dumps(details or {}, ensure_ascii=False), time.time() if created_at is None else created_at),
             )
 
 

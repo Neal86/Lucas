@@ -14,6 +14,10 @@ DURABLE_DISCONNECT_GRACE_SECONDS = 180.0
 log = logging.getLogger("lucas.gateway")
 
 
+class ConfirmedNodeError(RuntimeError):
+    """An explicit negative Node response, unlike an uncertain transport failure."""
+
+
 @dataclass
 class NodeConnection:
     node_id: str
@@ -254,5 +258,7 @@ class NodeRegistry:
             return
         if message.get("ok"):
             future.set_result(message.get("result"))
+        elif message.get("ok") is False:
+            future.set_exception(ConfirmedNodeError(message.get("error") or "Node execution failed"))
         else:
-            future.set_exception(RuntimeError(message.get("error") or "Node execution failed"))
+            future.set_exception(RuntimeError("Invalid Node response"))

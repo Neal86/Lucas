@@ -22,6 +22,9 @@ from .seo_pages import public_info_page
 from .entitlements import active_node_ids, ensure_node_capacity, set_active_node
 from .legal_ui import privacy_html, terms_html, refund_html, contact_html
 from .node_docs_ui import computer_node_docs_html
+from .oauth_grants import revoke_connection
+from .operation_admission import list_unresolved
+from .task_history import completed_task_summary
 
 
 BRAND_ASSET_DIR = Path(__file__).with_name("assets")
@@ -440,6 +443,9 @@ async def api_ai_connection(request: Request):
         if not row:
             return JSONResponse({"error": "AI connection not found"}, status_code=404)
         if request.method == "DELETE":
+            # The first write serializes disconnect with token redemption.
+            # Keep this tombstone even when this client is authorized again.
+            revoke_connection(db, user.id, client_id)
             db.execute("DELETE FROM oauth_refresh_tokens WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM oauth_codes WHERE client_id=? AND user_id=?", (client_id,user.id))
             db.execute("DELETE FROM oauth_client_users WHERE client_id=? AND user_id=?", (client_id,user.id))
@@ -467,15 +473,8 @@ async def api_task_runs(request: Request):
     since = time.time() - days * 86400 if days else None
     runs = gateway.task_runs.list_runs(user.id, node_id=node_id, limit=limit, since=since)
     with _db() as db:
-        run_where = "owner_id=?"; run_params: list[object] = [user.id]
-        step_where = "owner_id=?"; step_params: list[object] = [user.id]
-        if since is not None:
-            run_where += " AND started_at>=?"; run_params.append(since)
-            step_where += " AND started_at>=?"; step_params.append(since)
-        task_count = int(db.execute(f"SELECT COUNT(*) n FROM task_runs WHERE {run_where}", run_params).fetchone()["n"] or 0)
-        op_count = int(db.execute(f"SELECT COALESCE(SUM(operation_count),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
-        duration_ms = int(db.execute(f"SELECT COALESCE(SUM(duration_ms),0) n FROM task_steps WHERE {step_where}", step_params).fetchone()["n"] or 0)
-    return JSONResponse({"runs": runs, "summary": {"task_runs": task_count, "operations": op_count, "duration_ms": duration_ms, "days": days or None}})
+        summary = completed_task_summary(db, user.id, node_id=node_id, since=since)
+    return JSONResponse({"runs": runs, "unresolved_operations": list_unresolved(gateway.db_path, user.id, limit=limit, node_id=node_id, since=since), "summary": {**summary, "days": days or None}})
 
 async def api_logs(request: Request):
     user = _auth_user(request)

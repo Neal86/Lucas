@@ -1,21 +1,21 @@
 # Lucas PRD V2.1 implementation and acceptance
 
-Updated: 2026-10-12. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
+Updated: 2026-10-16. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
 
 This is a trace of implementation and evidence, not a production acceptance declaration.
 
 | Requirement | Implementation | Evidence / remaining gate |
 |---|---|---|
 | Free Beta pricing and visible Pricing navigation | billing_ui.py, entitlements.py, billing.py | Beta tests cover new/existing plans; paid checkout, expansion and billing portal changes blocked server-side; historical records preserved |
-| 100,000 OP/month, 3 active computers, 3 AI accounts | entitlements.py, web_billing_runtime.py | Quota/device/account regression suite; existing explicitly granted admin bonuses remain supported |
-| Registration CTA and language detection | billing_ui.py, web_core_runtime.py, web_i18n_runtime.py | Pricing register link, Chinese strings and sticky nav tested; visual acceptance still required |
+| 100,000 OP/month, 3 active computers, 3 AI accounts | entitlements.py, operation_admission.py, web_operation_usage_runtime.py | Atomic minimum admission, distinct completed/held usage and quota/device/account regressions; existing explicitly granted admin bonuses remain supported |
+| Registration CTA, language detection and setup guidance | billing_ui.py, web_registration_runtime.py, web_i18n_runtime.py, node_docs_ui.py | Guarded registration flows and localized standalone guide; browser evidence below, deployed/device acceptance remains separate |
 | Authorized browser extension | extensions/lucas-browser, browser_extension.py, executor.py | Real local WebSocket tests cover pairing, owner isolation, expiry, revocation and disconnect; real Chromium integration passed in GitHub CI |
 | Background browser operations | extension background.js | Navigation, inspection, observation, click/type/select/scroll, upload, screenshots and HTTP(S) link downloads implemented; real Chromium runtime test passed in GitHub CI |
 | Manual verification handoff | extension background.js; browser.handoff | No CAPTCHA/passkey solver and no automatic tab activation; unsupported exports and new-tab grants return a handoff |
 | No mandatory isolated Profile | gateway.py, browser.py | ALI/Eva hard-coded target removed; explicitly selected CDP remains supported; CDP failure never restarts browser |
 | Existing user browser preservation | browser.close | CDP disconnect does not close existing context/browser; regression test |
 | Windows local Node, updates, reconnect and Allowed Folders | existing Node/installer + executor.py | Regression suite; Windows tray pairing UI and actual Node update require Windows acceptance |
-| Source, agent, task, session, approval and result audit | auth.py, oauth.py, gateway.py, node.py, security.py | OAuth client ID comes from verified signed token; task/session propagated; local approval outcomes recorded; secrets and payload text excluded |
+| Source, agent, task, session, approval and result audit | auth.py, oauth.py, gateway.py, node.py, security.py, task_audit.py | Verified OAuth identity, task/session and approval outcomes retained; raw sub-operation commands excluded from stored/displayed task steps |
 | Staging then approved production release | PROJECT_RULES.md, CI and smoke_web_pages.py | Production release remains blocked until CI, deployed staging smoke and explicit production confirmation |
 | Existing Stripe subscriptions | Existing billing summary warning and retained records | Live subscription audit/handling still required. Free Beta does not automatically cancel or pause already active Stripe subscriptions |
 | macOS | PRD explicitly marks this as planned | Not part of current Windows P0 acceptance |
@@ -35,9 +35,9 @@ HTTP(S) download links use the tab's authenticated fetch and are limited to 20 M
 ## Verification
 
 - `python -m pytest -q`: normal regression suite and real loopback bridge tests.
-- `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. No Playwright automation is used by this test.
-- `python -m compileall -q src` and `node --check` on both extension scripts.
-- Build a wheel and confirm all five extension files are packaged.
+- `RUN_EXTENSION_E2E=1 CHROME_BIN=/path/to/chrome python -m pytest -q tests/test_extension_chromium.py`: actual installed extension with raw CDP, including upload/download, screenshots, authorization and foreground-tab preservation. Extension actions use raw CDP; the same isolated browser fixture also exercises the production Playwright-backed CDP fallback for password-observation redaction.
+- `python -m compileall -q src` and `node --check` on every extension JavaScript file.
+- Build a wheel and confirm the complete extension asset set is packaged.
 - `python scripts/smoke_web_pages.py <deployed-staging-url>` before production.
 
 Local verification result: **175 passed, 4 skipped**. The 28 user-visible HTTP routes passed against an isolated local server. Extension JavaScript syntax and wheel packaging passed. Browser rendering and deployed endpoints have separate gates.
@@ -48,4 +48,1352 @@ Functional commit `e68257135223e82ae96e888dfc9407aff7fcbe0e` passed the real ext
 
 ## Current environment gates
 
-The local execution sandbox denies Chromium's Unix socket creation, so real browser integration cannot be completed here. Coolify project inspection returned HTTP 401 Unauthenticated, blocking deployed staging verification and live subscription review. These must not be reported as passing.
+The local execution sandbox denies Chromium's Unix socket creation; exact-head GitHub CI provides the real Chromium evidence recorded below and on PR #3. The earlier Coolify HTTP 401 is historical: read-only access worked on 2026-10-15. The running app named Lucas-Staging is configured for main, with an image tagged f04f87af477ae77a14a5287d8f6a966b217111cb, not this development branch. Its test configuration bypasses login verification and has no SMTP, so it cannot establish production email-login acceptance. Deploying a reviewed commit to an explicitly approved, isolated staging target and checking its actual image/endpoints remain required. No deployment or live subscription handling was performed.
+
+## Development acceptance: atomic OAuth admission (2026-10-14)
+
+Based on staging `98919dd4dc329a8751771c026e58f0af159fc634`; proposed in a separate development branch, not deployed. This closes a concurrency gap in acceptance criterion 4 (AI-account enforcement agrees with the dashboard) and the security/reliability requirement.
+
+- Consent and refresh-token admission now check capacity and insert the account relationship under one SQLite `BEGIN IMMEDIATE` transaction. Competing gateway workers cannot both claim the last available AI-account slot.
+- Consent requests and authorization codes are consumed once under a write transaction. Concurrent repeat clicks or code exchanges cannot issue duplicate grants. Invalid client, redirect, or PKCE attempts do not consume a valid code.
+- Existing authorized clients can reconnect/refresh at the limit. Beta's three-account limit, legacy paid limits, admin bonuses and bonus expiry still use the same entitlement calculation. No schema migration, subscription mutation, browser/Profile requirement, local permission change or production deployment is included.
+- Entitlement helpers accept a caller-owned connection without committing it. Failed grant inserts roll back the new account relationship and preserve retryable consent.
+- CI now also runs for pull requests targeting `staging`, so this development path receives the existing Linux/Windows matrix and real Chromium extension check.
+
+Evidence:
+
+- The four core race tests in `tests/test_oauth_concurrency.py` were run against unchanged staging first: **4 failed**, demonstrating over-limit admission and duplicate consent/code issuance.
+- Final local Linux/Python 3.12 regression suite: **190 passed, 4 skipped**. All **15** new OAuth concurrency, replay, cancellation, invalid-PKCE/client/redirect, rollback, quota and bonus cases passed.
+- Python compilation, both extension JavaScript syntax checks and Git whitespace checks passed.
+- `scripts/smoke_web_pages.py` passed all **28 routes** against an isolated local HTTP server. This is not deployed-staging evidence or visual/browser acceptance.
+- The four default skips are the optional browser smoke, two Windows PowerShell tests, and opt-in real extension integration. A separate real Chromium attempt failed before the browser started because this sandbox denies its process-singleton socket (`Operation not permitted`). The check is not counted as passing; exact-commit CI must establish Linux Chromium and Windows results.
+- Independent code review found no blocking defects; production release still requires deployed staging smoke, existing-subscription audit/handling, Windows Node/browser acceptance and explicit confirmation.
+
+## Development acceptance: OAuth disconnect revocation (2026-10-15)
+
+Follow-on to the atomic-admission change, based on draft PR #3 head
+`88ea02b2b3ccbbd420c2aff83562402f23c11ddb`. This implements the Security and
+Reliability requirement that an AI connection cannot keep operating after the
+user disconnects it. These are code/test results, not deployed acceptance.
+
+- `oauth_grants.py` owns durable per-user/per-client revocation generations.
+  Signed OAuth access tokens carry the current generation. Authentication
+  requires both an active connection and the matching generation, so Disconnect
+  blocks subsequent authenticated requests immediately. Reconnecting the same
+  client never restores its old access tokens. Browser-login tokens and other
+  users/clients remain unaffected. Already-dispatched operations and existing
+  `/ws/events` subscriptions are not cancelled; new WebSocket handshakes are checked.
+- The dashboard increments the generation and removes ownership, codes, refresh
+  tokens and metadata in one transaction. Tombstones remain after reconnect.
+- Code redemption and refresh rotation validate, consume, issue replacements and
+  sign access tokens in one SQLite write transaction. An in-flight exchange
+  cannot recreate a disconnected relationship. Failed insertion/signing rolls
+  back consumption and replacement grants so the caller can retry.
+- Refresh retries retain the existing 30-second grace period, anchored to the
+  first rotation. Replaying a refresh token cannot extend that window indefinitely.
+- No routes, Beta limits/pricing, browser/Profile policy, device permissions,
+  billing records or deployment settings change.
+
+### Compatibility and migration
+
+- AuthStore initialization additively creates `oauth_revocations`; no existing
+  tables/records are dropped, rewritten or bulk-revoked. Startup is idempotent.
+- Existing signed OAuth access tokens without the generation claim are treated
+  as generation zero. They continue working for currently authorized connections
+  until that connection is disconnected under the new code. Existing valid
+  refresh tokens continue working and receive generation-bound replacements.
+- An access token for an absent connection is rejected even without a tombstone.
+  Fresh authorization is required after disconnect; it receives the next
+  generation. Revocation state survives gateway restart.
+- All gateway workers must run the new version for the guarantee to hold. An
+  older binary ignores revocation generations and still has the issuance race;
+  a rollback or mixed-version rollout must not be described as preserving this
+  security fix. Production rollout/migration has not been run or authorized here.
+
+### Verification
+
+- Seven new regressions failed against the unchanged PR #3 baseline, demonstrating
+  usable disconnected tokens, token revival, both grant/disconnect races,
+  indefinitely sliding refresh grace and grant loss after failed issuance.
+- `tests/test_oauth_revocation.py`: **16 passed**, including migration from a
+  pre-generation database, legacy tokens, repeated reconnect, user/client
+  isolation, rollback, orphan grants, invalid scope/client and actual dashboard
+  and MCP authentication rejection.
+- Local Linux/Python 3.12 full suite: **206 passed, 4 skipped**. Python compilation,
+  both extension JavaScript syntax checks and Git whitespace checks passed.
+- The isolated local HTTP smoke passed **28/28 routes**. This is not a deployed
+  staging smoke result. Windows and real Chromium checks require the exact-head
+  CI run linked in the PR before this follow-on is considered CI-verified.
+- The prior release gates remain open: deployed staging smoke, live Windows
+  Node/Edge/ixBrowser acceptance, existing Stripe subscription audit/handling and
+  explicit production approval.
+
+## Development acceptance: local policy and task-audit privacy (2026-10-15)
+
+Based on PR #3 head `3b0dfc511cde48d50992096b97b1d4e415c79d25`.
+This slice addresses acceptance criterion 5 and the local-authority/audit-privacy
+requirements. No running Node configuration or device setting was changed.
+
+### Behavior
+
+- `domain_policy.py` computes the shared scope of machine and account domain
+  grants. Parent domains include their descendants; `*.example.com` excludes
+  the apex. Case and trailing-dot normalization are retained. Disjoint restricted
+  lists produce an explicit deny-all policy rather than an unrestricted empty
+  list. That marker survives subsequent intersections and Executor preflight.
+- Configured grants must be a list/tuple of strings. Malformed containers or
+  entries fail closed rather than becoming character-level or coerced host grants.
+- Originally empty domain lists retain their unrestricted meaning. A configured
+  domain restriction now rejects a detected network operation when its destination
+  cannot be checked, such as a `git.push` without an identifiable destination or
+  a non-host browser URL. This is intentionally fail-closed and may require a more
+  explicit supported workflow under restrictive configurations.
+- `process.start` and `shell.run` combine their primary operation policy with
+  every detected software-installation, registry, service and high-risk gate.
+  The strictest decision wins, including explicit blocks. A first matching
+  category cannot hide a later blocked category in a compound command. Common
+  Windows executable variants and PowerShell/cmd wrappers have regression coverage.
+- An explicit `desktop_control=block` remains authoritative whether foreground
+  confirmation is enabled or disabled, including UIA foreground fallback and
+  visible browser launch. Existing non-blocked focus-toggle behavior is preserved.
+- `task_audit.py` sanitizes TaskRunStore write and read boundaries. Each
+  sub-operation is represented by the constant `shell.run`; command names,
+  arguments, URLs, paths and literal values are never copied into that field.
+  String-array shape, cardinality and separately recorded operation counts remain
+  intact. Source, agent, task, device, session, approval, result and timing metadata
+  remain available. Execution commands and internal accounting are not modified.
+
+### Boundaries and compatibility
+
+- These changes tighten source-code policy checks only; installing/updating a
+  real Node and verifying its local prompt behavior remain release work.
+- Command-risk and network-destination detection are conservative checks, not an
+  exhaustive shell parser or operating-system sandbox/firewall. Indirect or
+  obfuscated execution requires appropriate OS/network authority boundaries.
+- Previously stored command details are projected safely on read without
+  rewriting historical SQLite rows. Sensitive values may remain in historical
+  databases/backups; removal requires separately authorized cleanup. The sanitizer
+  covers `sub_operations`, not arbitrary user-entered metadata.
+- No schema migration, API route change, live settings mutation, subscription
+  action, billing/pricing change, required Eva/Profile isolation or deployment
+  is included. Browser PR #2 remains separate; its corresponding policy paths
+  still have the defects fixed here and must be reconciled without replacing
+  the current OAuth or audit implementation wholesale.
+
+### Verification
+
+- Unchanged-baseline tests demonstrated **38 policy failures** and **13 audit
+  privacy failures**, including actual Executor preflight and real SQLite
+  persistence/display paths. No dangerous command or device action was executed.
+- Review exposed a related malformed-configuration gap; all **12** added
+  regressions failed before type validation and passed afterward.
+- New focused suites: **87 passed**, covering domain intersection and 729
+  domain/host truth-table combinations, compound risk/block precedence, focus
+  blocks, raw database inspection, legacy non-mutation, malformed details and
+  gateway success/error/runtime-trace paths with only execution dispatch stubbed.
+- Final local Linux/Python 3.12 aggregate suite: **293 passed, 4 skipped**,
+  including existing accounting, OAuth and Beta acceptance cases. Compilation,
+  both extension JavaScript syntax checks and Git whitespace checks passed.
+- Isolated local HTTP smoke: **28/28 routes passed**. Independent review found
+  no blocking defects, independently passed the full suite, and passed a further
+  **5,488-case** domain truth-table probe. Exact final Windows/Chromium CI evidence
+  is recorded in the PR; local HTTP smoke is not deployed-staging acceptance.
+- The production gates remain unchanged: deployed staging smoke, actual Windows
+  Node/Edge/ixBrowser acceptance, existing-subscription handling and explicit
+  production approval. Passing synthetic/stubbed policy tests does not satisfy
+  those live acceptance gates.
+
+## Development acceptance: shared password-login policy (2026-10-15)
+
+Based on PR #3 head `5f4a06a934d8150953fe0e81b925b85379a2ca22`.
+This slice closes the OAuth password-only login bypass and aligns the standalone
+and composite gateways with the existing email-verification policy.
+
+### Behavior and compatibility
+
+- `login_policy.py` is the single implementation of password login, login-code
+  verification and resend. Both gateway entry points and the OAuth browser UI
+  use `/auth/login`, `/auth/login/verify` and `/auth/login/resend`. Password
+  attempts share the existing 10-per-600-second IP/email bucket in each worker.
+- A new/untrusted device receives HTTP 202 with `verification_required`,
+  `challenge_id` and `email`, without an access cookie. A valid email code then
+  sets the HttpOnly, SameSite=Lax access cookie (Secure on configured HTTPS).
+  Remembered devices still require the password and the same network address;
+  an address change invalidates remembered trust and requires a new code.
+- **Standalone setup/API change:** direct use of
+  `gpt_windows_connector.gateway:app` (or its module entry point) now fails closed
+  with HTTP 503 when verification is required but SMTP is absent. The documented
+  `gwc-gateway` command already targets the composite `server:main` and retains
+  its verification policy.
+  Configure `GWC_SMTP_HOST` and `GWC_SMTP_FROM`, plus the existing port/TLS and
+  optional username/password settings from `.env.example`, before normal use.
+  The already-supported explicit `GWC_BYPASS_LOGIN_VERIFICATION` development
+  override remains recognized and audited; this patch does not enable it.
+  Successful password/verification responses use `access_token: "cookie"`, as
+  the composite server already did. Clients of the old standalone password-to-JWT
+  response must handle the challenge and retain cookies. MCP OAuth clients still
+  obtain their bearer tokens through the unchanged consent/PKCE token flow.
+- `oauth_login_ui.py` supports password errors, code errors, remember choice,
+  resend cooldown, Back and pre-authentication cancellation. It stores no password
+  or code in browser storage and loads no external resources. Authentication
+  returns only to the fixed same-origin resume route with an opaque request ID.
+  Resume renders the existing explicit consent screen; signing in does not grant
+  an AI connection. Cancellation atomically consumes the request and returns only
+  to its previously validated registered redirect, preserving its original state.
+- Old `/oauth/authorize/login` forms no longer authenticate submitted passwords.
+  A valid old request renders the new sign-in flow so the user can restart safely;
+  invalid/expired resume, cancel or legacy requests fail locally without redirect.
+- The dashboard login-verification state is initialized in its own injected
+  runtime rather than through a stale match against registration-state text.
+  This fixes the reproduced `loginResendCooldownTimer` ReferenceError when a
+  challenge starts and preserves the registration metadata state.
+- No schema migration or token-format change is introduced. Existing web cookies,
+  remembered-device rows, OAuth grants and tokens remain valid subject to their
+  existing expiry/revocation checks, including sessions minted before this fix.
+  This patch does not retrospectively reauthenticate or revoke those sessions.
+  All serving workers must be upgraded to remove the old route bypass everywhere.
+
+### Verification and remaining boundaries
+
+- Before implementation, all three dedicated bypass regressions failed on the
+  unchanged head: OAuth minted a cookie without email verification, the standalone
+  gateway did so without SMTP, and alternating login routes escaped the limit.
+- A separate rendered-JavaScript runtime regression reproduced the dashboard
+  ReferenceError before the declaration fix. The final focused suite has
+  **28 passing tests**, including actual gateway middleware/routes, new/trusted
+  devices, changed networks, bad/expired/replayed codes, disabled accounts,
+  resend rotation/limit, safe cancellation/resume, malformed input and old tokens.
+- Final local Linux/Python 3.12 aggregate suite: **321 passed, 7 skipped**.
+  Python compilation, both extension scripts and the OAuth script syntax checks,
+  Git whitespace checks and isolated HTTP smoke (**28/28 routes**) passed.
+  Independent review re-ran the aggregate suite and examined route/redirect and
+  compatibility behavior. Exact-head CI is tracked in the PR.
+- Three new opt-in real Chromium tests use real loopback HTTP, SQLite, password
+  verification, cookies, consent and PKCE exchange. Only synthetic verification
+  email delivery is captured instead of sent. They cover wrong passwords/codes,
+  success, replay, Back/restart and cancellation before login/during a challenge.
+  They run in CI with `RUN_LOGIN_E2E=1`; local Chromium startup was blocked by the
+  environment's socket policy, while the real loopback HTTP flow was separately
+  verified. This is **not** evidence of outbound email/provider delivery.
+- Rate buckets remain process-local. Client IP still depends on the existing
+  forwarded-header handling; trusted ingress must remove/overwrite untrusted
+  `cf-connecting-ip`/`x-forwarded-for` headers. This is not a claim of a global
+  distributed rate limit or hardened direct-to-gateway proxy trust.
+- **Historical finding, addressed by the next slice below:** two independent `RegistrationSecurity`
+  instances can concurrently accept one login code and create two trusted tokens.
+  The reproduced interleaving reads the challenge before either write, then the
+  second unchecked DELETE affects zero rows but still creates trust. Serializing
+  validation, attempt accounting, code consumption and trust creation, including
+  resend/verify races, was separate pending work at this head. Sequential replay was tested here;
+  the authentication system is not claimed to be fully hardened by this slice.
+- A separate inherited dashboard `showRegister` string replacement also misses
+  the expanded registration function. Auth-mode switching while code verification
+  was visible required dedicated UI reconciliation (implemented below); the timer/Back regression
+  here does not claim to cover that mode-switch path.
+- Beta pricing/navigation, historical billing data and non-mandatory browser
+  Profile/Eva behavior are unchanged. Deployed staging smoke, live Windows Node,
+  Edge/ixBrowser acceptance, existing Stripe subscription handling and explicit
+  production approval remain outstanding release gates. No deployment occurred.
+
+
+## Development acceptance: atomic email challenges and auth-mode transitions (2026-10-15)
+
+Based on draft PR #3 head `7d1170c9a3898751ae17ad415c4fc419785c1c35`.
+This closes the two follow-on findings recorded above. It is development
+verification, not deployed staging or production acceptance.
+
+### Challenge transaction boundaries
+
+- Registration and login verification acquire a SQLite `BEGIN IMMEDIATE` writer
+  transaction before reading a challenge. Validation, the five-attempt limit,
+  consumption and user/trusted-device insertion are one transaction, including
+  independent gateway workers sharing the database. Only one concurrent login
+  verification can return success and receive access/trusted-device cookies.
+- Resend uses the same writer boundary. If verification consumes a challenge
+  first, resend fails instead of claiming to send a replacement for a deleted
+  challenge. If resend wins, verification checks the new hash and rejects the old
+  code. The latest committed resend/start code remains authoritative; outbound
+  delivery order is outside the transaction.
+- Registration hashes the password before taking the writer lock and then
+  rechecks that the email has not been registered before upserting pending state.
+  A start request waiting on hashing cannot recreate a consumed pending record
+  after another worker finishes registering that account.
+- Expiry is evaluated after the writer lock is acquired, so lock waiting cannot
+  extend a code's validity. Wrong-code counters and login expiry/network-change
+  invalidations still commit before their rejection errors. Unexpected write
+  errors roll back the complete operation, preserving a retryable challenge and
+  preventing partial user/trusted-device creation.
+- Existing behavior is retained: registration resend can renew expired pending
+  registration; login resend rejects expired challenges; resend resets attempts;
+  successful remembered-device sessions retain their existing 30-day lifetime.
+  No migration, token format, route or response-format change is introduced.
+
+### Dashboard transitions
+
+- `web_login_runtime.py` owns dashboard login/verification state and behavior.
+  Composition no longer depends on replacing an outdated full `showRegister`
+  function string. Mode switches and Back explicitly reset verification state.
+- Pending challenge, entered code and resend timers are cleared when leaving a
+  verification flow. Repeated submissions and late asynchronous responses are
+  guarded so an old flow cannot replace a newer login/signup view. Login stays
+  locked through dashboard boot. Initial boot and login-completion boot suppress
+  stale `/auth/me`, refresh and 401-navigation effects after an auth-mode reset.
+- These are browser-state safeguards. They do not revoke a code already issued
+  by the server or cancel an authentication response already processed by the
+  browser. Unused server challenges retain their normal expiry; no cancellation
+  endpoint or retroactive session revocation is added.
+
+### Verification boundaries
+
+- Fail-before challenge regressions were run against the unchanged parent head
+  with two independent service instances and a real temporary SQLite database.
+  The tests cover duplicate login/registration acceptance, attempt limits,
+  verify/resend ordering, registration start/verify, expiry after lock waiting,
+  rollback and HTTP cookie issuance. Synthetic test email addresses and codes
+  never leave the local test environment.
+- Rendered-JavaScript tests and opt-in real Chromium dashboard tests cover
+  interrupted/repeated login, Back, switching modes and late response handling.
+  Chromium uses loopback HTTP and captured synthetic email delivery; it is not
+  outbound SMTP/provider acceptance.
+- SQLite still serializes database writers, with the existing 30-second timeout.
+  This change does not implement distributed request-rate limits, ingress header
+  trust, retries on database exhaustion, or whole-session cancellation.
+- All serving workers must be upgraded to gain the atomicity guarantee. Existing
+  cookies/tokens remain valid under their existing expiry/revocation rules.
+- Beta pricing/navigation, historical billing and browser/Profile/Eva behavior
+  are unchanged. Deployed staging smoke, live Windows Node/Edge/ixBrowser,
+  existing Stripe subscription handling and explicit production approval remain
+  release gates. No production data, device configuration or deployment changed.
+
+### Final local evidence for this slice
+
+- **19 challenge cases passed**, including deterministic cross-worker event gates;
+  the unchanged parent failed **13** of those cases. Independent repeat runs
+  reproduced the same fail-before result and passed the candidate repeatedly.
+- **34 rendered dashboard runtime cases passed**; the unchanged parent failed
+  **29**, including mode reset, late responses and dashboard boot transitions.
+  The remaining cases protect compatibility, current errors and retry behavior.
+- Real Chromium coverage adds two dashboard flows (English and Chinese) to the
+  three existing OAuth cases. Local browser launch is blocked before page code
+  executes by the sandbox's process-singleton socket policy. Exact-head CI must
+  establish browser/Windows results; the PR records that run and its outcome.
+- Final local Linux/Python 3.12 aggregate: **374 passed, 9 skipped**. Python
+  compilation, rendered/extension JavaScript syntax and Git whitespace checks
+  passed. Isolated local HTTP smoke passed **28/28 routes**. Default skips are
+  the optional browser smoke, two Windows-only tests, the opt-in extension case
+  and five opt-in OAuth/dashboard Chromium cases. Deployed staging was not tested.
+
+### Final-HTML correction discovered by real Chromium
+
+- Exact-head CI run [38665194648](https://github.com/Neal86/Lucas/actions/runs/38665194648)
+  for `eb75a459f4f804f34af5c6c808c5de4d778dd53a` passed the normal
+  Linux/Windows suites, three OAuth browser cases and extension integration,
+  but both new dashboard browser cases failed before the signup form appeared.
+- Investigation reproduced two inherited assembly defects on the unchanged
+  parent: dashboard runtime followed the closed i18n script without a new
+  opening script tag, and server branding modified the landing component before
+  its exact-match removal. The final dashboard rendered JavaScript as body text
+  and retained the marketing landing. Syntax-only fragment checks missed this.
+- The correction adds the runtime script boundary at composition and removes
+  the dashboard's landing component before branding. Public-home composition
+  remains separate. No route, authentication API, schema, permission, billing,
+  persistent data or deployment behavior is changed.
+- Regression checks parse the final server-composed HTML, require the complete
+  runtime inside one executable script, reject unmatched script ends/body-text
+  JavaScript, syntax-check all inline scripts together and separately, and check
+  actual landing DOM exclusion while preserving public-home content. The
+  unchanged parent fails three new assembly checks, with five controls passing.
+- The failed CI run is retained as evidence. Browser acceptance requires the
+  corrective commit's exact-head CI outcome; local syntax/unit checks alone do
+  not establish real-browser success.
+- Corrective local validation: **54 focused tests passed** and **377 passed,
+  9 skipped** in the full suite. Python compilation, final-HTML JavaScript syntax,
+  whitespace checks and isolated HTTP smoke **28/28 routes** passed. The public
+  landing output is byte-identical to the parent. The smoke fixture had no
+  super-admin account, so its separate readiness endpoint remained unavailable;
+  these results establish page-route rendering, not deployment readiness.
+- Independent corrective review passed **55 focused tests** and found no
+  actionable source-level correctness/security/compatibility blockers. Real
+  Chromium remains the final integration gate for this correction.
+
+- Corrective exact-head [CI 38666160274](https://github.com/Neal86/Lucas/actions/runs/38666160274)
+  passed for `da565636407bcf41a31012d836da722bb83046c4`: Linux Python
+  3.11/3.12 each **377 passed, 9 skipped**, Windows Python 3.11 **379 passed,
+  7 skipped**, real Chromium OAuth/dashboard **5 passed** and extension
+  integration **1 passed**. Browser mail delivery remains synthetic only.
+
+## Development acceptance: extension grant cancellation (2026-10-15)
+
+Follow-on to PR #3 head `da565636407bcf41a31012d836da722bb83046c4`,
+addressing the PRD requirement that local browser authorization stays explicit
+and revocation cannot silently restore a cancelled tab grant. No real user
+browser, device, credential, deployment or production data is changed.
+
+- The unchanged extension could accept a late grant acknowledgement after
+  Revoke all had completed, restoring a locally usable browser session. A
+  deterministic runtime fixture reproduces the issue using the actual extension
+  source, synthetic Chrome/WebSocket interfaces and no real browser or account.
+- The fix isolates grant lifecycle state and cancellation from page actions,
+  correlates grant requests with acknowledgements, binds work to its originating
+  connection and prevents cancelled asynchronous setup from recreating access.
+- Revocation prevents later command dispatch after asynchronous boundaries. It
+  cannot undo a browser command already submitted to Chrome or reverse a page
+  change that has already occurred.
+
+### Compatibility and rollout boundaries
+
+- No MCP route, database schema, pairing-token format, browser permission,
+  Profile requirement or foreground-focus behavior changes. Existing approved
+  account checks and tab-scoped grants remain authoritative.
+- The updated extension requires a Node bridge that announces correlated grant
+  acknowledgement support. With an older bridge, granting fails closed with an
+  update message. The updated bridge retains legacy-extension compatibility;
+  the cancellation guarantee requires updating the extension as well.
+- The new lifecycle module must be present in both the extension ZIP and wheel
+  assets. Pairing remains local-only, and reconnection never automatically
+  authorizes a tab.
+
+### Regression evidence and remaining acceptance
+
+- **37 deterministic extension runtime cases passed**; the unchanged parent
+  extension failed **29**, with **8** controls passing. The tests load the actual
+  ES modules and cover cancellation before/after lookup and attachment, delayed
+  acknowledgements, remote revoke, duplicate/mismatched replies, old sockets,
+  overlapping pairing, timeouts, shared-tab owners and every multi-step command
+  dispatch boundary. These are synthetic interface tests, not live Chrome.
+- Independent review passed **21 interface-level probes** and the **37** runtime
+  cases. It found no remaining actionable blocker after stale attachment-state
+  and pending-acknowledgement revocation corrections. These extra state cases
+  were deterministic fixtures, not additional live-browser demonstrations.
+- Focused Python suite: **48 passed**. Full local Linux/Python 3.12 suite:
+  **415 passed, 9 skipped**. Python compilation, extension/module/runtime-test
+  JavaScript syntax and whitespace checks passed. Isolated HTTP page smoke:
+  **28/28 routes passed**, without claiming deployed readiness.
+- Built the wheel and generated the extension ZIP, then verified all **six**
+  extension assets byte-for-byte against the final source, including the new
+  lifecycle module. No extension store publication or device installation ran.
+- The real Chromium integration now also verifies explicit revoke/re-grant,
+  rejection of the old session and preservation of the unrelated foreground
+  tab. Local Chromium launch remains sandbox-blocked; the PR records the
+  published exact-head CI result for real-browser and Windows acceptance.
+- Deployed staging, actual Windows Node/Edge/ixBrowser operation, existing Stripe
+  subscription handling and explicit production approval remain release gates.
+  PR #2 is a divergent browser implementation, not a prerequisite to merge
+  wholesale: its additional capabilities require selective permission review.
+
+- Exact-head [CI 38667864932](https://github.com/Neal86/Lucas/actions/runs/38667864932)
+  passed for `84fd8e485acc59c56c2824181e1f0921f4ca173c`: Linux Python
+  3.11/3.12 each **415 passed, 9 skipped**, Windows Python 3.11 **417 passed,
+  7 skipped**, real Chromium extension **1 passed** and OAuth/dashboard
+  **5 passed**. Extension acceptance includes revoke/re-grant and foreground-tab
+  preservation; OAuth email delivery remains synthetic.
+
+## Development acceptance: password-control observation redaction (2026-10-15)
+
+The explicit CDP fallback now omits entered password-control values from the
+structured `browser.observe` element text, matching the extension's protection.
+Control identity, labels, type, visibility and disabled state remain available;
+ordinary input values and page text retain their existing behavior. This does
+not add arbitrary-page, screenshot or general sensitive-content redaction.
+
+- The unchanged evaluator exposed a synthetic password through the actual
+  Executor/observe path. Regression tests execute the production evaluator
+  against synthetic controls and preserve account/session ownership checks.
+- The existing isolated Chromium fixture connects an additional production CDP
+  session to its test browser, observes real DOM controls, then detaches without
+  closing the browser or changing foreground selection. No user browser or
+  credentials are involved.
+- No MCP response shape, route, schema, permissions, Profile requirements,
+  pairing behavior, device configuration or deployment changes are made. Only
+  the password control's text is withheld.
+- Dedicated regression suite: **9 passed**, with **6 failing on the unchanged
+  parent** and **3 compatibility controls passing**. Independent browser-focused
+  verification passed **11 tests**, with the opt-in real Chromium integration
+  explicitly skipped locally. Its extended fixture verifies both extension and
+  production Playwright-backed CDP observation, including mixed-case password
+  types, ownership checks and browser/foreground preservation after detach.
+- Independent review found no remaining blocker. Real Chromium execution is
+  pending published exact-head CI; local synthetic tests alone do not establish
+  browser integration acceptance.
+
+## Development acceptance: repeat computer activation (2026-10-15)
+
+Re-activating an already active computer now synchronizes the active set inside
+its existing SQLite transaction. The old branch opened a second writer while
+holding its own write lock, so an ordinary repeated activation could wait until
+SQLite raised `database is locked` instead of returning the selected computers.
+
+- The unchanged real SQLite path reproduced the failure after its default
+  **30-second timeout**. A regression fixture shortens only the test connection
+  timeout and fails on that parent in **0.61 seconds**, without production
+  timing changes or a live device.
+- **27 dedicated transaction tests passed**, covering WAL and DELETE journals,
+  repeat/stale requests, manual selection and eviction priority, bound-computer
+  ownership, Beta/legacy/expansion limits, overrides and expiry, rollback, and
+  HTTP audit/billing behavior after commit. Related activation/billing/admin/
+  Beta/UI checks passed **44 tests**; independent activation/OAuth checks passed
+  **53 tests** and found no remaining blocker.
+- No response format, route, schema, entitlement limit, account binding,
+  permission or deployment behavior changes. Existing manual choices and
+  transaction rollback remain authoritative.
+
+### Combined verification for the two fixes
+
+- Full local Linux/Python 3.12 suite: **451 passed, 9 skipped**. Python
+  compilation, extension JavaScript syntax and whitespace checks passed.
+- Isolated HTTP page smoke: **28/28 routes passed**. This is a disposable local
+  app fixture, not deployed staging or production readiness.
+- Built the wheel and verified both corrected Python modules and all **six**
+  extension assets byte-for-byte against source. No package publication or
+  installation on a user computer was performed.
+- Independent review passed **64 focused tests**, with **1** real Chromium test
+  explicitly skipped locally. Windows and real Chromium acceptance remain
+  pending the published exact-head CI result recorded on PR #3. Existing
+  staging/device/subscription/production release gates remain open.
+
+- Exact-head [CI 38669057105](https://github.com/Neal86/Lucas/actions/runs/38669057105)
+  passed for `71eebf5ee9bc8fe6db263fd8009a5362cd8a6402`: Linux Python
+  3.11/3.12 each **451 passed, 9 skipped**, Windows Python 3.11 **453 passed,
+  7 skipped**, real Chromium extension/CDP-fallback privacy **1 passed**, and
+  OAuth/dashboard **5 passed**. The fixture verified actual password-control
+  redaction and browser/foreground preservation. CI's PR merge tree exactly
+  matched the published development-head tree; email delivery was synthetic.
+
+## Development acceptance: isolated staging data configuration (2026-10-15)
+
+The development branch's `docker-compose.test.yml` directly bound the production
+Docker volume's host data path into the test gateway. Deploying that source
+unchanged could let staging read or modify production data. This source-only
+correction replaces the bind with `lucas-staging-data:/data` and an empty
+Compose-managed volume declaration. There is no global `name`, external volume
+reference or host path; [Compose scopes the volume to its project](https://docs.docker.com/reference/compose-file/volumes/).
+Production Compose and its data volume are unchanged.
+
+- Dedicated source regressions passed **4 tests**; the unchanged source failed
+  **3**, with its test-service configuration control passing. These validate
+  the mount/declaration and retained test-only settings without Docker or data.
+- No running application, mount, volume, credential, permissions, database or
+  deployment was changed. The current main-based staging app already declares
+  an independent named staging volume, which must be verified and preserved
+  when a future deployment is approved. This change does not copy, migrate,
+  delete or attach any data.
+- Before deployment, verify the selected app, exact commit, rendered Compose
+  mount, actual volume identity and separation from production. A new project
+  may receive an empty test volume. The app name alone is not evidence of its
+  branch or isolation. Runtime Docker and deployed-isolation acceptance remain
+  separate gates; this environment has no local Docker executable.
+- Full local Linux/Python 3.12 suite: **455 passed, 9 skipped**. Independent
+  review passed the **4** focused tests, confirmed **3** parent failures and
+  **1** passing control, and rejected five unsafe declaration/mount mutations.
+  No blocking source issue remained. These are fixed-shape source contracts,
+  not a general Compose parser or proof of a running mount.
+- Python compilation, extension JavaScript syntax and whitespace checks passed;
+  isolated local HTTP page smoke passed **28/28 routes**. Rebuilt wheel Python
+  modules and all six extension assets exactly match source. Exact-head CI and
+  future deployed acceptance are recorded separately on PR #3.
+
+
+- Exact-head [CI 38670017946](https://github.com/Neal86/Lucas/actions/runs/38670017946)
+  passed for `bad11e43a56c899a08617d8912c7254faae733e1`: Linux Python
+  3.11/3.12 each **455 passed, 9 skipped**, Windows Python 3.11 **457 passed,
+  7 skipped**, real Chromium extension/CDP **1 passed** and OAuth/dashboard
+  **5 passed**. The tested merge tree matched the published source tree. These
+  checks do not establish Docker rendering or deployed-volume isolation.
+
+## Development acceptance: computer onboarding and Chinese Beta copy (2026-10-15)
+
+The Connect computer dialog incorrectly counted every authorized computer as an
+active slot and refused to open at the account limit, even when those computers
+were offline. The backend already allows additional bindings and limits the
+active subset. The dashboard now follows that existing model: it opens the
+connection-code flow while local approval and server-side active limits remain
+authoritative. Opening the dialog sends no access request and grants no access.
+
+Chinese checklist, current connection instructions/status and Beta explanations
+use the existing shared translation catalog. The dynamically created checklist
+dialog also gets a localized accessible label. English remains the fallback.
+The README now describes the free Beta offer and its distinction from model
+tokens instead of advertising obsolete paid plans. Historical billing records
+and paid-plan implementation are retained.
+
+No API, schema, entitlement limit, permission, pairing, account/device setting
+or deployment behavior changes are included. This does not complete live Node
+installation/approval/reconnection, real email delivery or Stripe acceptance.
+
+### Regression and integration evidence
+
+- **54** executable rendered-runtime cases passed; **25 failed** on the
+  unchanged parent, with **29 compatibility controls passing**. The harness
+  loads actual composed functions/catalog and covers below/at/above-limit
+  offline bindings, explicit-submit/code/local-approval behavior, dialog reset,
+  reconnect prefill, dynamic Chinese checklist/labels and Beta notices.
+- Independent focused review passed **102 tests**, with **7** opt-in Chromium
+  cases skipped locally. Full local Linux/Python 3.12 suite: **509 passed,
+  11 skipped**. Compilation, JavaScript syntax and whitespace checks passed.
+- Isolated HTTP page smoke passed **28/28 routes**. Rebuilt wheel Python modules
+  and all six extension assets exactly match source.
+- Two new English/Chinese Chromium cases use real rendered UI, production HTTP
+  handlers and disposable SQLite records for offline computers. They exercise
+  the modal at capacity, immediate offline-request rejection, reconnect,
+  checklist/Beta localization and active-slot replacement without a live Node.
+  An independent fixture smoke verified login 202/200, offline-request 400 and
+  activation 200 with three active/four connected computers, and rejection of
+  the demoted computer; no RPC occurred.
+- Exact-head [CI 38671142116](https://github.com/Neal86/Lucas/actions/runs/38671142116)
+  passed for `236b3d8b81f687d2582ca100b0a0e7d3d23a9938`: Linux Python
+  3.11/3.12 each **509 passed, 11 skipped**, Windows Python 3.11 **511 passed,
+  9 skipped**, real Chromium extension/CDP **1 passed** and OAuth/dashboard/
+  onboarding **7 passed**. The tested merge tree matched the published source
+  tree. Browser email delivery was synthetic; no live Node was used.
+
+## Development acceptance: native browser handoff and popup errors (2026-10-15)
+
+The extension's fixed page-action function is isolated in `page_actions.js` and
+remains serialized into the authorized tab without accepting caller-supplied
+JavaScript. Directly resolvable light-DOM link and form navigation targets are
+checked before clicking:
+named/new contexts, inherited `base` targets and submitter `formtarget` overrides
+return the existing manual-handoff result. Explicit same-context overrides,
+ordinary same-tab controls and background operation remain supported. Native
+label forwarding to a submit control uses the same target check. A new target
+still needs the user's separate explicit tab authorization.
+
+This is a native light-DOM target guard, not a sandbox for arbitrary website
+event handlers, shadow/slotted activation, script-created windows or later page
+navigation. No automatic grant,
+new host/debugger permission, forced browser Profile or focus change is added.
+
+The popup presents action failures in a separate accessible error region that
+status polling does not overwrite. Rejected pairing requests retain their input
+for correction; transport and action errors are caught, and a successful retry
+clears the action error. A successful pair response only accepts the connection
+attempt: it does not establish that the Node has authenticated the supplied token.
+Existing connection status continues to report that later outcome.
+
+The distributable ZIP includes the new module along with the existing six
+assets. No bridge protocol, MCP API, database/schema, entitlement, real-user
+credential, live-device, deployment or persisted-user-data change is included.
+The extension must be updated to receive these source fixes.
+
+### First verification attempt
+
+- **131** serialized page-action runtime cases passed; the identical suite on
+  the unchanged parent failed **67**, with **64 compatibility controls passing**.
+  The harness runs the actual background-generated CDP expression in a separate
+  page context and checks that handoff happens before click/event side effects.
+- **23** shipped-popup runtime cases passed; the unchanged parent failed **20**,
+  with **3 positive controls passing**. Coverage includes polling, rejected and
+  malformed responses, transport failures, stale replies and revoke during a
+  pending tab query, plus retained input and ordinary owner/session rendering.
+- Independent review passed **200 focused tests**, with the opt-in Chromium
+  case skipped locally. The enclosing-anchor/label interaction and a browser
+  fixture assertion mismatch were corrected and rechecked; no blocker remained.
+- Full local Linux/Python 3.12 suite: **663 passed, 11 skipped**. Python and all
+  extension JavaScript syntax checks, whitespace, isolated HTTP smoke **28/28**,
+  wheel/source parity for all 77 Python modules and seven extension assets, and
+  ZIP asset/content/CRC checks passed.
+- The first Chromium fixture added the actual popup button retry flow,
+  **19** blocked native cross-context cases, **12** intended same-tab
+  navigation controls and ordinary controls. The initial run did not pass all
+  of those checks. Tab snapshots, a named unrelated tab,
+  request/click sentinels, unchanged grants and preserved foreground selection
+  accompany the prior upload/download/revocation/password/CDP checks.
+- Initial exact-head [CI 38672415949](https://github.com/Neal86/Lucas/actions/runs/38672415949)
+  failed for `f00b1579539db956f0f5ab3a25464dd21dc8a2d3`: both Linux suites
+  passed **663/11**, but the real Chromium fixture exposed an incorrect
+  assumption that an empty link target overrides an external base target.
+  Windows separately had one Node subprocess timeout in the existing password
+  observation fixture (**664 passed, 9 skipped, 1 failed**); no privacy assertion
+  failed. OAuth browser checks were skipped after the extension failure. This
+  failed run is retained, and the correction requires fresh exact-head CI.
+  The local browser restriction was not retried. These fixtures do not establish
+  live Windows Node, Edge/ixBrowser, staging or provider-email acceptance.
+
+### Chromium empty-target compatibility correction
+
+CI exposed a real difference between the [HTML target algorithm](https://html.spec.whatwg.org/multipage/semantics.html#get-an-element%27s-target)
+and Chromium's native behavior. A present empty `target` is preserved by that
+standard algorithm, but Chromium falls back to the first `base[target]` for an
+empty effective target. An empty submitter `formtarget` still overrides its
+form's target before that base fallback. The guard now conservatively handles
+this engine behavior; explicit `_self` remains unambiguous and empty targets
+without an external base continue working. The compatibility guard does not
+rewrite page attributes or click first to discover the destination.
+
+- Corrected serialized runtime suite: **159 passed**. The identical suite fails
+  **16** cases on the first fix, with **143 controls passing**; against the
+  original pre-extraction source it fails **84**, with **75 controls passing**.
+  Both original and failed-first-fix evidence are retained.
+- Expanded real Chromium fixture now has **27** blocked native target cases and
+  **15** same-tab navigation controls, including empty anchor/form/submitter
+  targets under named and blank bases, no-base empties and explicit self
+  overrides. Exact-head CI must establish the corrected browser behavior.
+- The pre-existing observation test gives the Node subprocess **30 seconds on
+  Windows and 10 elsewhere**. The CI failure was a timeout in a finite synthetic
+  map/JSON expression, with no failed privacy assertion; precise runner cause
+  was not measured. All assertions remain, with no retry or added skip. The
+  nine privacy cases pass locally and both timeout branches were checked.
+- Final full local Linux/Python 3.12 suite: **691 passed, 11 skipped**. Independent
+  corrected-source review passed **237 focused tests**, with **1** opt-in
+  Chromium case skipped and no remaining blocker. All extension JavaScript and
+  Python syntax, whitespace, HTTP smoke **28/28**, rebuilt wheel/source parity
+  for all 77 Python modules/seven assets, and ZIP content/CRC checks passed.
+  Fresh exact-head Windows and real Chromium CI remains the acceptance gate.
+
+- Corrected exact-head [CI 38673170272](https://github.com/Neal86/Lucas/actions/runs/38673170272)
+  passed for `b9761c79c04b428bccdd9c785ec32120917652a2`: Linux Python
+  3.11/3.12 each **691 passed, 11 skipped**, Windows Python 3.11 **693 passed,
+  9 skipped**, actual Chromium extension/CDP **1 passed** with all 27 blocked
+  targets and 15 same-tab navigation controls, and OAuth/dashboard/onboarding
+  **7 passed** with synthetic email delivery. The CI merge tree exactly matched
+  the tested/published source tree. The preceding failed run remains recorded.
+
+## Atomic Operation admission and reviewable unresolved work
+
+The gateway now reserves the minimum required quota before dispatching a Node
+RPC. The new `operation_admission.py` service uses an additive
+`operation_reservations` table and a SQLite `BEGIN IMMEDIATE` transaction, shared
+with the entitlement check. The lock ends before the remote await, preserving
+concurrent tasks below the limit while preventing two callers from consuming
+the same final available unit. Every serving gateway must be upgraded for this
+guarantee; a mixed fleet with the old check-only path is not covered.
+
+An explicit negative Node response is a confirmed failure. Confirmed success or
+failure atomically creates its task step, updates task/usage totals, writes the
+execution audit, and settles the reservation. Repeating settlement does not
+charge again or change the first confirmed outcome. The Node wire protocol is
+unchanged. Timeout, transport loss, cancellation and expired pending work remain
+separate unresolved records: they do not establish failure, create completed
+task steps, or increment success/error totals.
+
+The entitlement projection keeps `requests_used` as confirmed completed usage,
+adds `requests_pending` and `requests_unconfirmed`, and subtracts all three from
+`request_remaining`. Both held and completed units use the admission timestamp
+within the effective current billing period. A late result therefore converts
+its hold to completed usage in the same period without charging twice; it does
+not move into the completion month. This also applies when paid subscription
+windows overlap after a plan change. Beta uses fixed UTC calendar months, so
+prior-month unresolved records stop holding the next month's capacity while
+remaining available for review. Original admission-period boundaries remain
+historical metadata, not a separate timer that refunds current quota.
+
+This admission/review layer never retries or refunds unknown work. Existing
+same-request transport reconnect/replay behavior is unchanged; this is not an
+end-to-end exactly-once execution guarantee. Its deadline changes
+the displayed state rather than cancelling the Node operation. Pending records
+survive process restart; reading the recovered store marks expired records
+unconfirmed. If a confirmed Node result arrives but its local settlement fails,
+all accounting writes roll back. The original result is preserved without
+re-dispatch, and best-effort metadata labels the record **Accounting unconfirmed**
+with the known success/failure. If storage also rejects that annotation, the
+durable pending minimum remains and becomes outcome-unconfirmed after recovery.
+An administrator can review evidence and use the existing Extra Operations
+control to grant replacement capacity; that does not settle the unknown result.
+No new release, refund or retry endpoint is provided.
+
+Shell admission still reserves a minimum of one unit. A confirmed result uses
+the existing runtime operation count, with the existing static fallback; it can
+exceed that minimum and the plan limit, after which further admission is blocked.
+This is not a hard execution ceiling. A count lost with a gateway crash cannot
+be reconstructed without a larger Node protocol change; the minimum remains
+reviewable. Commands, output and exception messages are not persisted in the
+new ledger. Source/agent/session/task metadata is sanitized, and transition
+audits carry a reservation ID linking to that metadata.
+
+Dashboard, billing, task history and admin user detail share the isolated
+`web_operation_usage_runtime.py` renderer. English and Chinese labels distinguish
+completed Operations, pending/unconfirmed held units, remaining quota, current
+reset and historical records. The task/admin APIs add owner-scoped unresolved
+records with the existing node/time filters; completed summaries retain their
+old meaning. Beta's free-price explanation and paid-control suppression remain.
+The existing privacy test now uses the explicit confirmed-error type for its
+known-failure fixture; the onboarding runtime harness includes the new composed
+renderer. Their assertions remain intact.
+
+This is source and disposable-fixture validation only. The additive schema is
+initialized when the new admission path is used; no live database migration,
+deployment, provider operation or real-user device action was performed.
+
+### Verification
+
+- The same barrier-held last-slot gateway regression dispatches **two** RPCs on
+  unchanged parent `1f479030457462af20fa15ae60268316109fc6d4`, and exactly **one**
+  with the fix. Below-limit calls still overlap rather than serializing remote
+  work. All activity uses disposable stores and synthetic registry responses.
+- **64 new tests** pass: **24** service/SQLite cases, **28** gateway/HTTP cases,
+  and **12** composed-JavaScript/API cases. Coverage includes cross-process
+  admission, duplicate settlement, transactional failure at each accounting
+  stage, double bookkeeping faults, restart/deadline behavior, month/day and paid
+  overlap attribution, owner isolation, shell counts, sanitized metadata and
+  English/Chinese rendering.
+- Independent review passed **186 focused tests** with no remaining source
+  blocker, plus a 32-reservation concurrent-settlement/snapshot stress probe.
+  Review corrected the paid-overlap attribution and late accounting-evidence
+  enrichment. Full regression caught a context-manager integration mismatch in
+  the snapshot helper; its existing connection contract was restored without
+  changing the active-computer tests.
+- Final local Linux/Python 3.12 suite: **755 passed, 13 skipped**. Python compile,
+  all three final-page JavaScript blocks, extension module syntax, whitespace,
+  isolated real HTTP page smoke **28/28**, and wheel/source parity for **79**
+  Python modules and all **7** extension assets passed.
+- The two new real-Chromium English/Chinese cases preserve all seven previous
+  cases. They cover dashboard/billing/task/admin usage distinctions, historical
+  records, metadata, authorization, localized reset/review help and Beta's $0
+  offer. Their disposable HTTP fixture passes with real production handlers,
+  SQLite and synthetic mail; browser execution remains the exact-head CI gate.
+  Local Chromium restrictions were not retried. Staging, live Windows Node,
+  Edge/ixBrowser, provider email and existing Stripe handling remain separate
+  acceptance gates.
+
+- Exact-head [CI 38674977570](https://github.com/Neal86/Lucas/actions/runs/38674977570)
+  passed for `988ad2984589273de324e0fcbb89be3d858c727b`: Linux Python
+  3.11/3.12 each **755 passed, 13 skipped**, Windows Python 3.11 **757 passed,
+  11 skipped**, real Chromium extension/CDP **1 passed**, and
+  OAuth/dashboard/onboarding/usage **9 passed** with synthetic mail. The two
+  new English/Chinese usage flows passed in the real browser. Merge
+  `f36cf39c82b1b02dc4869c5e41b9850aa8510357` had exactly the tested/published
+  tree `ea60427d5cd3d9e41c97f1c7474b7036cd27f523`, covering all 185 blobs.
+
+## Registration UI state and localized Computer Node guidance
+
+The registration client now lives in `web_registration_runtime.py`, composed by
+the existing core runtime. Registration, verification and resend share the
+existing auth-mode generation. Mode switches clear pending email/code/metadata,
+cooldowns and disabled state. Requests capture their own payload and target;
+duplicate submissions and overlapping verification/resend are blocked. Stale
+responses cannot reopen the old form, replace the current error, reset Turnstile,
+restart cooldowns, fire completion tracking or start an obsolete dashboard boot.
+Current successful flows retain their busy lock through the existing guarded
+`/auth/me` and dashboard refresh sequence.
+
+These are client-side state guarantees. Server registration/verification may
+already have committed, sent mail or issued a cookie before a response becomes
+stale; ignoring that response does not undo those effects. No server cancellation,
+revocation, HTTP API, schema or authentication-policy change is included. Existing
+password/email/Turnstile payloads, backend expiry/resend rules, 60-second client
+cooldown and login behavior remain in place.
+
+The standalone `/docs/computer-node` page now uses the shared browser-language
+runtime and authoritative English/Chinese catalog, including page title,
+description, HTML language and accessible labels. English remains the fallback.
+Its existing sticky/responsive layout, download/navigation destinations and
+checklist separation remain. Setup explicitly states that a newly requesting
+account requires local approval after code verification. The connection-code
+FAQ describes current/regenerated codes rather than claiming automatic expiry.
+
+The guide documents the existing Settings → General → Lucas Node update controls,
+version/reconnection checks and local permissions. It does not add or run an
+updater. The current default installer/updater reads GitHub `main`; a development
+checkout or staging page does not establish that those changes are installed on
+a Windows computer. Actual install/update/reconnection and Edge/ixBrowser
+compatibility still need an explicitly authorized device acceptance session.
+
+The CI browser step includes a separate guide test file alongside the existing
+OAuth/dashboard suite. All fixtures use loopback HTTP, isolated state and
+synthetic email; source checks do not replace staging or real-device acceptance.
+
+### Verification
+
+- Unchanged `348fbc1b0f6d7e4b4019398af10e1401b3b9f3d7` failed **15**
+  supplied registration guard regressions, with **1** existing resend control
+  passing. Separate actual-composed-boot probes demonstrated late registration
+  and verification opening the old dashboard after a mode change.
+- The fixed registration runtime passes **71** dedicated cases and preserves
+  all **34** existing auth-mode tests. Coverage includes current success/error
+  retry, payload snapshots, mutual exclusion, stale responses/finally callbacks,
+  mode reset, English/Chinese labels, and current/stale boot and refresh results.
+- The final guide contract/runtime set passes **25** cases; identical tests
+  against unchanged `348fbc1` fail **14**, with **11** compatibility controls
+  passing. Six Chinese language variants/fallbacks, English/unsupported-language
+  fallback, all translated text/attributes, unchanged links and update/approval
+  guidance are covered. Existing setup/checklist assertions remain.
+- Full local Linux/Python 3.12 suite: **849 passed, 43 skipped**. Python compile,
+  final dashboard/guide script syntax, all extension JavaScript, whitespace,
+  real isolated HTTP page smoke **28/28** and wheel parity for **80** Python
+  modules plus all **7** extension assets pass.
+- Independent review passed **247 focused tests**, **90** response-order stress
+  combinations and **12** real boot/refresh-ownership probes, with no remaining
+  source/test blocker. The fixture's ASGI observer and response gate preserve
+  chunked bodies, cookies/headers, early errors and non-HTTP pass-through.
+- The browser suite preserves its original **9** cases, adds **28** parameterized
+  English/Chinese registration cases and **2** standalone guide cases. Real
+  production HTTP/SQLite handlers pass synthetic-mail fixture smoke, including
+  held verification, cookies, errors and guide/logo responses. Guide cases check
+  actual accessibility names, desktop/mobile layout and sticky behavior without
+  activating downloads or updater actions. All **39** web cases still require
+  exact-head CI; no local Chromium retry was performed.
+
+### Cross-platform fixture correction
+
+- First exact-head [CI 38676427766](https://github.com/Neal86/Lucas/actions/runs/38676427766)
+  for `5346900cb83a600bb9bc7e62bfbea60d1d521f8d` passed Linux Python 3.11/3.12
+  (**849 passed, 43 skipped** each), real Chromium extension/CDP (**1 passed**)
+  and all **39** web browser cases. Windows had **106 failed, 745 passed,
+  41 skipped**: every failure was `WinError 206` while starting the shared
+  dashboard-auth Node fixture, before any JavaScript assertion could execute.
+  This failed run is retained rather than represented as full acceptance.
+- The rendered command measured **40,990 UTF-16 command-line units** in an
+  independent probe, above the [Windows CreateProcessW limit](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+  `tests/test_dashboard_auth_modes.py` now supplies the unchanged generated
+  script through [Node's stdin entry point](https://nodejs.org/api/cli.html),
+  explicitly using UTF-8. The shared-login-policy test already delegates to this
+  helper and needs no file change. Production code and existing assertions are
+  unchanged.
+- An enclosing function preserves the fixture's previous declaration scope.
+  Plain stdin alone exposed functions on `globalThis`, where named DOM stubs
+  overwrote `authError`; the initial local stdin-only attempt failed **107**
+  cases and was corrected before publication. Independent review reproduced
+  this scope issue, including the ineffective explicit CommonJS-mode variant.
+- A new large Chinese-script regression failed on the original `-e` transport
+  and checks short argv, explicit UTF-8, scope wrapper and completed execution.
+  It adds no skips, retries or relaxed assertions. Windows and real Chromium
+  still require a fresh exact-head CI result for the corrective commit.
+- Corrected full local Linux/Python 3.12 regression: **850 passed, 43 skipped**.
+  Independent focused review: **134 passed**; all existing test assertions are
+  unchanged, six generated EN/Chinese/boot/refresh inner scripts are byte-identical
+  to the previous transport, and a greater-than-1-MiB Unicode stdin stress probe
+  passes. Python compile and whitespace checks pass; the unchanged product wheel
+  still matches all **80** Python modules and **7** extension assets.
+
+
+## Task and activity history response ownership (2026-10-16)
+
+Task Run period/refresh requests and Activity Log filter requests now keep independent
+latest-request generations. Only the latest request in the same authenticated user
+and login generation may render rows, totals, or unresolved-operation evidence. An
+obsolete success, failure, or 401 cannot replace a newer view or reopen authentication
+after a later successful request. Current network/server failures remain observable;
+a current 401 still opens authentication and invalidates pending history requests. No API, schema, quota, permission, or stored
+audit-data contract changes. The implementation lives in `web_history_runtime.py`,
+composed by `web_core_runtime.py`.
+
+`tests/test_history_response_ownership.py` executes the actual composed dashboard
+runtime with controlled response ordering, auth mode changes, account replacement,
+repeated navigation, and independent task/activity requests. These deterministic
+regressions are not real Windows/device, provider-email, or deployed staging evidence.
+The approved staging deployment remains pinned to the separately reviewed commit.
+
+
+## Administrative read-response ownership (2026-10-16)
+
+Admin tabs, their user-search/operation-filter reads, and the selected-user detail
+modal now bind responses to the current view, request, authenticated user and login
+generation. A newer selection, Close/Escape, navigation away, or authentication reset
+invalidates older UI responses, including obsolete errors/401s. Selecting a different
+user clears the previous edit view while loading. Search/filter responses also belong
+to the exact parent tab instance. Existing renderer escaping, account controls, API
+URLs/payloads, backend authorization, and entitlement behavior remain unchanged.
+
+A dispatched account-save request still executes normally. Its captured UI owner only
+controls response-side authentication, notifications and subsequent detail refresh.
+Closing/replacing the modal does not cancel, undo, retry or promise failure of that
+mutation; a stale save completion cannot open a fresh selection. No mutation effects,
+server authorization, schema, stored data, dependencies or deployment config change.
+
+The read module is `web_admin_read_runtime.py`; dedicated synthetic runtime regressions
+cover response ordering and interrupted UI lifecycles. Deterministic mocks and hosted
+CI remain separate from real device, provider-email and deployed staging acceptance.
+
+
+## Dashboard snapshot response ownership (2026-10-16)
+
+Dashboard refreshes now bind the nodes, recent activity, AI-connection list and
+usage snapshot to the latest read in the same authenticated account and login
+generation. The existing boot caller predicate is retained. An obsolete success,
+error or 401 cannot replace newer data or reopen authentication for a newer
+session. Current non-auth failures remain visible to callers; a current 401
+still returns to authentication. Guest refreshes dispatch no reads.
+
+Authentication reset and a new-account boot clear these account-owned caches and
+displays before the new account's pending refresh can expose previous rows. This
+does not clear unrelated form drafts, filters or local storage. Existing renderers,
+API routes/payloads, quota calculations, backend mutations/authorization, local
+Node policy and realtime behavior are retained. This is UI response ownership,
+not request cancellation or a server access-control change.
+
+The isolated module is `web_dashboard_read_runtime.py`; deterministic regressions
+execute the actual composed runtime with controlled HTTP/JSON ordering and
+auth/visibility/logout transitions. Synthetic fixtures and hosted CI remain
+separate from deployed staging, provider-email and real-device acceptance.
+
+
+## Computer connection modal response ownership (2026-10-16)
+
+The Connect computer modal now owns each explicit access request by its modal,
+account/login generation, attempt sequence and input revision. Repeated Send
+actions within the current attempt dispatch only one POST; the button stays busy
+until its response and current dashboard refresh settle. Close/Escape, navigation,
+auth reset, a reopened modal or edited input prevent old success/error/401 results
+from changing the current form. A stale finalizer cannot unlock a newer attempt.
+New attempts retain the existing node/code validation, exact API payload and
+local-approval wording; current errors remain visible and allow deliberate retry.
+
+An access request already sent may still become pending or approved on the server.
+Closing the modal or suppressing its response does not cancel, reverse or retry
+that effect. The client never bypasses local approval and does not alter backend
+authorization, Node policy, persisted permissions, APIs or schemas. Unrelated
+drafts and stored state are unaffected. The isolated runtime is
+`web_computer_connection_runtime.py`.
+
+Dedicated deterministic regressions exercise actual composed UI code and model
+dispatched effects separately. The separate Chromium suite uses the real loopback
+offline-node handler as one control, and explicitly synthetic response ordering
+for only the fixture-origin access-request POST in other cases. These browser
+checks validate frontend behavior, not live pairing or device approval. Windows
+Node/device, deployed staging, provider email and existing-subscription handling
+remain separate acceptance gates.
+
+
+## AI-connection frontend module extraction (2026-10-16)
+
+Existing AI-connection list rendering, setup URL/help, edit/save and confirmed
+delete UI now live in `web_ai_connection_runtime.py`. The core composes two
+fragments at their original positions so rendered JavaScript and execution order
+remain unchanged. This is a structural extraction, not a new connection feature
+or a change to request ownership, authorization or mutation effects.
+
+Focused in-memory runtime contracts preserve current rendering/escaping, setup
+limits/help, clipboard fallback, edit payloads, confirmation and failure paths.
+They make no real HTTP, OAuth, clipboard or navigation calls. The existing
+composed-page regressions and hosted browser tests remain required. API routes,
+backend permissions, schema, persistent data, dependencies and deployment
+configuration are unchanged; deployed and real-device acceptance remain open.
+
+
+## AI-connection metadata editor response ownership (2026-10-16)
+
+The metadata editor now lives in `web_ai_connection_editor_runtime.py`, composed
+by the AI-connection module. Each Save captures its target and trimmed name/note
+once, with modal, account/login, request and input ownership. Repeated Save calls
+within one active attempt dispatch one PUT. Close/Escape, another selection,
+navigation, auth/account replacement or edited fields invalidate old success,
+error and 401 UI effects. An old finalizer cannot unlock a newer save. Delayed
+focus also belongs to the editor that requested it.
+
+A current successful PUT still hides the editor and refreshes the dashboard;
+its busy lock and response ownership remain through that read. Current failures
+are visible, current 401s still return to authentication, and deliberate retry
+is available. Dispatched saves may already have updated server metadata; UI
+suppression does not cancel, undo, automatically retry or guarantee ordering of
+those writes across reopened editors. The exact PUT route/payload and backend
+authorization remain unchanged. Delete/Disconnect, OAuth grants and revocation,
+setup/help, list rendering and clipboard behavior are outside this change.
+
+Dedicated actual-composed-runtime regressions and isolated Chromium cases cover
+interrupted and repeated flows in English and Chinese. Browser metadata PUTs use
+explicit fixture-only synthetic responses; no real OAuth connection or user
+record is modified. These checks do not establish deployed or real-device
+acceptance. No schema, permission, dependency or deployment change is included.
+
+
+## Task-history timing and computer-filter accuracy (2026-10-16)
+
+Operations that already belong to the same task run now preserve the earliest
+start and the latest completion/activity timestamp, regardless of completion
+order. For example, when a slow operation starts before a fast operation but
+finishes later, the run includes the slow operation's full time span. A delayed
+older completion cannot move the run's end backward or make it appear idle early.
+Nullable legacy end timestamps fall back to the existing activity timestamp.
+The update remains atomic with the recorded step and the caller's transaction;
+operation replay does not change the first recorded result or counters.
+
+The task-history API applies the selected computer to completed summary totals
+as well as displayed runs and unresolved work. The isolated `task_history.py`
+projection uses the same owner/computer/period conditions for its three totals,
+read in one SQLite statement. Summary totals still cover the full selected scope,
+not just the displayed page. Runs and individual steps retain their existing
+start-time period attribution, so a period boundary crossing can still select
+individual steps independently of the run's initial start.
+
+Existing candidate selection, task grouping, idle threshold, title upgrades,
+API shape, authentication, quota settlement, weighted Operation counts and
+unresolved-record semantics remain unchanged. This is not historical repair:
+reads do not rewrite old task boundaries, and no schema migration, backfill,
+live data operation or deployment is included. Long-operation grouping and
+literal-context matching are separate follow-up work outside this correction.
+
+Dedicated regressions exercise real disposable SQLite admission/settlement and
+authenticated HTTP routes, including reverse completion, delayed records,
+transaction rollback/replay, legacy nullable ends, account/computer/period
+isolation and page-independent totals. Synthetic records do not establish real
+Windows/device, provider email or deployed-staging acceptance.
+
+
+## Task-context wildcard grouping correction (2026-10-16)
+
+An untitled operation's lookup for an existing titled task now treats percent
+and underscore characters in its context as literal data. Previously, a context
+such as `synthetic_workspace` could join a task for `syntheticXworkspace`, and
+`synthetic%workspace` could join `syntheticXYZworkspace`. This mixed task labels
+and steps within the same account/computer despite different supplied contexts.
+
+The isolated `task_run_context.py` query service uses a parameterized literal
+prefix comparison, avoiding SQL wildcard interpretation and LIKE pattern-size
+limits. A constant LIKE probe retains the caller connection's ASCII case policy;
+SQLite's ASCII-only LOWER is used only when that policy folds case. Default,
+case-sensitive and non-ASCII behavior are explicitly covered. Quotes, backslashes,
+Unicode, percent/underscore and marker characters remain context data. Embedded
+NUL characters also retain their full identity instead of LIKE truncating them.
+
+The exact-context branch, stored key format, latest-candidate ordering, title
+promotion and idle threshold are unchanged. This is not path normalization or
+a new context schema. Ambiguity in the existing `::task::` delimiter remains a
+separate concern. An initial escape-based candidate was rejected during review:
+escaping a long context could exceed SQLite's pattern limit and fail settlement.
+The literal-prefix implementation has long-context settlement and HTTP regressions.
+
+Account/computer ownership filters, API shape, quota/weighted Operation counts,
+settlement transactions and immutable replay are preserved. No historical task
+rows are split, renamed or backfilled; no schema, dependency, permission,
+deployment or live-data change is included. Dedicated real SQLite/admission and
+authenticated local HTTP regressions cover the collisions, valid joins, filter
+scope, accounting totals and failed-settlement rollback/retry. Real device and
+deployed acceptance remain separate gates.
+
+
+## Billing read ownership and shared quota projection (2026-10-16)
+
+Billing-summary requests now belong to the current authenticated user object,
+login generation and a shared snapshot sequence. The dashboard's `/api/nodes`
+response contains the same BillingService summary and participates in that same
+sequence. Only the latest-started eligible read can replace the shared billing
+cache. A late Billing result cannot overwrite a newer dashboard quota, and a
+late dashboard result cannot overwrite a newer Billing quota. Existing dashboard
+ownership still governs its other rows and HTTP/authentication effects.
+
+Each accepted billing snapshot renders both dashboard usage and Billing usage,
+limits, price and subscription notice from one value. A newer failed request
+retains the previous committed same-account snapshot; it does not authorize an
+older request to commit afterward. Current Billing failures remain visible and
+allow explicit retry. Obsolete Billing failures and 401s cannot replace feedback
+or sign out a newer session. Account reset or a new-account boot clears prior
+Billing price/renewal/usage/limit/notice/error displays before pending reads can
+expose them; unrelated form drafts, filters and local storage are preserved.
+
+The isolated module is `web_billing_read_runtime.py`; existing Billing and
+Dashboard modules compose it. Paid checkout/expansion/portal callbacks and their
+payloads are unchanged. This is frontend read-result ownership, not cancellation
+of requests, server authorization, quota policy or subscription handling. The
+Beta page stays visible and free; no API/schema, dependency, permission,
+backend mutation, persistent-data or deployment change is included.
+
+Dedicated deterministic cases execute the actual composed page, including
+cross-source ordering, delayed JSON, account/login changes, stale/current errors,
+cache/DOM agreement and legacy paid rendering. Existing partial auth/history/onboarding
+fixtures load the real dependency and enter a signed-in state for billing reads.
+The separate English/Chinese Chromium suite runs against disposable loopback
+accounts and synthetic email, with delayed delivery of fully received real JSON and explicitly synthetic
+read outcomes where stated. It does not establish provider-email, historical
+Stripe, real Windows/browser or deployed-staging acceptance. Those gates and
+previously paused security work remain open.
+
+
+### Billing browser-fixture transport refinement
+
+The first hosted run passed all unit/extension checks and 67 web cases, but the
+two new real-summary cases timed out: the test withheld an entire HTTP response
+while awaiting a second identical GET. This observation does not establish a
+production ownership defect or uniquely identify the browser transport cause.
+The fixture now lets the first native HTTP/JSON read complete and holds only
+its parsed-payload delivery to the production API client. The newer read remains
+native and receives the real updated disposable-store summary before the old
+payload is released. Response status/headers and payloads remain unmodified;
+production code and timeout settings are unchanged. The corrected exact-head
+hosted browser result must pass before this slice is called CI-verified.
+
+## Account/session lifecycle batch (2026-10-16)
+
+This related frontend batch starts from PR #4 commit `9105b11`. Eleven baseline
+probes reproduced account-display failures across bootstrap/logout, referral
+summaries, event callbacks and setup-hint timers. These paths are verified as one
+batch, with focused checks while editing and a final combined regression/review
+and exact-head CI matrix, rather than publishing each small correction separately.
+
+### Account bootstrap and logout
+
+`web_session_lifecycle_runtime.py` owns the extracted bootstrap/logout functions
+and identity-display reset. Only the newest eligible bootstrap may set the user,
+render identity/role-dependent navigation or finish its dashboard/realtime/setup
+follow-ups. Its ownership survives its own user assignment but is invalidated by
+authentication reset, a replacement account, a newer bootstrap or an obsolete
+caller. Current authentication failures still open sign-in; current dashboard
+read failures retain the signed-in page and existing retry notice. Account reset
+clears old identity/referral presentation and administrative navigation without
+clearing unrelated form drafts, filters or local storage. The current role controls
+both showing and hiding the Admin navigation item; server authorization is unchanged.
+
+Logout retains the same POST and current response/error behavior. Its UI completion
+belongs to the logout attempt, login generation and stable account identity. A
+same-account bootstrap creates a fresh user object without making the user's
+pending logout obsolete; a later login or different account does. Ignoring a stale
+completion does not cancel, reverse or retry a dispatched logout, prevent its
+server-side cookie effects, or guarantee ordering across concurrent browser tabs.
+The real browser regression explicitly lets the original logout remove its cookie
+before a second real login, then releases only the old parsed response delivery.
+
+### Referral summaries and realtime display
+
+The existing referral module now gives reads a latest-request owner tied to the
+exact user and login generation. Late success/error/401 responses cannot replace
+a newer summary or sign out a newer session. Reset clears the previous account's
+invite URL, counts and feedback. Current failures and explicit retries remain
+observable; a newer failure does not permit an older response to overwrite the
+committed same-account summary. Referral awards, code creation, cookie attribution
+and copy-link effects remain unchanged; response suppression does not undo work
+already performed by the server.
+
+`web_realtime_runtime.py` owns the extracted event socket and timers. Socket,
+account, login and socket-generation ownership guards open/message/close callbacks,
+heartbeats, watchdogs, reconnect timers and event-triggered refresh completion.
+Stopping or replacing a socket retires its callbacks and owned timers, so queued
+old events cannot restore previous-account computer rows or disrupt the current
+socket. Current heartbeat intervals, watchdog threshold, reconnect backoff/jitter,
+recovery refresh, event rendering and endpoint remain. This is browser presentation
+ownership, not a server subscription-revocation, device-access or permission change.
+
+### Setup guidance
+
+The existing onboarding module ties rendered checklist actions and delayed hints
+to their exact account/login and checklist/hint generation. Closing, reopening,
+re-rendering, signing out or replacing the account invalidates obsolete callbacks;
+an old delayed hint cannot mark the next account's storage key, and an old dismiss
+callback cannot hide a newer hint. Only the owned timers are canceled. Localized
+content, per-email completion/hint keys, navigation, unrelated storage and the
+existing computer/AI/permission completion criteria are retained. A completed
+checklist is not new evidence that local permissions or devices were verified.
+
+### Verification scope
+
+The composed-page suites exercise current and stale HTTP/JSON outcomes, concurrent
+boot/logout, same-account reboot, role changes, referral ordering, socket/timer
+replacement, current reconnect/heartbeat behavior, setup lifecycle and EN/ZH
+presentation. Eleven original baseline probes fail before the batch and have
+corresponding regressions. Review additionally protects the intended logout
+through a same-account object replacement. Partial auth/checklist fixtures load
+the real module dependencies and use separately controlled timer identities.
+
+A combined opt-in Chromium file adds twelve EN/ZH cases. Real disposable SQLite,
+HTTP, login/logout cookies and referral summaries are used where stated; only
+parsed-payload delivery is held after native HTTP completes. Separate synthetic
+cases exercise a stale referral 401, event callbacks and hint timers. Browser
+fixtures are loopback-only, use synthetic email delivery and never connect a Node,
+change a real subscription, award a referral or contact an external provider.
+The existing browser fixture gains the real referral-summary route only. The
+existing CI matrix includes this combined browser file.
+
+No backend/API/schema, entitlement/Beta policy, local Node/files security, deployed
+configuration, dependency or persistent live-data change is included. No canceled
+wheel session is read or retried. Deployed staging smoke, real Windows/Edge/ixBrowser,
+provider-email, historical Stripe handling and paused security acceptance remain
+separate open gates. The approved deployment pin remains `d7e09e7`; this newer
+review branch is not covered by that deployment approval.
+
+## Consolidated inspection and frontend acceptance batch (2026-10-16)
+
+The full-PRD inventory was completed before this repair batch: 43 requirement
+rows and all six explicit acceptance criteria were mapped to implementation,
+existing tests, reproducible issues and remaining gates. Static inspection and
+fixture evidence do not constitute full runtime acceptance. The preserved
+account/session work above and the related management/rendered-page gaps below
+are now validated and published together rather than one defect at a time.
+
+### Computer management and AI deletion
+
+New `web_computer_management_runtime.py` and
+`web_ai_connection_delete_runtime.py` keep this behavior out of the core
+composition file. The computer modal captures its node, account/login, modal
+and request generations; rename also captures the input revision. Late log
+responses cannot populate a different/reopened modal, and stale 401/error
+responses cannot hide a replacement login. Current Save, log Refresh, activation
+and Delete controls expose owned busy state. Duplicate current mutations are
+suppressed without automatically retrying, canceling or reversing any request.
+
+Cache reconciliation is deliberately separate from presentation ownership.
+Successful rename/Delete responses may reconcile the captured account's target
+cache after Close/navigation when their per-target mutation token is still the
+latest. This does not overwrite a newer unsaved input, show an obsolete toast,
+or alter a replacement account. Successful activation retains its same-account
+read-only refresh after navigation. Authentication reset and accepted user
+replacement retire these cache tokens; newer same-target mutations supersede
+older ones. The existing confirmation text, endpoints, encoded identifiers,
+payloads, backend authorization and OAuth/device effects are unchanged.
+
+A committed cache change invalidates older pending dashboard snapshot reads via
+one shared dashboard sequence, preventing an old read from restoring the deleted
+row or old name. Current failures remain visible and allow deliberate retry.
+Reset hides the computer modal and clears account-owned readonly details/logs,
+while retaining unrelated drafts and storage. Reading actual local logs still
+requires the existing server and Node policy; these tests use synthetic lines.
+
+Independent whole-diff review found and reproduced a same-account cache regression
+in the first candidate: Delete → navigate → success → return retained the deleted
+row, and Save → Close → success → reopen retained the old name. Both baseline
+controls passed. Cache/presentation ownership was separated as described above,
+and dedicated regressions preserve reconciliation without weakening account or
+stale-response boundaries. The first full local run also found two partial
+operation-usage fixture failures; that fixture now includes the actual extracted
+dashboard sequence declaration rather than inventing a test-only substitute.
+
+### Rendered routes and viewports
+
+`tests/test_web_acceptance_chromium.py` adds 28 parametrized cases covering every
+path in the 28-route smoke catalog across EN/ZH and desktop 1365×900/mobile
+375×812. It mounts actual production routes over disposable loopback SQLite/auth
+fixtures. Assertions check expected content, redirects, JavaScript exceptions,
+unhandled rejections, viewport overflow, pointer hit targets, accessible control
+names, Beta pricing, registration, authenticated/admin deep links, browser history
+and management modal Close/reopen. Existing untranslated informational/legal and
+administrative copy is recorded as shipped, not silently treated as localized.
+
+`tests/test_computer_management_chromium.py` adds ten EN/ZH cases around the actual
+composed page, including real isolated login/logout cookies. Only exact fixture-
+origin synthetic computer/AI operations are intercepted. It verifies encoded
+payloads, current failure/retry, duplicate controls, stale selection/account
+responses and same-account cache reconciliation. It does not exercise a real
+permission dialog, local computer, OAuth grant/revocation or external provider.
+The CI Chromium command includes both files and the twelve lifecycle cases above.
+
+### Verification and remaining gates
+
+The six management problems from inventory were reproduced in EN/ZH against
+published `9105b11`: twelve failing cases and two passing current-read controls.
+The same fourteen probes pass after repair. Focused suites exercise the full
+emitted runtime, and the complete available regression matrix follows the final
+combined corrections. Exact executed totals and CI commit/run links belong in
+the PR evidence; collected or skipped browser tests are not reported as passes.
+
+The first full local pass was 983 passed, 123 skipped and two failed fixture cases
+with three existing warnings. This retained failure evidence drove the combined
+correction above; it is not a successful final acceptance result. Chromium is
+executed in the existing hosted job, not inferred from local collection.
+
+Task-context delimiter ambiguity remains a separate schema/legacy-data design
+issue. Main/review branch and release-version divergence must be reconciled before
+production distribution. DevOps recovery, exact approved isolated staging health
+and deployed smoke, real Windows/Edge/ixBrowser, email/provider configuration,
+historical paid subscriptions and the paused Node/files security findings remain
+open. No release branch merge, live deployment, canceled wheel-session read,
+backend/schema/permission change or security-audit resumption is part of this batch.
+
+### Collected hosted responsive failures and correction
+
+The first complete hosted run for `f3265c8` passed the ordinary matrix (Linux
+985 passed/123 skipped on each Python version; Windows 987 passed/121 skipped),
+extension integration (1 passed), and 113 web Chromium cases. Six mobile rendered
+cases failed: the public landing and navigation in EN/ZH, plus Admin in EN/ZH.
+All lifecycle and management browser cases passed. The failing rendered assertions
+are retained unchanged; the run is not presented as green acceptance.
+
+The landing's non-interactive glow used a 650px width plus a 15% left offset,
+expanding a 375px viewport to 706px. The two decorative boxes now use bounded
+`min()` widths while retaining their existing desktop dimensions and offsets.
+No foreground content is hidden or clipped to make the viewport check pass.
+
+The English Admin tab row and operation-filter controls did not wrap at mobile
+width. `web_admin_styles.py` supplies a separate, Admin-scoped responsive module,
+composed by `web_styles.py`: toolbars wrap, and inputs/selects can shrink within
+their container. Existing table scrolling, desktop styling, content, handlers,
+authorization and filter payloads remain. Dedicated structural contracts protect
+scope/bounds/composition; the unchanged real Chromium route/viewport matrix is
+still required to validate rendered behavior. The complete available matrix is
+rerun on the combined correction, with exact results recorded in PR evidence.
