@@ -1084,3 +1084,36 @@ interrupted and repeated flows in English and Chinese. Browser metadata PUTs use
 explicit fixture-only synthetic responses; no real OAuth connection or user
 record is modified. These checks do not establish deployed or real-device
 acceptance. No schema, permission, dependency or deployment change is included.
+
+
+## Task-history timing and computer-filter accuracy (2026-10-16)
+
+Operations that already belong to the same task run now preserve the earliest
+start and the latest completion/activity timestamp, regardless of completion
+order. For example, when a slow operation starts before a fast operation but
+finishes later, the run includes the slow operation's full time span. A delayed
+older completion cannot move the run's end backward or make it appear idle early.
+Nullable legacy end timestamps fall back to the existing activity timestamp.
+The update remains atomic with the recorded step and the caller's transaction;
+operation replay does not change the first recorded result or counters.
+
+The task-history API applies the selected computer to completed summary totals
+as well as displayed runs and unresolved work. The isolated `task_history.py`
+projection uses the same owner/computer/period conditions for its three totals,
+read in one SQLite statement. Summary totals still cover the full selected scope,
+not just the displayed page. Runs and individual steps retain their existing
+start-time period attribution, so a period boundary crossing can still select
+individual steps independently of the run's initial start.
+
+Existing candidate selection, task grouping, idle threshold, title upgrades,
+API shape, authentication, quota settlement, weighted Operation counts and
+unresolved-record semantics remain unchanged. This is not historical repair:
+reads do not rewrite old task boundaries, and no schema migration, backfill,
+live data operation or deployment is included. Long-operation grouping and
+literal-context matching are separate follow-up work outside this correction.
+
+Dedicated regressions exercise real disposable SQLite admission/settlement and
+authenticated HTTP routes, including reverse completion, delayed records,
+transaction rollback/replay, legacy nullable ends, account/computer/period
+isolation and page-independent totals. Synthetic records do not establish real
+Windows/device, provider email or deployed-staging acceptance.

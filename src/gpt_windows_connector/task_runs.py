@@ -98,7 +98,13 @@ class TaskRunStore:
                 run_id=uuid.uuid4().hex
                 db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at))
             success=status=="success"
-            db.execute("UPDATE task_runs SET last_activity_at=?,ended_at=?,success_count=success_count+?,error_count=error_count+? WHERE id=?",(ended_at,ended_at,1 if success else 0,0 if success else 1,run_id))
+            # Completion order is not admission order. Keep the time envelope
+            # of every operation assigned to this run without changing grouping.
+            db.execute("""UPDATE task_runs SET started_at=MIN(started_at,?),
+                last_activity_at=MAX(last_activity_at,?),
+                ended_at=MAX(COALESCE(ended_at,last_activity_at),?),
+                success_count=success_count+?,error_count=error_count+? WHERE id=?""",
+                (started_at,ended_at,ended_at,1 if success else 0,0 if success else 1,run_id))
             db.execute("INSERT INTO task_steps(id,task_run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,details) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(operation_id or uuid.uuid4().hex,run_id,owner_id,node_id,action,target,status,started_at,ended_at,duration_ms,operation_count,json.dumps(details or {},ensure_ascii=False)))
         return run_id
 
