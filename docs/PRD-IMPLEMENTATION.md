@@ -1042,3 +1042,19 @@ for only the fixture-origin access-request POST in other cases. These browser
 checks validate frontend behavior, not live pairing or device approval. Windows
 Node/device, deployed staging, provider email and existing-subscription handling
 remain separate acceptance gates.
+
+
+## AI-connection frontend module extraction (2026-10-16)
+
+Existing AI-connection list rendering, setup URL/help, edit/save and confirmed
+delete UI now live in `web_ai_connection_runtime.py`. The core composes two
+fragments at their original positions so rendered JavaScript and execution order
+remain unchanged. This is a structural extraction, not a new connection feature
+or a change to request ownership, authorization or mutation effects.
+
+Focused in-memory runtime contracts preserve current rendering/escaping, setup
+limits/help, clipboard fallback, edit payloads, confirmation and failure paths.
+They make no real HTTP, OAuth, clipboard or navigation calls. The existing
+composed-page regressions and hosted browser tests remain required. API routes,
+backend permissions, schema, persistent data, dependencies and deployment
+configuration are unchanged; deployed and real-device acceptance remain open.
