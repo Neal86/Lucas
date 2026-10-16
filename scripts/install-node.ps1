@@ -18,6 +18,53 @@ function Write-LucasProgress {
   if ($UpdateFromApp) { Write-Output ("LUCAS_PROGRESS|{0}|{1}" -f $Percent, $Stage) }
 }
 
+function Read-LucasJsonWithLegacyRepair {
+  param([string]$Path, [string]$Label)
+
+  $OriginalBytes = [System.IO.File]::ReadAllBytes($Path)
+  $HasBom = $OriginalBytes.Length -ge 3 -and $OriginalBytes[0] -eq 239 -and $OriginalBytes[1] -eq 187 -and $OriginalBytes[2] -eq 191
+  $Offset = 0
+  if ($HasBom) { $Offset = 3 }
+  $Utf8 = New-Object System.Text.UTF8Encoding($false, $true)
+  try {
+    $Raw = $Utf8.GetString($OriginalBytes, $Offset, $OriginalBytes.Length - $Offset)
+  } catch {
+    $CorruptBackup = "$Path.corrupt-$([guid]::NewGuid().ToString('N'))"
+    Copy-Item -LiteralPath $Path -Destination $CorruptBackup -ErrorAction Stop
+    throw "$Label is not valid UTF-8. Original preserved at $CorruptBackup."
+  }
+  try {
+    $Object = $Raw | ConvertFrom-Json -ErrorAction Stop
+    return [pscustomobject]@{ Raw = $Raw; Object = $Object; Repaired = $false; CorruptBackup = "" }
+  } catch {
+    # Preserve the original bytes before considering the one known legacy fault.
+    # A unique suffix prevents two failed attempts from overwriting that evidence.
+    $CorruptBackup = "$Path.corrupt-$([guid]::NewGuid().ToString('N'))"
+    Copy-Item -LiteralPath $Path -Destination $CorruptBackup -ErrorAction Stop
+    # Only an unterminated, single-line rules_text directly before
+    # show_rule_summary is repairable. Quotes/objects/arrays in the damaged
+    # span are ambiguous: never consume identity, permission or future fields.
+    $Pattern = '"rules_text"\s*:\s*"[^"\r\n{}\[\]]*,\s*(?="show_rule_summary"\s*:)'
+    $Matches = [regex]::Matches($Raw, $Pattern)
+    $Keys = [regex]::Matches($Raw, '"rules_text"\s*:')
+    if ($Matches.Count -ne 1 -or $Keys.Count -ne 1) {
+      throw "$Label did not match the supported legacy rules_text corruption pattern. Original preserved at $CorruptBackup."
+    }
+    $Match = $Matches[0]
+    $RepairedRaw = $Raw.Substring(0, $Match.Index) + '"rules_text": "Lucas local security policy.",' + $Raw.Substring($Match.Index + $Match.Length)
+    try {
+      $Object = $RepairedRaw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+      throw "$Label legacy repair failed validation. Original preserved at $CorruptBackup."
+    }
+    $RepairedBytes = $Utf8.GetBytes($RepairedRaw)
+    if ($HasBom) { $RepairedBytes = [byte[]](@(239, 187, 191) + $RepairedBytes) }
+    [System.IO.File]::WriteAllBytes($Path, $RepairedBytes)
+    Write-Host "[Lucas] Repaired legacy $Label rules_text encoding damage. Original backup: $CorruptBackup" -ForegroundColor Yellow
+    return [pscustomobject]@{ Raw = $RepairedRaw; Object = $Object; Repaired = $true; CorruptBackup = $CorruptBackup }
+  }
+}
+
 function Test-Python311 {
   param([string]$Command, [string[]]$Arguments)
   try {
@@ -107,8 +154,9 @@ $ExistingConfigRaw = $null
 $ConfigBackupFile = "$ConfigFile.pre-update"
 if (Test-Path $ConfigFile) {
   try {
-    $ExistingConfigRaw = Get-Content -Raw -Path $ConfigFile
-    $ExistingConfig = $ExistingConfigRaw | ConvertFrom-Json -ErrorAction Stop
+    $ConfigRead = Read-LucasJsonWithLegacyRepair -Path $ConfigFile -Label "Lucas configuration"
+    $ExistingConfigRaw = [string]$ConfigRead.Raw
+    $ExistingConfig = $ConfigRead.Object
     Copy-Item -Force -Path $ConfigFile -Destination $ConfigBackupFile
   } catch {
     throw "Existing Lucas configuration could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
@@ -122,8 +170,9 @@ $ExistingAccessRaw = $null
 $AccessBackupFile = "$AccessFile.pre-update"
 if (Test-Path $AccessFile) {
   try {
-    $ExistingAccessRaw = Get-Content -Raw -Path $AccessFile
-    $ExistingAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
+    $AccessRead = Read-LucasJsonWithLegacyRepair -Path $AccessFile -Label "Lucas user permissions"
+    $ExistingAccessRaw = [string]$AccessRead.Raw
+    $AccessRead.Object | Out-Null
     Copy-Item -Force -Path $AccessFile -Destination $AccessBackupFile
   } catch {
     throw "Existing Lucas user permissions could not be read. Update aborted without changing local settings: $($_.Exception.Message)"
@@ -248,7 +297,7 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to install the latest Lucas Node." }
 if ($null -ne $ExistingConfigRaw) {
   Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
   try {
-    $RestoredConfigRaw = Get-Content -Raw -Path $ConfigFile
+    $RestoredConfigRaw = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile
     $RestoredConfigRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
     if ($RestoredConfigRaw -ne $ExistingConfigRaw) { throw "node-config.json changed during update" }
   } catch {
@@ -258,7 +307,7 @@ if ($null -ne $ExistingConfigRaw) {
 if ($null -ne $ExistingAccessRaw) {
   Copy-Item -Force -Path $AccessBackupFile -Destination $AccessFile
   try {
-    $RestoredAccessRaw = Get-Content -Raw -Path $AccessFile
+    $RestoredAccessRaw = Get-Content -Raw -Encoding UTF8 -Path $AccessFile
     $RestoredAccessRaw | ConvertFrom-Json -ErrorAction Stop | Out-Null
     if ($RestoredAccessRaw -ne $ExistingAccessRaw) { throw "node-access.json changed during update" }
   } catch {
@@ -339,7 +388,7 @@ if ($ExistingConfig -and $ExistingConfigRaw) {
     # and older tray builds treated that valid JSON as unreadable and rewrote it.
     Copy-Item -Force -Path $ConfigBackupFile -Destination $ConfigFile
   }
-  $Config = Get-Content -Raw -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
+  $Config = Get-Content -Raw -Encoding UTF8 -Path $ConfigFile | ConvertFrom-Json -ErrorAction Stop
 } else {
   $Config = [ordered]@{
     gateway_ws_url = $GatewayUrl.TrimEnd('/')
@@ -448,25 +497,14 @@ if (-not $TrayStarted) {
   Start-Sleep -Seconds 2
 }
 
-# Fresh installs open Settings. During an in-app update the existing Settings
-# window stays alive to show progress, then restarts itself when the user returns.
+# Fresh installs open Settings once. In-app updates leave the existing window
+# in charge of its bounded restart handover; the installer never adds a second
+# Settings process. The tray/shortcut can reopen Settings if that window closed.
 if (-not $UpdateFromApp) {
   Write-Host "[Lucas] Opening Lucas..." -ForegroundColor Cyan
   Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
 } else {
-  # The updater must survive even if the old Settings process closes unexpectedly.
-  # If it is gone, reopen Settings explicitly from the newly verified runtime. If
-  # it survived, leave it in place so its in-app progress/Return flow remains intact.
-  $SettingsAlive = $false
-  if ($KeepProcessId -gt 0) {
-    try { $SettingsAlive = $null -ne (Get-Process -Id $KeepProcessId -ErrorAction Stop) } catch { $SettingsAlive = $false }
-  }
-  if (-not $SettingsAlive) {
-    Write-Host "[Lucas] Previous Settings closed during update; reopening the verified new version..." -ForegroundColor Yellow
-    Start-Process -FilePath $VenvPythonw -ArgumentList "-m","gpt_windows_connector.node","--configure"
-  } else {
-    Write-Host "[Lucas] App update finished; current Settings remains open." -ForegroundColor Green
-  }
+  Write-Host "[Lucas] App update finished; Settings will not be reopened automatically." -ForegroundColor Green
 }
 Write-LucasProgress 100 "complete"
 

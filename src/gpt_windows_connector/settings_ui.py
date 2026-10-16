@@ -312,7 +312,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
         before_update=lambda: persist_current_settings_for_update(),
         on_update_complete=lambda value: sidebar_version.set(f"Lucas v{value}"),
     )
-    row(c,"Lucas Node","自动检查新版本；也可手动检测并在有新版本时更新。",updater.build_control)
+    row(c,"Lucas Node","更新来源由安装包的发布渠道决定；测试版本不会自动替换为生产版本。",updater.build_control)
     updater.start_auto_check()
 
     wrap,body=scroll_page(); pages["安全"]=wrap

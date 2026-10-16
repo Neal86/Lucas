@@ -9,6 +9,8 @@ import uuid
 from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import Any
 
+from . import update_distribution
+
 from .settings_constants import (
     CONFIG_DIR,
     CONFIG_FILE,
@@ -36,6 +38,8 @@ def _version_key(value: str) -> tuple[int,...]:
 
 
 def _fetch_latest_version(timeout: float = 5.0) -> str | None:
+    if not update_distribution.in_app_updates_allowed() or LATEST_VERSION_URL != update_distribution.STABLE_VERSION_URL:
+        return None
     try:
         request = urllib.request.Request(
             f"{LATEST_VERSION_URL}?t={int(time.time())}",

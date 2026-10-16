@@ -19,6 +19,7 @@ from .config import NodeSettings
 from .executor import Executor
 from . import browser_extension
 from .settings_ui import configure_gui as _configure_gui
+from .settings_single_instance import guard_settings_startup, parse_settings_args
 from .task_runs import TaskRunStore
 
 APP_NAME = "Lucas"
@@ -556,8 +557,11 @@ async def run_node() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="lucas-node")
     parser.add_argument("--configure", action="store_true", help="Open the Lucas Node configuration window")
-    args = parser.parse_args()
+    args = parse_settings_args(parser)
     _setup_logging()
+    settings_mutex = guard_settings_startup(args, log)
+    if settings_mutex is None:
+        return
     config = _load_config()
     if not config:
         settings = NodeSettings.from_env()
