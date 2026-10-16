@@ -1,9 +1,10 @@
 """Opt-in Chromium regressions for account-owned Billing/quota reads.
 
 The real loopback dashboard, login handlers, API client, localization and DOM
-run unchanged. ResponseGate holds a real Billing summary response. Explicitly
-synthetic quota/error cases intercept only GET /api/billing/summary and GET
-/api/nodes at that fixture origin; all other requests retain native transport.
+run unchanged. A one-shot fixture-origin gate finishes native HTTP and JSON
+parsing, then holds delivery of that real summary payload to the API client.
+Explicitly synthetic quota/error cases intercept only GET /api/billing/summary
+and GET /api/nodes at that origin; all other requests retain native transport.
 No Node, payment, subscription mutation or external provider is contacted.
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ import pytest
 from test_computer_connection_chromium import signed_in_dashboard
 from test_oauth_login_chromium import (
     EMAIL, PASSWORD, chromium, click, login_server, request_count, visible,
-    wait_for, wait_for_gate,
+    wait_for,
 )
 
 
@@ -113,6 +114,48 @@ async def assert_cleared(cdp, session):
             session) == "—"
 
 
+async def hold_next_real_summary_payload(cdp, session, server):
+    """Hold parsed real JSON, leaving native HTTP free to serve the next GET."""
+    assert urlsplit(server.base).scheme == "http"
+    assert urlsplit(server.base).hostname == "127.0.0.1"
+    await cdp.evaluate(REAL_SUMMARY_PAYLOAD_GATE.replace("FIXTURE_ORIGIN", json.dumps(server.base)), session)
+
+
+REAL_SUMMARY_PAYLOAD_GATE = r"""(() => {
+  const origin=FIXTURE_ORIGIN,nativeFetch=window.fetch.bind(window);
+  if(location.origin!==origin)throw new Error('Wrong real Billing fixture origin');
+  let armed=true,deliver;
+  const gate=window.__billingPayloadGate={
+    ready:false,released:false,jsonRequested:0,payload:null,error:null,
+    release(){
+      if(!gate.ready||gate.released)throw new Error('Missing or released real Billing payload');
+      gate.released=true;deliver();
+    }
+  };
+  window.fetch=async(input,options={})=>{
+    const url=new URL(typeof input==='string'?input:input.url,location.href);
+    const method=String(options.method||(typeof input==='object'&&input.method)||'GET').toUpperCase();
+    if(!armed||url.origin!==origin||url.pathname!=='/api/billing/summary'||url.search||method!=='GET')
+      return nativeFetch(input,options);
+    armed=false;
+    try{
+      const response=await nativeFetch(input,options);
+      // Complete the actual network body before allowing a second same-URL GET.
+      // Only delivery to api().json() waits; no payload/status/header is invented.
+      const payload=await response.json();
+      gate.payload=payload;
+      const delivery=new Promise(resolve=>{deliver=()=>resolve(payload)});
+      Object.defineProperty(response,'json',{value:()=>{
+        gate.jsonRequested++;return delivery;
+      }});
+      gate.ready=true;
+      return response;
+    }catch(error){gate.error=String(error);throw error}
+  };
+  return true;
+})()"""
+
+
 async def intercept_synthetic_reads(cdp, session, server):
     """Fixture-origin GET shim; do not replace application/API/auth functions."""
     assert urlsplit(server.base).scheme == "http"
@@ -199,7 +242,7 @@ def assert_no_operational_effects(server):
 
 @pytest.mark.parametrize("language", ["en", "zh-CN"])
 def test_billing_real_held_summary_cannot_restore_old_subscription_warning(login_server, tmp_path, language):
-    """Real HTTP ordering and Beta summary from isolated subscription fixtures."""
+    """Real HTTP/JSON payloads, with only the first parsed-payload delivery held."""
     server = login_server
 
     async def run():
@@ -215,9 +258,14 @@ def test_billing_real_held_summary_cannot_restore_old_subscription_warning(login
             await cdp.evaluate("loadBillingView().then(()=>true)", session)
             await text_is(cdp, session, "billingNotice", OLD_NOTICE)
             before = request_count(server, SUMMARY)
-            server.gate.arm(SUMMARY)
+            await hold_next_real_summary_payload(cdp, session, server)
             await cdp.evaluate("window.billingOld=loadBillingView();true", session)
-            await wait_for_gate(server.gate)
+            await wait_for(cdp, session, "__billingPayloadGate.error||"
+                           "(__billingPayloadGate.ready&&__billingPayloadGate.jsonRequested===1)")
+            assert await cdp.evaluate("__billingPayloadGate.error", session) is None
+            captured = await cdp.evaluate("__billingPayloadGate.payload", session)
+            assert captured == gateway.billing.summary(user_id)
+            assert captured["existing_paid_subscription"] is True
             assert request_count(server, SUMMARY) == before + 1
             # Change only this local fixture between two real summary reads.
             with server.provider.db() as db:
@@ -225,7 +273,8 @@ def test_billing_real_held_summary_cannot_restore_old_subscription_warning(login
             await cdp.evaluate("loadBillingView().then(()=>true)", session)
             current = gateway.billing.summary(user_id)
             await assert_snapshot(cdp, session, current, language)
-            server.gate.release.set()
+            assert not await cdp.evaluate("__billingPayloadGate.released", session)
+            await cdp.evaluate("__billingPayloadGate.release();true", session)
             await complete(cdp, session, "billingOld")
             await assert_snapshot(cdp, session, current, language)
             assert request_count(server, SUMMARY) == before + 2

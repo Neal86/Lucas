@@ -1182,7 +1182,21 @@ cross-source ordering, delayed JSON, account/login changes, stale/current errors
 cache/DOM agreement and legacy paid rendering. Existing partial auth/history/onboarding
 fixtures load the real dependency and enter a signed-in state for billing reads.
 The separate English/Chinese Chromium suite runs against disposable loopback
-accounts and synthetic email, with held real reads and explicitly synthetic
+accounts and synthetic email, with delayed delivery of fully received real JSON and explicitly synthetic
 read outcomes where stated. It does not establish provider-email, historical
 Stripe, real Windows/browser or deployed-staging acceptance. Those gates and
 previously paused security work remain open.
+
+
+### Billing browser-fixture transport refinement
+
+The first hosted run passed all unit/extension checks and 67 web cases, but the
+two new real-summary cases timed out: the test withheld an entire HTTP response
+while awaiting a second identical GET. This observation does not establish a
+production ownership defect or uniquely identify the browser transport cause.
+The fixture now lets the first native HTTP/JSON read complete and holds only
+its parsed-payload delivery to the production API client. The newer read remains
+native and receives the real updated disposable-store summary before the old
+payload is released. Response status/headers and payloads remain unmodified;
+production code and timeout settings are unchanged. The corrected exact-head
+hosted browser result must pass before this slice is called CI-verified.
