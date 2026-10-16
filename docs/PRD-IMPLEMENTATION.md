@@ -1117,3 +1117,35 @@ authenticated HTTP routes, including reverse completion, delayed records,
 transaction rollback/replay, legacy nullable ends, account/computer/period
 isolation and page-independent totals. Synthetic records do not establish real
 Windows/device, provider email or deployed-staging acceptance.
+
+
+## Task-context wildcard grouping correction (2026-10-16)
+
+An untitled operation's lookup for an existing titled task now treats percent
+and underscore characters in its context as literal data. Previously, a context
+such as `synthetic_workspace` could join a task for `syntheticXworkspace`, and
+`synthetic%workspace` could join `syntheticXYZworkspace`. This mixed task labels
+and steps within the same account/computer despite different supplied contexts.
+
+The isolated `task_run_context.py` query service uses a parameterized literal
+prefix comparison, avoiding SQL wildcard interpretation and LIKE pattern-size
+limits. A constant LIKE probe retains the caller connection's ASCII case policy;
+SQLite's ASCII-only LOWER is used only when that policy folds case. Default,
+case-sensitive and non-ASCII behavior are explicitly covered. Quotes, backslashes,
+Unicode, percent/underscore and marker characters remain context data. Embedded
+NUL characters also retain their full identity instead of LIKE truncating them.
+
+The exact-context branch, stored key format, latest-candidate ordering, title
+promotion and idle threshold are unchanged. This is not path normalization or
+a new context schema. Ambiguity in the existing `::task::` delimiter remains a
+separate concern. An initial escape-based candidate was rejected during review:
+escaping a long context could exceed SQLite's pattern limit and fail settlement.
+The literal-prefix implementation has long-context settlement and HTTP regressions.
+
+Account/computer ownership filters, API shape, quota/weighted Operation counts,
+settlement transactions and immutable replay are preserved. No historical task
+rows are split, renamed or backfilled; no schema, dependency, permission,
+deployment or live-data change is included. Dedicated real SQLite/admission and
+authenticated local HTTP regressions cover the collisions, valid joins, filter
+scope, accounting totals and failed-settlement rollback/retry. Real device and
+deployed acceptance remain separate gates.

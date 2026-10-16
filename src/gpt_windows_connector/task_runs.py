@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .task_audit import sanitize_task_details
+from .task_run_context import find_untitled_context_run
 
 
 class TaskRunStore:
@@ -88,7 +89,7 @@ class TaskRunStore:
                         db.execute("UPDATE task_runs SET context_key=?,title=? WHERE id=?",(titled_context,task_title,str(fallback["id"])))
                         row=db.execute("SELECT * FROM task_runs WHERE id=?",(str(fallback["id"]),)).fetchone()
             else:
-                row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND (context_key=? OR context_key LIKE ?) ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context,f"{base_context}::task::%")).fetchone()
+                row=find_untitled_context_run(db,owner_id,node_id,base_context)
             context_key=titled_context or base_context
             if row and ended_at-float(row["last_activity_at"]) <= self.idle_seconds:
                 run_id=str(row["id"])
