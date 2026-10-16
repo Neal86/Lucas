@@ -218,6 +218,7 @@ def login_server(tmp_path, monkeypatch):
             Route("/api/nodes/request-access", dashboard_server.webapp.api_request_node_access, methods=["POST"]),
             Route("/api/nodes/{node_id}/activate", dashboard_server.webapp.api_activate_node, methods=["POST"]),
             Route("/api/billing/summary", dashboard_server.webapp.api_billing_summary),
+            Route("/api/referrals/summary", dashboard_server.webapp.api_referral_summary),
             Route("/api/logs", dashboard_server.webapp.api_logs),
             Route("/api/task-runs", dashboard_server.webapp.api_task_runs),
             Route("/api/ai-connections", dashboard_server.webapp.api_ai_connections),

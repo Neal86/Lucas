@@ -24,7 +24,7 @@ def run_dashboard_js(body: str, language: str = "en", *, real_boot=False, real_r
     # all login declarations/functions. Do not reimplement the function at issue.
     runtime = html[html.index("async function api("):html.index("async function logout(")]
     if real_boot:
-        runtime += html[html.index("async function boot("):html.index("async function refresh(")]
+        runtime += html[html.index("let sessionBootstrapSequence="):html.index("async function refresh(")]
     if real_refresh:
         runtime += html[html.index("const BILLING_PLAN_RANK="):html.index("async function billingChangePlan(")]
         runtime += html[html.index("async function refresh("):html.index("function updateNodeMetrics(")]

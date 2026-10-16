@@ -1200,3 +1200,177 @@ native and receives the real updated disposable-store summary before the old
 payload is released. Response status/headers and payloads remain unmodified;
 production code and timeout settings are unchanged. The corrected exact-head
 hosted browser result must pass before this slice is called CI-verified.
+
+## Account/session lifecycle batch (2026-10-16)
+
+This related frontend batch starts from PR #4 commit `9105b11`. Eleven baseline
+probes reproduced account-display failures across bootstrap/logout, referral
+summaries, event callbacks and setup-hint timers. These paths are verified as one
+batch, with focused checks while editing and a final combined regression/review
+and exact-head CI matrix, rather than publishing each small correction separately.
+
+### Account bootstrap and logout
+
+`web_session_lifecycle_runtime.py` owns the extracted bootstrap/logout functions
+and identity-display reset. Only the newest eligible bootstrap may set the user,
+render identity/role-dependent navigation or finish its dashboard/realtime/setup
+follow-ups. Its ownership survives its own user assignment but is invalidated by
+authentication reset, a replacement account, a newer bootstrap or an obsolete
+caller. Current authentication failures still open sign-in; current dashboard
+read failures retain the signed-in page and existing retry notice. Account reset
+clears old identity/referral presentation and administrative navigation without
+clearing unrelated form drafts, filters or local storage. The current role controls
+both showing and hiding the Admin navigation item; server authorization is unchanged.
+
+Logout retains the same POST and current response/error behavior. Its UI completion
+belongs to the logout attempt, login generation and stable account identity. A
+same-account bootstrap creates a fresh user object without making the user's
+pending logout obsolete; a later login or different account does. Ignoring a stale
+completion does not cancel, reverse or retry a dispatched logout, prevent its
+server-side cookie effects, or guarantee ordering across concurrent browser tabs.
+The real browser regression explicitly lets the original logout remove its cookie
+before a second real login, then releases only the old parsed response delivery.
+
+### Referral summaries and realtime display
+
+The existing referral module now gives reads a latest-request owner tied to the
+exact user and login generation. Late success/error/401 responses cannot replace
+a newer summary or sign out a newer session. Reset clears the previous account's
+invite URL, counts and feedback. Current failures and explicit retries remain
+observable; a newer failure does not permit an older response to overwrite the
+committed same-account summary. Referral awards, code creation, cookie attribution
+and copy-link effects remain unchanged; response suppression does not undo work
+already performed by the server.
+
+`web_realtime_runtime.py` owns the extracted event socket and timers. Socket,
+account, login and socket-generation ownership guards open/message/close callbacks,
+heartbeats, watchdogs, reconnect timers and event-triggered refresh completion.
+Stopping or replacing a socket retires its callbacks and owned timers, so queued
+old events cannot restore previous-account computer rows or disrupt the current
+socket. Current heartbeat intervals, watchdog threshold, reconnect backoff/jitter,
+recovery refresh, event rendering and endpoint remain. This is browser presentation
+ownership, not a server subscription-revocation, device-access or permission change.
+
+### Setup guidance
+
+The existing onboarding module ties rendered checklist actions and delayed hints
+to their exact account/login and checklist/hint generation. Closing, reopening,
+re-rendering, signing out or replacing the account invalidates obsolete callbacks;
+an old delayed hint cannot mark the next account's storage key, and an old dismiss
+callback cannot hide a newer hint. Only the owned timers are canceled. Localized
+content, per-email completion/hint keys, navigation, unrelated storage and the
+existing computer/AI/permission completion criteria are retained. A completed
+checklist is not new evidence that local permissions or devices were verified.
+
+### Verification scope
+
+The composed-page suites exercise current and stale HTTP/JSON outcomes, concurrent
+boot/logout, same-account reboot, role changes, referral ordering, socket/timer
+replacement, current reconnect/heartbeat behavior, setup lifecycle and EN/ZH
+presentation. Eleven original baseline probes fail before the batch and have
+corresponding regressions. Review additionally protects the intended logout
+through a same-account object replacement. Partial auth/checklist fixtures load
+the real module dependencies and use separately controlled timer identities.
+
+A combined opt-in Chromium file adds twelve EN/ZH cases. Real disposable SQLite,
+HTTP, login/logout cookies and referral summaries are used where stated; only
+parsed-payload delivery is held after native HTTP completes. Separate synthetic
+cases exercise a stale referral 401, event callbacks and hint timers. Browser
+fixtures are loopback-only, use synthetic email delivery and never connect a Node,
+change a real subscription, award a referral or contact an external provider.
+The existing browser fixture gains the real referral-summary route only. The
+existing CI matrix includes this combined browser file.
+
+No backend/API/schema, entitlement/Beta policy, local Node/files security, deployed
+configuration, dependency or persistent live-data change is included. No canceled
+wheel session is read or retried. Deployed staging smoke, real Windows/Edge/ixBrowser,
+provider-email, historical Stripe handling and paused security acceptance remain
+separate open gates. The approved deployment pin remains `d7e09e7`; this newer
+review branch is not covered by that deployment approval.
+
+## Consolidated inspection and frontend acceptance batch (2026-10-16)
+
+The full-PRD inventory was completed before this repair batch: 43 requirement
+rows and all six explicit acceptance criteria were mapped to implementation,
+existing tests, reproducible issues and remaining gates. Static inspection and
+fixture evidence do not constitute full runtime acceptance. The preserved
+account/session work above and the related management/rendered-page gaps below
+are now validated and published together rather than one defect at a time.
+
+### Computer management and AI deletion
+
+New `web_computer_management_runtime.py` and
+`web_ai_connection_delete_runtime.py` keep this behavior out of the core
+composition file. The computer modal captures its node, account/login, modal
+and request generations; rename also captures the input revision. Late log
+responses cannot populate a different/reopened modal, and stale 401/error
+responses cannot hide a replacement login. Current Save, log Refresh, activation
+and Delete controls expose owned busy state. Duplicate current mutations are
+suppressed without automatically retrying, canceling or reversing any request.
+
+Cache reconciliation is deliberately separate from presentation ownership.
+Successful rename/Delete responses may reconcile the captured account's target
+cache after Close/navigation when their per-target mutation token is still the
+latest. This does not overwrite a newer unsaved input, show an obsolete toast,
+or alter a replacement account. Successful activation retains its same-account
+read-only refresh after navigation. Authentication reset and accepted user
+replacement retire these cache tokens; newer same-target mutations supersede
+older ones. The existing confirmation text, endpoints, encoded identifiers,
+payloads, backend authorization and OAuth/device effects are unchanged.
+
+A committed cache change invalidates older pending dashboard snapshot reads via
+one shared dashboard sequence, preventing an old read from restoring the deleted
+row or old name. Current failures remain visible and allow deliberate retry.
+Reset hides the computer modal and clears account-owned readonly details/logs,
+while retaining unrelated drafts and storage. Reading actual local logs still
+requires the existing server and Node policy; these tests use synthetic lines.
+
+Independent whole-diff review found and reproduced a same-account cache regression
+in the first candidate: Delete → navigate → success → return retained the deleted
+row, and Save → Close → success → reopen retained the old name. Both baseline
+controls passed. Cache/presentation ownership was separated as described above,
+and dedicated regressions preserve reconciliation without weakening account or
+stale-response boundaries. The first full local run also found two partial
+operation-usage fixture failures; that fixture now includes the actual extracted
+dashboard sequence declaration rather than inventing a test-only substitute.
+
+### Rendered routes and viewports
+
+`tests/test_web_acceptance_chromium.py` adds 28 parametrized cases covering every
+path in the 28-route smoke catalog across EN/ZH and desktop 1365×900/mobile
+375×812. It mounts actual production routes over disposable loopback SQLite/auth
+fixtures. Assertions check expected content, redirects, JavaScript exceptions,
+unhandled rejections, viewport overflow, pointer hit targets, accessible control
+names, Beta pricing, registration, authenticated/admin deep links, browser history
+and management modal Close/reopen. Existing untranslated informational/legal and
+administrative copy is recorded as shipped, not silently treated as localized.
+
+`tests/test_computer_management_chromium.py` adds ten EN/ZH cases around the actual
+composed page, including real isolated login/logout cookies. Only exact fixture-
+origin synthetic computer/AI operations are intercepted. It verifies encoded
+payloads, current failure/retry, duplicate controls, stale selection/account
+responses and same-account cache reconciliation. It does not exercise a real
+permission dialog, local computer, OAuth grant/revocation or external provider.
+The CI Chromium command includes both files and the twelve lifecycle cases above.
+
+### Verification and remaining gates
+
+The six management problems from inventory were reproduced in EN/ZH against
+published `9105b11`: twelve failing cases and two passing current-read controls.
+The same fourteen probes pass after repair. Focused suites exercise the full
+emitted runtime, and the complete available regression matrix follows the final
+combined corrections. Exact executed totals and CI commit/run links belong in
+the PR evidence; collected or skipped browser tests are not reported as passes.
+
+The first full local pass was 983 passed, 123 skipped and two failed fixture cases
+with three existing warnings. This retained failure evidence drove the combined
+correction above; it is not a successful final acceptance result. Chromium is
+executed in the existing hosted job, not inferred from local collection.
+
+Task-context delimiter ambiguity remains a separate schema/legacy-data design
+issue. Main/review branch and release-version divergence must be reconciled before
+production distribution. DevOps recovery, exact approved isolated staging health
+and deployed smoke, real Windows/Edge/ixBrowser, email/provider configuration,
+historical paid subscriptions and the paused Node/files security findings remain
+open. No release branch merge, live deployment, canceled wheel-session read,
+backend/schema/permission change or security-audit resumption is part of this batch.

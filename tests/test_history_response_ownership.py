@@ -39,7 +39,7 @@ function element(id){
   elements.set(id,e);globalThis[id]=e;return e;
 }
 ''' + "\n".join(f"element({json.dumps(id)});" for id in ids) + r'''
-const state={user:{id:'synthetic-user',email:'fixture@example.test'}};
+const state={user:{id:'synthetic-user',email:'fixture@example.test'},nodes:[],aiClients:[],billing:null};
 const document={getElementById:id=>elements.get(id)||null,
   querySelector:()=>null,querySelectorAll:s=>s==='.view'?['dashboard','tasks','logs'].map(id=>elements.get(id)):[],
   addEventListener(){}};

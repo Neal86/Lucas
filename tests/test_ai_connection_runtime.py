@@ -15,6 +15,7 @@ from gpt_windows_connector.web_ai_connection_runtime import (
     AI_CONNECTION_RENDER_SCRIPT,
 )
 from gpt_windows_connector.web_core_runtime import CORE_SCRIPT
+from gpt_windows_connector.web_dashboard_read_runtime import DASHBOARD_INVALIDATION_SCRIPT
 
 
 def test_ai_connection_fragments_have_one_composed_owner():
@@ -36,7 +37,7 @@ def test_ai_connection_runtime_contracts(tmp_path):
     assert node, "Node.js is required for AI connection runtime contracts"
     script = tmp_path / "ai-connection-runtime.mjs"
     script.write_text(
-        "const runtime=" + json.dumps(AI_CONNECTION_RENDER_SCRIPT + AI_CONNECTION_ACTION_SCRIPT) + ";\n" + CASES,
+        "const runtime=" + json.dumps(DASHBOARD_INVALIDATION_SCRIPT + AI_CONNECTION_RENDER_SCRIPT + AI_CONNECTION_ACTION_SCRIPT) + ";\n" + CASES,
         encoding="utf-8",
     )
     result = subprocess.run(

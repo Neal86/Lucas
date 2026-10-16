@@ -3,6 +3,8 @@ from __future__ import annotations
 ONBOARDING_SCRIPT = r'''
 (() => {
   let active = false;
+  let checklistGeneration = 0, checklistOwner = null;
+  let hintGeneration = 0, hintOwner = null;
   const userKey = () => 'lucas-setup-checklist-v1:' + (state?.user?.email || 'guest');
   const hintKey = () => 'lucas-setup-checklist-hint-v1:' + (state?.user?.email || 'guest');
   const hasAi = () => (state?.aiClients || []).length > 0;
@@ -11,6 +13,9 @@ ONBOARDING_SCRIPT = r'''
   const hasPermissions = () => hasComputer();
   const allDone = () => hasAi() && hasComputer() && hasPermissions();
   const appVisible = () => !!state?.user && document.getElementById('auth')?.classList.contains('hidden') && !document.getElementById('app')?.classList.contains('hidden');
+  const ownsSession = owner => !!owner?.user && owner.user === state.user && owner.login === loginGeneration && appVisible();
+  const ownsChecklist = owner => active && owner === checklistOwner && owner?.generation === checklistGeneration && ownsSession(owner);
+  const ownsHint = owner => !!owner && owner === hintOwner && owner.generation === hintGeneration && ownsSession(owner);
 
   const ensureUi = () => {
     if (document.getElementById('lucasCoach')) return;
@@ -35,18 +40,25 @@ ONBOARDING_SCRIPT = r'''
     document.body.appendChild(coach);
   };
 
-  const hideHint = () => {
-    document.getElementById('coachReopenHint')?.remove();
-    document.getElementById('gettingStartedNav')?.classList.remove('lucas-reopen-target');
+  const hideHint = (owner = hintOwner) => {
+    if (!owner || owner !== hintOwner) return;
+    hintGeneration++;
+    hintOwner = null;
+    if (owner.showTimer !== null) clearTimeout(owner.showTimer);
+    if (owner.dismissTimer !== null) clearTimeout(owner.dismissTimer);
+    owner.hint?.remove();
+    owner.nav?.classList.remove('lucas-reopen-target');
   };
 
-  const showReopenHint = () => {
-    try { if (localStorage.getItem(hintKey())) return; localStorage.setItem(hintKey(),'1'); } catch (_) {}
+  const showReopenHint = owner => {
+    if (!ownsHint(owner) || active) return;
     const nav = document.getElementById('gettingStartedNav');
-    if (!nav || !appVisible()) return;
-    hideHint();
+    if (!nav) return hideHint(owner);
+    try { if (localStorage.getItem(owner.key)) return hideHint(owner); localStorage.setItem(owner.key,'1'); } catch (_) {}
+    owner.nav = nav;
     nav.classList.add('lucas-reopen-target');
     const hint = document.createElement('div');
+    owner.hint = hint;
     hint.id = 'coachReopenHint';
     hint.innerHTML = 'You can reopen setup guidance here anytime.<br><button type="button">Got it</button>';
     document.body.appendChild(hint);
@@ -55,41 +67,61 @@ ONBOARDING_SCRIPT = r'''
       hint.style.left = Math.min(window.innerWidth - hint.offsetWidth - 12, r.right + 12) + 'px';
       hint.style.top = Math.max(12, Math.min(window.innerHeight - hint.offsetHeight - 12, r.top)) + 'px';
     };
-    hint.querySelector('button').onclick = hideHint;
+    const dismiss = () => { if (ownsHint(owner)) hideHint(owner); };
+    hint.querySelector('button').onclick = dismiss;
     place();
-    setTimeout(hideHint, 9000);
+    owner.dismissTimer = setTimeout(dismiss, 9000);
   };
 
   const step = (label, done, target) => `<button type="button" class="coach-step ${done?'done':''}" data-target="${target}"><span class="coach-status">${done?'✓':'○'}</span><span>${label}</span></button>`;
 
   const renderChecklist = () => {
-    if (!active || !appVisible()) return hideGettingStarted();
+    if (!ownsChecklist(checklistOwner)) return hideGettingStarted();
     ensureUi();
     const coach = document.getElementById('lucasCoach');
+    // A replaced render must not leave its detached buttons owning the checklist.
+    const owner = {...checklistOwner, generation: ++checklistGeneration};
+    checklistOwner = owner;
     coach.innerHTML = `<div class="coach-kicker">GETTING STARTED</div><h3>Setup Checklist</h3><div class="coach-list">${step('Connect your AI',hasAi(),'ai')}${step('Connect your computer',hasComputer(),'nodes')}${step('Set permissions',hasPermissions(),'nodes')}</div><div class="coach-actions"><button type="button" class="coach-close" id="coachClose">Close</button></div>`;
     coach.style.display = 'block';
     coach.style.left = '50%';
     coach.style.top = '50%';
     coach.style.transform = 'translate(-50%,-50%)';
     coach.querySelectorAll('.coach-step').forEach(btn => btn.onclick = () => {
+      if (!ownsChecklist(owner)) return;
       const id = btn.dataset.target;
-      closeGettingStarted(false);
+      closeGettingStarted(false, owner);
       const nav = document.querySelector(`.nav[data-view="${id}"]`);
       if (window.view) window.view(id, nav);
     });
-    document.getElementById('coachClose').onclick = () => closeGettingStarted(true);
+    document.getElementById('coachClose').onclick = () => closeGettingStarted(true, owner);
   };
 
-  function closeGettingStarted(showHint=true) {
+  function closeGettingStarted(showHint=true, owner=checklistOwner) {
+    if (!ownsChecklist(owner)) return;
     active = false;
+    checklistGeneration++;
+    checklistOwner = null;
     const coach = document.getElementById('lucasCoach');
     if (coach) coach.style.display = 'none';
-    try { if (state?.user) localStorage.setItem(userKey(),'1'); } catch (_) {}
-    if (showHint) setTimeout(showReopenHint, 120);
+    try { localStorage.setItem(owner.key,'1'); } catch (_) {}
+    hideHint();
+    if (showHint) {
+      const hint = {user: owner.user, login: owner.login, generation: ++hintGeneration,
+        key: owner.hintKey, showTimer: null, dismissTimer: null, hint: null, nav: null};
+      hintOwner = hint;
+      hint.showTimer = setTimeout(() => {
+        if (!ownsHint(hint)) return;
+        hint.showTimer = null;
+        showReopenHint(hint);
+      }, 120);
+    }
   }
 
   function hideGettingStarted() {
     active = false;
+    checklistGeneration++;
+    checklistOwner = null;
     hideHint();
     const coach = document.getElementById('lucasCoach');
     if (coach) coach.style.display = 'none';
@@ -99,17 +131,23 @@ ONBOARDING_SCRIPT = r'''
     if (!appVisible()) return;
     hideHint();
     active = true;
+    checklistOwner = {user: state.user, login: loginGeneration, generation: ++checklistGeneration,
+      key: userKey(), hintKey: hintKey()};
     renderChecklist();
   }
 
   function maybeStartOnboarding() {
+    if ((checklistOwner && !ownsSession(checklistOwner)) || (hintOwner && !ownsSession(hintOwner))) hideGettingStarted();
     if (!appVisible()) return;
     if (allDone()) return;
     try { if (localStorage.getItem(userKey())) return; } catch (_) {}
     openGettingStarted();
   }
 
-  function sync() { if (active) renderChecklist(); }
+  function sync() {
+    if (active) renderChecklist();
+    else if (hintOwner && !ownsSession(hintOwner)) hideHint();
+  }
 
   window.openGettingStarted = openGettingStarted;
   window.maybeStartOnboarding = maybeStartOnboarding;
@@ -117,8 +155,7 @@ ONBOARDING_SCRIPT = r'''
   window.hideGettingStarted = hideGettingStarted;
   window.onboardingSync = sync;
   window.addEventListener('resize', () => {
-    const hint = document.getElementById('coachReopenHint');
-    if (hint) { hideHint(); }
+    if (hintOwner?.hint) hideHint();
   });
 })();
 '''

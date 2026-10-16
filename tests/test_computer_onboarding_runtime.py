@@ -40,6 +40,7 @@ def run_computer_js(body: str, language: str = "en"):
         between("function closeModal(", "let onboardingStep="),
         between("function esc(", "async function boot("),
         between("function accessMode(", "function renderNodes("),
+        between("let managedNodeId=null;", "async function copyMcpUrl("),
         between("function openConnectModal(", "\n(() => {\n  let active = false;"),
         between("(() => {\n  let active = false;", "function adminMetric("),
         between("if(WEB_LANG==='zh'){localizeWeb();", "\ndocument.addEventListener('keydown'"),
@@ -48,7 +49,7 @@ def run_computer_js(body: str, language: str = "en"):
     script = r'''
 const assert = require('node:assert/strict');
 const focused=[],requests=[],timeouts=[],mutations=[],stored=new Map(),routes=[];
-let observer=null,refreshes=0,signedOut=0,loginGeneration=0;
+let observer=null,refreshes=0,signedOut=0,loginGeneration=0,nextTimeoutId=0;
 const Node={ELEMENT_NODE:1,TEXT_NODE:3},NodeFilter={SHOW_TEXT:4};
 function descendants(root){return root.children.flatMap(n=>[n,...(n.children?descendants(n):[])])}
 function changed(target,nodes){if(observer && (target===document.body || descendants(document.body).includes(target)))mutations.push({addedNodes:nodes})}
@@ -108,8 +109,9 @@ function flushMutations(){for(let i=0;mutations.length&&i<20;i++)observer(mutati
 const window=globalThis,location={href:'/nodes'},navigator={language:LANGUAGE};
 window.addEventListener=()=>{};window.innerWidth=1280;window.innerHeight=800;
 const localStorage={getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,v)};
-function setTimeout(f,delay){timeouts.push({f,delay});return timeouts.length}
-function runTimers(delay){const due=timeouts.filter(t=>delay===undefined||t.delay===delay);for(const t of due){timeouts.splice(timeouts.indexOf(t),1);t.f()}flushMutations()}
+function setTimeout(f,delay){const id=++nextTimeoutId;timeouts.push({id,f,delay});return id}
+function clearTimeout(id){const index=timeouts.findIndex(t=>t.id===id);if(index>=0)timeouts.splice(index,1)}
+function runTimers(delay){const due=timeouts.filter(t=>delay===undefined||t.delay===delay);for(const t of due){const index=timeouts.indexOf(t);if(index<0)continue;timeouts.splice(index,1);t.f()}flushMutations()}
 function fetch(url,options){return new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}))}
 function response(index,data,status=200){requests[index].resolve({status,ok:status>=200&&status<300,json:async()=>data})}
 async function refresh(){refreshes++}

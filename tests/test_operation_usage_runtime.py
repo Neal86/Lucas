@@ -40,7 +40,7 @@ def run_usage_js(body: str, language: str = "en"):
         between("function operationNumber(", "const state="),
         between("const state=", "async function billingChangePlan("),
         between("function esc(", "async function boot("),
-        between("async function refresh(", "function updateNodeMetrics("),
+        between("let dashboardRefreshSequence=", "function updateNodeMetrics("),
         between("const historyRequestSequences=", "function renderRecent("),
         between("function adminMetric(", "if(WEB_LANG==='zh'){localizeWeb();"),
     ))

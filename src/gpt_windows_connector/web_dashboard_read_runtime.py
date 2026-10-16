@@ -1,7 +1,11 @@
 """Session-owned dashboard snapshots, separate from mutations and local policy."""
 from __future__ import annotations
 
-DASHBOARD_READ_SCRIPT = r'''
+DASHBOARD_INVALIDATION_SCRIPT = r'''let dashboardRefreshSequence=0;
+function invalidateDashboardSnapshotReads(){dashboardRefreshSequence++}
+'''
+
+DASHBOARD_READ_SCRIPT = DASHBOARD_INVALIDATION_SCRIPT + r'''
 async function refresh(isCurrent=()=>true){
   const sequence=++dashboardRefreshSequence,generation=loginGeneration,user=state.user;
   const owns=()=>!!user&&state.user===user&&loginGeneration===generation&&sequence===dashboardRefreshSequence&&isCurrent();
@@ -16,7 +20,6 @@ async function refresh(isCurrent=()=>true){
   renderNodes();renderRecent(l.logs);renderAiClients();updateNodeMetrics();
   metricAiClients.textContent=state.aiClients.length;
 }
-let dashboardRefreshSequence=0;
 function resetDashboardAccountData(){
   dashboardRefreshSequence++;
   state.nodes=[];state.billing=null;state.aiClients=[];
