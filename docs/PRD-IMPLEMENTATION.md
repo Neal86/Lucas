@@ -1,5 +1,17 @@
 # Lucas PRD V2.1 implementation and acceptance
 
+## Development acceptance: source-only release contract (2026-10-16)
+
+A separate stacked review branch from PR4 `8787b1f` restores Compose healthcheck
+source parity, strict UTF-8 installer preservation/known-corruption backups and
+a dedicated Windows Settings single-instance guard. The review distribution
+explicitly blocks in-app updates before network/installer effects so main cannot
+silently replace the review code. No version, update channel or deployment is
+released. See [RELEASE-DISTRIBUTION.md](RELEASE-DISTRIBUTION.md) for the channel
+contract, exact module boundaries, synthetic fixture coverage and remaining
+package/device/deployment gates. Beta, referral amounts, account/tab authority
+and the canceled forced Eva/Profile policy are unchanged.
+
 Updated: 2026-10-16. Target branch: staging. Node package: 1.7.55; extension: 2.1.0.
 
 This is a trace of implementation and evidence, not a production acceptance declaration.

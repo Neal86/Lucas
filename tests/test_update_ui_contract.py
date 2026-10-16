@@ -29,7 +29,8 @@ def test_installer_has_fast_in_app_update_mode():
     assert "[int]$KeepProcessId = 0" in text
     assert '[string]$ExpectedVersion = ""' in text
     assert "expected $ExpectedVersion but runtime reports $InstalledVersion" in text
-    assert "Previous Settings closed during update" in text
+    assert "Previous Settings closed during update" not in text
+    assert "Settings will not be reopened automatically" in text
     assert "--upgrade --no-cache-dir $PackageUrl" in text
     assert "--force-reinstall --no-deps" not in text
     assert 'Write-LucasProgress 100 "complete"' in text

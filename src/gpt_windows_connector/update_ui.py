@@ -11,6 +11,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from . import update_distribution
+
 
 class InAppUpdater:
     """Transient in-app update surface for the Windows Settings application."""
@@ -78,7 +80,7 @@ class InAppUpdater:
             "complete": self.T("更新完成", "Update complete"),
         }
 
-    SETTINGS_RUNTIME_FILES = ("settings_ui.py", "update_ui.py", "settings_constants.py", "app_icon.py", "node.py")
+    SETTINGS_RUNTIME_FILES = ("settings_ui.py", "update_ui.py", "settings_constants.py", "app_icon.py", "node.py", "settings_single_instance.py", "update_distribution.py")
 
     def _settings_hashes(self) -> dict[str, str]:
         base = Path(__file__).resolve().parent
@@ -101,7 +103,7 @@ class InAppUpdater:
         env["LUCAS_SETTINGS_PAGE"] = return_page
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         subprocess.Popen(
-            [sys.executable, "-m", "gpt_windows_connector.node", "--configure"],
+            [sys.executable, "-m", "gpt_windows_connector.node", "--configure", "--wait-for-settings"],
             env=env,
             creationflags=flags,
         )
@@ -121,7 +123,22 @@ class InAppUpdater:
         self.update_button = self.button_factory(control, "更新 Node", self.run_update, primary=True)
         self.update_button.pack(side="left", padx=(8, 0))
         self.update_button.configure(state="disabled")
+        if not update_distribution.in_app_updates_allowed(installer_url=self.installer_url):
+            self._show_update_block()
         return control
+
+    def _show_update_block(self) -> None:
+        self.version_status.set(update_distribution.review_update_message(self.T))
+        if self.check_update_button is not None:
+            self.check_update_button.configure(state="disabled")
+        if self.update_button is not None:
+            self.update_button.configure(state="disabled")
+
+    def _queue_update_block(self) -> None:
+        try:
+            self.root.after(0, self._show_update_block)
+        except self.tk.TclError:
+            pass  # The Settings window may have closed before the worker ran.
 
     def start_check(self) -> None:
         threading.Thread(target=self._check_update_worker, daemon=True).start()
@@ -266,9 +283,15 @@ class InAppUpdater:
         self._append_log(message or self.T("更新失败，请重试。", "Update failed. Please retry."))
 
     def run_update(self) -> None:
+        if not update_distribution.in_app_updates_allowed(installer_url=self.installer_url):
+            self._show_update_block()
+            return
         self._show_update_page(str(self.state.get("target") or ""))
 
         def worker() -> None:
+            if not update_distribution.in_app_updates_allowed(installer_url=self.installer_url):
+                self._queue_update_block()
+                return
             target = self.fetch_latest_version() or str(self.state.get("target") or "") or self.T("最新版本", "latest")
             settings_snapshot = self._settings_hashes()
             try:
@@ -345,6 +368,9 @@ class InAppUpdater:
         threading.Thread(target=worker, daemon=True).start()
 
     def _check_update_worker(self) -> None:
+        if not update_distribution.in_app_updates_allowed(installer_url=self.installer_url):
+            self._queue_update_block()
+            return
         def set_checking() -> None:
             self.version_status.set(f"当前版本 {self.current_version} · 正在检查更新…")
             if self.check_update_button is not None:

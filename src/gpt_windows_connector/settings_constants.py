@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .update_distribution import STABLE_INSTALLER_URL, STABLE_VERSION_URL
+
 SETTINGS_EN = {
+    "更新来源由安装包的发布渠道决定；测试版本不会自动替换为生产版本。": "Updates follow the installed distribution channel; review builds never automatically switch to production.",
     "搜索设置...": "Search settings...", "常规": "General", "安全": "Security", "用户与权限": "Users & Permissions",
     "文件访问": "File Access", "网络": "Network", "规则": "Rules", "任务记录": "Task History", "日志": "Logs", "系统访问": "System Access",
     "电脑": "Computer", "电脑名称": "Computer name", "Windows 设备名称，只读。网页中的显示名称可单独修改。": "Windows device name, read-only.",
@@ -40,8 +43,8 @@ STATUS_STALE_SECONDS = 45.0
 UI_STATE_FILE = CONFIG_DIR / "settings-ui-state.json"
 TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
 ACCESS_FILE = CONFIG_DIR / "node-access.json"
-LATEST_VERSION_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/pyproject.toml"
-INSTALLER_URL = "https://raw.githubusercontent.com/Neal86/Lucas/main/scripts/install-node.ps1"
+LATEST_VERSION_URL = STABLE_VERSION_URL
+INSTALLER_URL = STABLE_INSTALLER_URL
 
 APPROVAL_DEFAULTS = {
     "system_info":"allow","shell":"allow","file_write":"ask","file_delete":"ask",
