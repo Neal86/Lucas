@@ -1015,3 +1015,30 @@ The isolated module is `web_dashboard_read_runtime.py`; deterministic regression
 execute the actual composed runtime with controlled HTTP/JSON ordering and
 auth/visibility/logout transitions. Synthetic fixtures and hosted CI remain
 separate from deployed staging, provider-email and real-device acceptance.
+
+
+## Computer connection modal response ownership (2026-10-16)
+
+The Connect computer modal now owns each explicit access request by its modal,
+account/login generation, attempt sequence and input revision. Repeated Send
+actions within the current attempt dispatch only one POST; the button stays busy
+until its response and current dashboard refresh settle. Close/Escape, navigation,
+auth reset, a reopened modal or edited input prevent old success/error/401 results
+from changing the current form. A stale finalizer cannot unlock a newer attempt.
+New attempts retain the existing node/code validation, exact API payload and
+local-approval wording; current errors remain visible and allow deliberate retry.
+
+An access request already sent may still become pending or approved on the server.
+Closing the modal or suppressing its response does not cancel, reverse or retry
+that effect. The client never bypasses local approval and does not alter backend
+authorization, Node policy, persisted permissions, APIs or schemas. Unrelated
+drafts and stored state are unaffected. The isolated runtime is
+`web_computer_connection_runtime.py`.
+
+Dedicated deterministic regressions exercise actual composed UI code and model
+dispatched effects separately. The separate Chromium suite uses the real loopback
+offline-node handler as one control, and explicitly synthetic response ordering
+for only the fixture-origin access-request POST in other cases. These browser
+checks validate frontend behavior, not live pairing or device approval. Windows
+Node/device, deployed staging, provider email and existing-subscription handling
+remain separate acceptance gates.

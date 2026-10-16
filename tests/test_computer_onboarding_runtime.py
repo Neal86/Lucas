@@ -48,7 +48,7 @@ def run_computer_js(body: str, language: str = "en"):
     script = r'''
 const assert = require('node:assert/strict');
 const focused=[],requests=[],timeouts=[],mutations=[],stored=new Map(),routes=[];
-let observer=null,refreshes=0,signedOut=0;
+let observer=null,refreshes=0,signedOut=0,loginGeneration=0;
 const Node={ELEMENT_NODE:1,TEXT_NODE:3},NodeFilter={SHOW_TEXT:4};
 function descendants(root){return root.children.flatMap(n=>[n,...(n.children?descendants(n):[])])}
 function changed(target,nodes){if(observer && (target===document.body || descendants(document.body).includes(target)))mutations.push({addedNodes:nodes})}
@@ -99,7 +99,7 @@ function parseInto(root,html){
     }else stack.at(-1).appendChild(textNode(token));
   }
 }
-const document={documentElement:new Element('html'),head:new Element('head'),body:new Element('body'),
+const document={documentElement:new Element('html'),head:new Element('head'),body:new Element('body'),addEventListener(){},
   createElement:tag=>new Element(tag),getElementById:id=>document.body.querySelector('#'+id),
   querySelector:s=>document.body.querySelector(s),querySelectorAll:s=>document.body.querySelectorAll(s),
   createTreeWalker(root){const nodes=descendants(root).filter(n=>n.nodeType===3);let i=0;return {nextNode(){this.currentNode=nodes[i++];return !!this.currentNode}}}};

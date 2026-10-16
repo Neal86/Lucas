@@ -50,4 +50,4 @@ jobs:
           test -n "$CHROME_BIN"
           export CHROME_BIN
           export RUN_LOGIN_E2E=1
-          pytest -q tests/test_oauth_login_chromium.py tests/test_computer_node_docs_chromium.py
+          pytest -q tests/test_oauth_login_chromium.py tests/test_computer_node_docs_chromium.py tests/test_computer_connection_chromium.py
