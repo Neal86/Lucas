@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import contextlib
 import json
 import logging
@@ -44,6 +45,7 @@ from .operation_admission import OperationAdmissionStore
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
 from . import login_policy
+from .desktop_account_routes import desktop_account_routes, DESKTOP_AUTH_PATHS
 from .task_runs import TaskRunStore
 from .gateway_readiness import readiness_checks, critical_ready
 from .gateway_referral import claim_referral_cookie
@@ -60,7 +62,7 @@ log = logging.getLogger("lucas.gateway")
 
 
 class AuthMiddleware:
-    PUBLIC_PATHS = {
+    PUBLIC_PATHS = DESKTOP_AUTH_PATHS | {
         "/health",
         "/live",
         "/auth/register",
@@ -832,6 +834,7 @@ async def lifespan(app: Starlette):
 
 app = Starlette(
     routes=[
+        *desktop_account_routes(sys.modules[__name__]),
         Route("/.well-known/oauth-authorization-server", oauth.as_meta, methods=["GET"]),
         Route("/.well-known/oauth-protected-resource", oauth.resource_meta, methods=["GET"]),
         Route("/.well-known/oauth-protected-resource/mcp", oauth.resource_meta, methods=["GET"]),

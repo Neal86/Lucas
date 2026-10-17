@@ -63,6 +63,12 @@ class RegistrationSecurity:
                 CREATE INDEX IF NOT EXISTS idx_trusted_login_devices_user ON trusted_login_devices(user_id);
                 """
             )
+            # Existing challenges are browser-cookie challenges. This additive
+            # migration never promotes them to desktop bearer-token challenges.
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(login_verifications)")}
+            if "purpose" not in columns:
+                db.execute("ALTER TABLE login_verifications ADD COLUMN purpose TEXT NOT NULL DEFAULT 'web'")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.db_path, timeout=30)
@@ -167,7 +173,12 @@ class RegistrationSecurity:
         email: str,
         ip_address: str,
         remember_device: bool,
+        *, purpose: str = "web",
     ) -> tuple[str, str]:
+        if purpose not in {"web", "desktop"}:
+            raise ValueError("Unsupported login challenge purpose")
+        if purpose == "desktop":
+            remember_device = False
         email = self._normalize_email(email)
         challenge_id = uuid.uuid4().hex
         code = f"{secrets.randbelow(1_000_000):06d}"
@@ -179,14 +190,14 @@ class RegistrationSecurity:
                 """
                 INSERT INTO login_verifications(
                     challenge_id,user_id,email,ip_address,remember_device,code_hash,
-                    expires_at,attempts,created_at,updated_at
-                ) VALUES(?,?,?,?,?,?,?,0,?,?)
+                    expires_at,attempts,created_at,updated_at,purpose
+                ) VALUES(?,?,?,?,?,?,?,0,?,?,?)
                 """,
-                (challenge_id, user_id, email, ip_address, 1 if remember_device else 0, code_hash, now + 600, now, now),
+                (challenge_id, user_id, email, ip_address, 1 if remember_device else 0, code_hash, now + 600, now, now, purpose),
             )
         return challenge_id, code
 
-    def resend_login_verification(self, challenge_id: str, ip_address: str) -> tuple[str, str, str]:
+    def resend_login_verification(self, challenge_id: str, ip_address: str, *, purpose: str = "web") -> tuple[str, str, str]:
         challenge_id = str(challenge_id or "").strip()
         if not challenge_id:
             raise ValueError("Login verification session is missing")
@@ -196,6 +207,8 @@ class RegistrationSecurity:
             row = db.execute("SELECT * FROM login_verifications WHERE challenge_id=?", (challenge_id,)).fetchone()
             if not row:
                 raise ValueError("Login verification session expired")
+            if purpose not in {"web", "desktop"} or str(row["purpose"]) != purpose:
+                raise ValueError("Login verification session has a different purpose")
             if float(row["expires_at"]) < now:
                 db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
                 db.commit()
@@ -211,7 +224,7 @@ class RegistrationSecurity:
             email = str(row["email"])
         return user_id, email, code
 
-    def verify_login(self, challenge_id: str, code: str, ip_address: str) -> tuple[str, bool, str | None]:
+    def verify_login(self, challenge_id: str, code: str, ip_address: str, *, purpose: str = "web") -> tuple[str, bool, str | None]:
         challenge_id = str(challenge_id or "").strip()
         code = str(code or "").strip()
         if not challenge_id:
@@ -224,6 +237,8 @@ class RegistrationSecurity:
             row = db.execute("SELECT * FROM login_verifications WHERE challenge_id=?", (challenge_id,)).fetchone()
             if not row:
                 raise ValueError("Login verification session expired")
+            if purpose not in {"web", "desktop"} or str(row["purpose"]) != purpose:
+                raise ValueError("Login verification session has a different purpose")
             if float(row["expires_at"]) < now:
                 db.execute("DELETE FROM login_verifications WHERE challenge_id=?", (challenge_id,))
                 db.commit()
