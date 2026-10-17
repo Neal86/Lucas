@@ -1421,3 +1421,28 @@ authorization and filter payloads remain. Dedicated structural contracts protect
 scope/bounds/composition; the unchanged real Chromium route/viewport matrix is
 still required to validate rendered behavior. The complete available matrix is
 rerun on the combined correction, with exact results recorded in PR evidence.
+
+### Confirmed-defect hardening: task identities and HTTP/log boundaries
+
+New task records use identity version 1 with separately stored base context and
+normalized title. The historical `context_key` remains a compatibility display
+value, not a grouping key. Startup adds identity columns/indexes transactionally;
+existing rows retain version 0 and are never parsed, split, backfilled or
+reassigned. They remain visible through the unchanged history response shape.
+New operations do not guess a legacy run's identity; a stable operation-id replay
+still returns its recorded run without rewriting it. Owner/computer filtering,
+idle timing, title normalization, SQLite ASCII case policy, settlement atomicity
+and weighted billing remain unchanged. This is a source migration contract, not
+confirmation of a production migration or mixed-version writer rollout.
+
+OAuth registration and dashboard computer/AI metadata require JSON objects and
+return HTTP 400 for malformed/non-object bodies. Valid empty metadata objects
+retain their prior clearing/default behavior. Task/activity history rejects
+noninteger limits with HTTP 400; valid integers retain the existing 1–500 clamp.
+Resource ownership checks remain in place before metadata parsing.
+
+Meta conversion failures log the exception classification rather than arbitrary
+exception text, which can contain credential-bearing request URLs. Event sending
+and failure return semantics remain unchanged. Regression evidence uses only
+synthetic tokens, disposable SQLite stores and in-process HTTP fixtures; no live
+provider, credentials, production logs or devices are involved.

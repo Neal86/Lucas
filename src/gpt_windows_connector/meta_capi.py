@@ -84,7 +84,9 @@ class MetaConversionsAPI:
             response.raise_for_status()
             return True
         except Exception as exc:
-            log.warning("Meta CAPI event failed event=%s error=%s", event_name, exc)
+            # HTTP errors can include a credential-bearing URL. Do not log
+            # arbitrary exception text, request data or response bodies.
+            log.warning("Meta CAPI event failed event=%s error_type=%s", event_name, type(exc).__name__)
             return False
 
     async def send_async(self, event_name: str, **kwargs: Any) -> bool:
@@ -100,5 +102,7 @@ class MetaConversionsAPI:
                 response.raise_for_status()
             return True
         except Exception as exc:
-            log.warning("Meta CAPI event failed event=%s error=%s", event_name, exc)
+            # HTTP errors can include a credential-bearing URL. Do not log
+            # arbitrary exception text, request data or response bodies.
+            log.warning("Meta CAPI event failed event=%s error_type=%s", event_name, type(exc).__name__)
             return False
