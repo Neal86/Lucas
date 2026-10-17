@@ -48,6 +48,20 @@ class TaskRunStore:
             );
             CREATE INDEX IF NOT EXISTS idx_task_steps_run_started ON task_steps(task_run_id, started_at ASC);
             """)
+            # Serialize additive schema discovery/upgrade across constructors.
+            # Existing records keep version 0 and NULL identity fields; their
+            # ambiguous context strings are never parsed or backfilled.
+            db.execute("BEGIN IMMEDIATE")
+            run_columns = {row[1] for row in db.execute("PRAGMA table_info(task_runs)").fetchall()}
+            for name, definition in (
+                ("identity_version", "INTEGER NOT NULL DEFAULT 0"),
+                ("identity_context", "TEXT"),
+                ("identity_title", "TEXT"),
+            ):
+                if name not in run_columns:
+                    db.execute(f"ALTER TABLE task_runs ADD COLUMN {name} {definition}")
+            db.execute("""CREATE INDEX IF NOT EXISTS idx_task_runs_identity
+                ON task_runs(owner_id,node_id,identity_version,identity_context,identity_title,last_activity_at DESC)""")
             step_columns = {row[1] for row in db.execute("PRAGMA table_info(task_steps)").fetchall()}
             if "operation_count" not in step_columns:
                 db.execute("ALTER TABLE task_steps ADD COLUMN operation_count INTEGER NOT NULL DEFAULT 1")
@@ -82,11 +96,11 @@ class TaskRunStore:
                 if existing:
                     return str(existing[0])
             if task_title:
-                row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,titled_context)).fetchone()
+                row=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND identity_version=1 AND identity_context=? AND identity_title=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context,task_title)).fetchone()
                 if not row:
-                    fallback=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND context_key=? ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context)).fetchone()
+                    fallback=db.execute("SELECT * FROM task_runs WHERE owner_id=? AND node_id=? AND identity_version=1 AND identity_context=? AND identity_title IS NULL ORDER BY last_activity_at DESC LIMIT 1",(owner_id,node_id,base_context)).fetchone()
                     if fallback and ended_at-float(fallback["last_activity_at"]) <= self.idle_seconds:
-                        db.execute("UPDATE task_runs SET context_key=?,title=? WHERE id=?",(titled_context,task_title,str(fallback["id"])))
+                        db.execute("UPDATE task_runs SET context_key=?,title=?,identity_title=? WHERE id=?",(titled_context,task_title,task_title,str(fallback["id"])))
                         row=db.execute("SELECT * FROM task_runs WHERE id=?",(str(fallback["id"]),)).fetchone()
             else:
                 row=find_untitled_context_run(db,owner_id,node_id,base_context)
@@ -94,10 +108,10 @@ class TaskRunStore:
             if row and ended_at-float(row["last_activity_at"]) <= self.idle_seconds:
                 run_id=str(row["id"])
                 if task_title and str(row["title"]) != task_title:
-                    db.execute("UPDATE task_runs SET title=?,context_key=? WHERE id=?",(task_title,titled_context,run_id))
+                    db.execute("UPDATE task_runs SET title=?,context_key=?,identity_title=? WHERE id=?",(task_title,titled_context,task_title,run_id))
             else:
                 run_id=uuid.uuid4().hex
-                db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at) VALUES(?,?,?,?,?,?,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at))
+                db.execute("INSERT INTO task_runs(id,owner_id,node_id,context_key,title,started_at,last_activity_at,ended_at,identity_version,identity_context,identity_title) VALUES(?,?,?,?,?,?,?,?,1,?,?)",(run_id,owner_id,node_id,context_key,task_title or self._title(action,target),started_at,ended_at,ended_at,base_context,task_title))
             success=status=="success"
             # Completion order is not admission order. Keep the time envelope
             # of every operation assigned to this run without changing grouping.
@@ -119,7 +133,11 @@ class TaskRunStore:
             rows=db.execute(f"SELECT * FROM task_runs WHERE {where} ORDER BY started_at DESC LIMIT ?",params).fetchall()
             out=[]; now=time.time()
             for row in rows:
-                item=dict(row); last=float(item["last_activity_at"])
+                item=dict(row)
+                # Storage discrimination is internal; retain the history API shape.
+                for field in ("identity_version", "identity_context", "identity_title"):
+                    item.pop(field, None)
+                last=float(item["last_activity_at"])
                 item["status"]="running" if now-last <= self.idle_seconds else ("failed" if int(item["error_count"]) and not int(item["success_count"]) else "completed")
                 end=now if item["status"]=="running" else float(item["ended_at"] or last)
                 item["duration_ms"]=max(0,round((end-float(item["started_at"]))*1000))

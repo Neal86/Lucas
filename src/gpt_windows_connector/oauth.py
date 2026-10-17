@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
 from .auth import AuthStore, User
+from .api_inputs import read_json_object
 from .entitlements import ensure_ai_capacity
 from .oauth_grants import connection_generation
 from .oauth_login_ui import login_page
@@ -68,7 +69,7 @@ class OAuthProvider:
         return bool(p.netloc and not p.fragment and p.scheme in {"https","http"} and not (p.scheme=="http" and p.hostname not in {"localhost","127.0.0.1","::1"}))
 
     async def register(self, request: Request):
-        try: body = await request.json()
+        try: body = await read_json_object(request)
         except Exception: return JSONResponse({"error":"invalid_client_metadata"}, status_code=400)
         uris = body.get("redirect_uris") or []
         if not isinstance(uris,list) or not uris or len(uris)>20 or any(not self.redirect_ok(str(u)) for u in uris): return JSONResponse({"error":"invalid_redirect_uri"}, status_code=400)

@@ -15,6 +15,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainT
 from starlette.routing import Mount, Route
 
 from . import gateway
+from .api_inputs import read_json_object
 from .admin import admin_routes
 from .billing_ui import dashboard_billing_html, pricing_html
 from .referral_ui import dashboard_referral_html, referral_html
@@ -348,7 +349,10 @@ async def api_node_name(request: Request):
     node = next((n for n in nodes if n.get("node_id") == node_id), None)
     if not node:
         return JSONResponse({"error": "Node not found"}, status_code=404)
-    body = await request.json()
+    try:
+        body = await read_json_object(request)
+    except ValueError:
+        return JSONResponse({"error": "invalid_request_body"}, status_code=400)
     name = str(body.get("name") or "").strip()[:100]
     with _db() as db:
         _ensure_dashboard_metadata_schema(db)
@@ -455,7 +459,10 @@ async def api_ai_connection(request: Request):
             db.commit()
             gateway.auth.audit(user.id, "oauth.disconnect", client_id)
             return JSONResponse({"ok": True})
-        body = await request.json()
+        try:
+            body = await read_json_object(request)
+        except ValueError:
+            return JSONResponse({"error": "invalid_request_body"}, status_code=400)
         display_name = str(body.get("display_name") or "").strip()[:100]
         note = str(body.get("note") or "").strip()[:500]
         db.execute("INSERT INTO dashboard_ai_metadata(user_id,client_id,display_name,note,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id,client_id) DO UPDATE SET display_name=excluded.display_name,note=excluded.note,updated_at=excluded.updated_at", (user.id,client_id,display_name or None,note or None,time.time()))
@@ -466,7 +473,10 @@ async def api_ai_connection(request: Request):
 
 async def api_task_runs(request: Request):
     user = _auth_user(request)
-    limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
+    except ValueError:
+        return JSONResponse({"error": "invalid_limit"}, status_code=400)
     node_id = request.query_params.get("node_id", "").strip() or None
     days_raw = request.query_params.get("days", "all").strip().lower()
     days = int(days_raw) if days_raw in {"7", "30", "90"} else 0
@@ -478,7 +488,10 @@ async def api_task_runs(request: Request):
 
 async def api_logs(request: Request):
     user = _auth_user(request)
-    limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", "100")), 500))
+    except ValueError:
+        return JSONResponse({"error": "invalid_limit"}, status_code=400)
     action = request.query_params.get("action", "").strip()
     target = request.query_params.get("target", "").strip()
     sql = "SELECT id,action,target,details,created_at FROM audit_logs WHERE user_id=?"
