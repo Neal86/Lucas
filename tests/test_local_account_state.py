@@ -1,6 +1,7 @@
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import threading
 import httpx
@@ -209,6 +210,7 @@ def test_late_verification_after_logout_does_not_sign_in(tmp_path, vault):
 def test_unique_atomic_temporary_files_under_concurrency(tmp_path, monkeypatch):
     from gpt_windows_connector import local_account_state as state
     original_replace = state.os.replace
+    original_fsync = state.os.fsync
     seen = []
     lock = threading.Lock()
     barrier = threading.Barrier(8)
@@ -216,8 +218,13 @@ def test_unique_atomic_temporary_files_under_concurrency(tmp_path, monkeypatch):
     def replace(source, dest):
         with lock:
             seen.append(str(source))
-        barrier.wait(timeout=5)
         original_replace(source, dest)
+
+    def fsync(fd):
+        original_fsync(fd)
+        barrier.wait(timeout=5)
+
+    monkeypatch.setattr(state.os, 'fsync', fsync)
     monkeypatch.setattr(state.os, 'replace', replace)
     path = tmp_path / 'atomic.json'
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -225,6 +232,150 @@ def test_unique_atomic_temporary_files_under_concurrency(tmp_path, monkeypatch):
     assert len(set(seen)) == 8
     assert json.loads(path.read_text())['value'] in range(8)
     assert list(tmp_path.glob('*.tmp')) == []
+
+
+@pytest.mark.parametrize('alias_kind', ['lexical', 'relative', 'windows_case'])
+def test_atomic_write_and_account_state_share_canonical_lock(tmp_path, monkeypatch, alias_kind):
+    from gpt_windows_connector import local_account_state as state
+    path = tmp_path / 'account.json'
+    if alias_kind == 'windows_case':
+        if os.name != 'nt':
+            pytest.skip('Native Windows case normalization')
+        alias = tmp_path / 'ACCOUNT.JSON'
+    elif alias_kind == 'relative':
+        monkeypatch.chdir(tmp_path)
+        alias = Path('account.json')
+    else:
+        (tmp_path / 'nested').mkdir()
+        alias = tmp_path / 'nested' / '..' / 'account.json'
+    first = state.AccountState('https://accounts.example.test', path)
+    second = state.AccountState('https://accounts.example.test', alias)
+    assert first.shared is second.shared
+    assert first.lock is state._path_lock(state._path_key(alias))
+
+    # A real helper write must reenter the AccountState lock without deadlock.
+    errors = []
+    def write_while_locked():
+        try:
+            with first.lock:
+                atomic_write(alias, {'value': 'reentrant'})
+        except BaseException as error:
+            errors.append(error)
+    worker = threading.Thread(target=write_while_locked, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), 'atomic_write did not reuse the reentrant path lock'
+    assert not errors
+    assert json.loads(path.read_text()) == {'value': 'reentrant'}
+
+
+def test_raw_atomic_write_does_not_initialize_account_metadata(tmp_path):
+    from gpt_windows_connector import local_account_state as state
+    path = tmp_path / 'raw.json'
+    key = state._path_key(path)
+    assert key not in state._registry
+    atomic_write(path, {'value': 1})
+    assert key not in state._registry
+    assert key in state._path_locks
+
+
+def test_same_path_atomic_replacements_are_serialized(tmp_path, monkeypatch):
+    from gpt_windows_connector import local_account_state as state
+    path = tmp_path / 'atomic.json'
+    key = state._path_key(path)
+    real_lock = state._path_lock(key)
+    first_entered = threading.Event()
+    second_acquiring = threading.Event()
+    release = threading.Event()
+    replacements = []
+    original_replace = state.os.replace
+
+    class ObservedLock:
+        def __enter__(self):
+            if first_entered.is_set():
+                second_acquiring.set()
+            real_lock.acquire()
+        def __exit__(self, *args):
+            real_lock.release()
+
+    monkeypatch.setitem(state._path_locks, key, ObservedLock())
+    def replace(source, dest):
+        replacements.append(source)
+        if len(replacements) == 1:
+            first_entered.set()
+            assert release.wait(5), 'First replacement was not released'
+        original_replace(source, dest)
+    monkeypatch.setattr(state.os, 'replace', replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(atomic_write, path, {'value': 1})
+        try:
+            assert first_entered.wait(5)
+            second = pool.submit(atomic_write, path, {'value': 2})
+            assert second_acquiring.wait(5), 'Second writer did not reach the path lock'
+            assert len(replacements) == 1
+        finally:
+            release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert len(replacements) == 2
+    assert json.loads(path.read_text()) == {'value': 2}
+    assert list(tmp_path.glob('*.tmp')) == []
+
+
+def test_different_path_atomic_replacements_are_independent(tmp_path, monkeypatch):
+    from gpt_windows_connector import local_account_state as state
+    first_path, second_path = tmp_path / 'first.json', tmp_path / 'second.json'
+    entered, release = threading.Event(), threading.Event()
+    original_replace = state.os.replace
+    def replace(source, dest):
+        if dest == first_path:
+            entered.set()
+            assert release.wait(5), 'First replacement was not released'
+        original_replace(source, dest)
+    monkeypatch.setattr(state.os, 'replace', replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(atomic_write, first_path, {'value': 1})
+        try:
+            assert entered.wait(5)
+            second = pool.submit(atomic_write, second_path, {'value': 2})
+            second.result(timeout=5)
+            assert json.loads(second_path.read_text()) == {'value': 2}
+        finally:
+            release.set()
+        first.result(timeout=5)
+    assert json.loads(first_path.read_text()) == {'value': 1}
+    assert list(tmp_path.glob('*.tmp')) == []
+
+
+def test_failed_atomic_replace_propagates_and_releases_lock(tmp_path, monkeypatch):
+    from gpt_windows_connector import local_account_state as state
+    path = tmp_path / 'atomic.json'
+    atomic_write(path, {'old': True})
+    original_replace = state.os.replace
+    failure = PermissionError('synthetic replacement denial')
+    def fail(source, dest):
+        raise failure
+    monkeypatch.setattr(state.os, 'replace', fail)
+    with pytest.raises(PermissionError) as caught:
+        atomic_write(path, {'new': True})
+    assert caught.value is failure
+    assert json.loads(path.read_text()) == {'old': True}
+    assert list(tmp_path.glob('*.tmp')) == []
+    monkeypatch.setattr(state.os, 'replace', original_replace)
+    errors = []
+    def write_again():
+        try:
+            atomic_write(path, {'recovered': True})
+        except BaseException as error:
+            errors.append(error)
+    worker = threading.Thread(target=write_again, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), 'Failed replacement retained the path lock'
+    assert not errors
+    assert json.loads(path.read_text()) == {'recovered': True}
+    assert list(tmp_path.glob('*.tmp')) == []
+
 
 def test_failed_atomic_serialization_keeps_previous_file_and_cleans_temp(tmp_path):
     path = tmp_path / 'atomic.json'

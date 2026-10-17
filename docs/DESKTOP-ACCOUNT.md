@@ -49,6 +49,11 @@ branch's monolithic UI or server.
 - Tokens are protected with Windows DPAPI; there is no plaintext persistence or
   non-Windows fallback. Tests use synthetic tokens and fake native APIs. They do
   not read any user credential store or make a real sign-in request.
+- Each state writer creates, writes and fsyncs its own temporary file. Final
+  replacement is serialized by a canonical-path reentrant lock shared with
+  account-state operations in this process, including raw helper calls. Different
+  paths remain independent. Replacement errors propagate and temporary files are
+  cleaned up; this does not provide cross-process serialization.
 - Latest-operation and account-generation ownership prevent delayed login,
   verification or `/auth/me` responses from recreating a signed-out session,
   replacing another account, or signing out a newer session on a stale 401.

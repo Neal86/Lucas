@@ -43,8 +43,8 @@ class RequestOwner:
 
 
 class _SharedState:
-    def __init__(self) -> None:
-        self.lock = threading.RLock()
+    def __init__(self, lock: Any) -> None:
+        self.lock = lock
         self.generation = 0
         self.sequence: dict[str, int] = {}
         self.pending: dict[str, Any] | None = None
@@ -56,6 +56,21 @@ class _SharedState:
 
 _registry_lock = threading.Lock()
 _registry: dict[str, _SharedState] = {}
+_path_locks: dict[str, Any] = {}
+
+
+def _path_key(path: Path) -> str:
+    return os.path.normcase(str(path.resolve()))
+
+
+def _path_lock(key: str) -> Any:
+    # Never wait for a path lock while holding the registry mutex. Raw writes
+    # need a lock, but must not initialize account-generation/lifetime metadata.
+    with _registry_lock:
+        lock = _path_locks.get(key)
+        if lock is None:
+            lock = _path_locks[key] = threading.RLock()
+        return lock
 
 
 def read_object(path: Path) -> dict[str, Any]:
@@ -81,7 +96,8 @@ def _valid_lifetime(data: dict[str, Any]) -> bool:
 
 
 def atomic_write(path: Path, data: dict[str, Any]) -> None:
-    """Each writer owns a different private temporary file, even in one process."""
+    """Private temp files, with same-process replacement serialized per path."""
+    lock = _path_lock(_path_key(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
@@ -90,7 +106,8 @@ def atomic_write(path: Path, data: dict[str, Any]) -> None:
             json.dump(data, stream, ensure_ascii=False, allow_nan=False, indent=2)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        with lock:
+            os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -99,11 +116,14 @@ class AccountState:
     def __init__(self, origin: str, state_path: Path) -> None:
         self.origin = origin
         self.path = Path(state_path)
-        key = os.path.normcase(str(self.path.resolve()))
-        with _registry_lock:
+        key = _path_key(self.path)
+        lock = _path_lock(key)
+        # Use the same reentrant lock as atomic_write, including initialization.
+        # Registry lookup is complete before waiting for this path's lock.
+        with lock, _registry_lock:
             shared = _registry.get(key)
             if shared is None:
-                shared = _SharedState()
+                shared = _SharedState(lock)
                 data = read_object(self.path)
                 if _valid_lifetime(data):
                     shared.session_id = data.get("session_id")
