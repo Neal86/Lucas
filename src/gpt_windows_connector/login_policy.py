@@ -26,14 +26,22 @@ def _set_access_cookie(response: JSONResponse, user, auth, settings) -> JSONResp
     return response
 
 
-async def login(request: Request, auth, security, settings, client_ip):
+def _success_response(user, auth, settings, desktop: bool) -> JSONResponse:
+    if desktop:
+        return JSONResponse({"access_token": auth.issue_token(user), "token_type": "bearer",
+                             "expires_in": settings.jwt_ttl_seconds, "user": user.__dict__},
+                            headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+    return _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user, auth, settings)
+
+
+async def login(request: Request, auth, security, settings, client_ip, *, desktop: bool = False):
     try:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("Expected a JSON object")
         email = str(body.get("email") or "").strip().lower()
         password = str(body.get("password") or "")
-        remember = bool(body.get("remember"))
+        remember = False if desktop else bool(body.get("remember"))
         ip_address = client_ip(request)
         if not security.allow(f"login:{ip_address}:{email}", 10, 600):
             return JSONResponse({"error": "Too many login attempts. Try again later."}, status_code=429)
@@ -41,14 +49,14 @@ async def login(request: Request, auth, security, settings, client_ip):
         bypass_login_verification = os.getenv("GWC_BYPASS_LOGIN_VERIFICATION", "").strip().lower() in {"1", "true", "yes", "on"}
         if bypass_login_verification:
             auth.audit(user.id, "auth.login_staging_bypass")
-            return _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user, auth, settings)
+            return _success_response(user, auth, settings, desktop)
         trusted_cookie = request.cookies.get("gwc_trusted_login_device", "")
         if remember and security.is_trusted_login(user.id, trusted_cookie, ip_address):
             auth.audit(user.id, "auth.login_trusted_device", details={"ip_changed": False})
             return _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user, auth, settings)
         if not email_verification_enabled():
             return JSONResponse({"error": "Email verification is required but email service is not configured"}, status_code=503)
-        challenge_id, code = security.start_login_verification(user.id, user.email, ip_address, remember)
+        challenge_id, code = security.start_login_verification(user.id, user.email, ip_address, remember, purpose="desktop" if desktop else "web")
         send_verification_email(user.email, code)
         auth.audit(user.id, "auth.login_verification_sent", details={"remember_device": remember})
         return JSONResponse({"verification_required": True, "challenge_id": challenge_id, "email": user.email}, status_code=202)
@@ -60,7 +68,7 @@ async def login(request: Request, auth, security, settings, client_ip):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
-async def resend(request: Request, auth, security, settings, client_ip):
+async def resend(request: Request, auth, security, settings, client_ip, *, desktop: bool = False):
     try:
         body = await request.json()
         if not isinstance(body, dict):
@@ -69,7 +77,7 @@ async def resend(request: Request, auth, security, settings, client_ip):
         ip_address = client_ip(request)
         if not security.allow(f"login-resend:{ip_address}:{challenge_id}", 6, 3600):
             return JSONResponse({"error": "Too many resend attempts. Try again later."}, status_code=429)
-        user_id, email, code = security.resend_login_verification(challenge_id, ip_address)
+        user_id, email, code = security.resend_login_verification(challenge_id, ip_address, purpose="desktop" if desktop else "web")
         send_verification_email(email, code)
         auth.audit(user_id, "auth.login_verification_resent")
         return JSONResponse({"ok": True, "email": email})
@@ -79,16 +87,18 @@ async def resend(request: Request, auth, security, settings, client_ip):
         return JSONResponse({"error": str(exc)}, status_code=503)
 
 
-async def verify(request: Request, auth, security, settings, client_ip):
+async def verify(request: Request, auth, security, settings, client_ip, *, desktop: bool = False):
     try:
         body = await request.json()
         if not isinstance(body, dict):
             raise ValueError("Expected a JSON object")
         ip_address = client_ip(request)
-        user_id, remember, trusted_token = security.verify_login(str(body.get("challenge_id") or ""), str(body.get("code") or ""), ip_address)
+        user_id, remember, trusted_token = security.verify_login(str(body.get("challenge_id") or ""), str(body.get("code") or ""), ip_address, purpose="desktop" if desktop else "web")
         user = auth.get_user(user_id)
         auth.audit(user.id, "auth.login_verified", details={"remember_device": remember})
-        response = _set_access_cookie(JSONResponse({"access_token": "cookie", "token_type": "bearer", "user": user.__dict__}), user, auth, settings)
+        response = _success_response(user, auth, settings, desktop)
+        if desktop:
+            return response
         if remember and trusted_token:
             response.set_cookie(
                 "gwc_trusted_login_device",

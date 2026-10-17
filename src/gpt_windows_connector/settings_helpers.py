@@ -10,6 +10,7 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 from typing import Any
 
 from . import update_distribution
+from .settings_navigation import PAGE_ORDER
 
 from .settings_constants import (
     CONFIG_DIR,
@@ -90,7 +91,7 @@ def _save_config(config: dict[str, Any]) -> None:
 
 
 def _load_last_page() -> str:
-    allowed = {"常规", "安全", "用户与权限", "文件访问", "网络", "任务记录", "日志", "系统访问"}
+    allowed = set(PAGE_ORDER)
     requested = str(os.environ.get("LUCAS_SETTINGS_PAGE") or "").strip()
     if requested in allowed:
         return requested

@@ -1,5 +1,17 @@
 # Lucas PRD V2.1 implementation and acceptance
 
+## Development acceptance: desktop account login only (2026-10-17)
+
+The stacked source-only desktop account batch restores the main-only Settings
+login capability through the current shared login policy, a purpose-bound email
+challenge and isolated origin/account-owned token persistence and UI lifecycle
+modules. See [DESKTOP-ACCOUNT.md](DESKTOP-ACCOUNT.md) for APIs, additive migration,
+module boundaries, synthetic checks and remaining real Windows/mail/distribution
+gates. The user's plugin synchronization pause is preserved: plugin catalog,
+sync/cache UI, routes and tool integration are excluded from this batch.
+No Node authorization, OAuth grant, Beta/pricing, browser/Profile policy,
+installer, deployed configuration or release version is changed.
+
 ## Development acceptance: source-only release contract (2026-10-16)
 
 A separate stacked review branch from PR4 `8787b1f` restores Compose healthcheck

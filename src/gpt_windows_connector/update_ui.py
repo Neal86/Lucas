@@ -80,7 +80,7 @@ class InAppUpdater:
             "complete": self.T("更新完成", "Update complete"),
         }
 
-    SETTINGS_RUNTIME_FILES = ("settings_ui.py", "update_ui.py", "settings_constants.py", "app_icon.py", "node.py", "settings_single_instance.py", "update_distribution.py")
+    SETTINGS_RUNTIME_FILES = ("settings_ui.py", "update_ui.py", "settings_constants.py", "app_icon.py", "node.py", "settings_single_instance.py", "update_distribution.py", "settings_helpers.py", "settings_navigation.py", "settings_account_integration.py", "settings_account_ui.py", "settings_account_lifecycle.py", "local_account.py", "local_account_state.py", "credential_vault.py")
 
     def _settings_hashes(self) -> dict[str, str]:
         base = Path(__file__).resolve().parent
