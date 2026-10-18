@@ -40,7 +40,7 @@ class Texts(HTMLParser):
 
 
 def node(script):
-    return subprocess.check_output(['node', '-e', script], text=True).strip()
+    return subprocess.check_output(['node', '-e', script], text=True, encoding="utf-8").strip()
 
 
 class SecondaryPageI18nTests(unittest.TestCase):
@@ -128,7 +128,7 @@ class SecondaryPageI18nTests(unittest.TestCase):
             # ADMIN_SCRIPT includes the final document suffix; keep only JS.
             script = script.split('</script>\n</body>')[0]
             script = re.sub(r'</?script>', '', script)
-            result = subprocess.run(['node','--check'], input=script, text=True, capture_output=True)
+            result = subprocess.run(['node','--check'], input=script, text=True, encoding="utf-8", capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
 
 

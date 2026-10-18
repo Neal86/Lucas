@@ -5,6 +5,7 @@ is a synthetic fixture, not proof of the gateway's real authorization behavior.
 No gateway/Node/security modules or external services are loaded.
 """
 import ast
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import sqlite3
@@ -21,6 +22,7 @@ from starlette.routing import Route
 class AdminOperationsQueryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
         self.db_path = Path(self.temp.name) / 'operations.sqlite'
         with self.db() as db:
             db.executescript('''
@@ -32,7 +34,7 @@ class AdminOperationsQueryTests(unittest.IsolatedAsyncioTestCase):
                 INSERT INTO users VALUES('u2','second@example.test');
             ''')
         source = Path(__file__).parents[1] / 'src/gpt_windows_connector/admin.py'
-        module = ast.parse(source.read_text())
+        module = ast.parse(source.read_text(encoding="utf-8"))
         wanted = {'operations', '_safe_details', '_error'}
         nodes = [n for n in module.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in wanted]
         self.assertEqual({n.name for n in nodes}, wanted)
@@ -41,13 +43,15 @@ class AdminOperationsQueryTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(source), 'exec'), namespace)
         self.app = Starlette(routes=[Route('/api/admin/operations', namespace['operations'])])
 
-    def tearDown(self):
-        self.temp.cleanup()
-
+    @contextmanager
     def db(self):
         db = sqlite3.connect(self.db_path)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
 
     @staticmethod
     def authorize(request):
