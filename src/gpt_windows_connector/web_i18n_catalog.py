@@ -163,3 +163,8 @@ WEB_ZH_JS = r'''{
 "Once your computer is Authorized, connect an AI from":"电脑获得授权后，可从以下页面连接 AI：",
 ". The AI can then use Lucas MCP according to the permissions set on your computer.":"。随后，AI 即可按电脑上设置的权限使用 Lucas MCP。",
 }'''
+
+
+# Keep secondary-page translations separate from the core onboarding catalog.
+from .web_secondary_i18n import SECONDARY_ZH_JS
+WEB_ZH_JS = "Object.assign(" + WEB_ZH_JS + "," + SECONDARY_ZH_JS + ")"

@@ -43,16 +43,16 @@ NODE_NAME = "Synthetic offline acceptance computer"
 # rendering functions so a blank/wrong page cannot pass by matching itself.
 PUBLIC_PAGES = [
     ("/", "#landing h1", "Let AI Work for You", "让 AI 为你工作"),
-    ("/features", "main h1", "Give your AI a secure way to use your computer.", None),
-    ("/how-it-works", "main h1", "From AI request to computer action in three steps.", None),
-    ("/security", "main h1", "Your computer stays behind your permission boundary.", None),
-    ("/download", "main h1", "Connect your computer with Lucas Node.", None),
+    ("/features", "main h1", "Give your AI a secure way to use your computer.", "让你的 AI 安全地使用电脑。"),
+    ("/how-it-works", "main h1", "From AI request to computer action in three steps.", "三个步骤，从 AI 请求到电脑执行。"),
+    ("/security", "main h1", "Your computer stays behind your permission boundary.", "你的电脑始终受权限边界保护。"),
+    ("/download", "main h1", "Connect your computer with Lucas Node.", "通过 Lucas Node 连接电脑。"),
     ("/docs/computer-node", "#node-guide-title", "Connect a computer with Lucas Node", "使用 Lucas Node 连接电脑"),
     ("/pricing", "main h1", "Free during Beta", "测试期间免费"),
-    ("/privacy", "main h1", "Privacy Policy", None),
-    ("/terms", "main h1", "Terms of Service", None),
-    ("/refunds", "main h1", "Refund & Cancellation Policy", None),
-    ("/contact", "main h1", "Contact Lucas", None),
+    ("/privacy", "main h1", "Privacy Policy", "隐私政策"),
+    ("/terms", "main h1", "Terms of Service", "服务条款"),
+    ("/refunds", "main h1", "Refund & Cancellation Policy", "退款与取消政策"),
+    ("/contact", "main h1", "Contact Lucas", "联系 Lucas"),
 ]
 DASHBOARD_PAGES = [
     ("/dashboard", "dashboard", "Dashboard", "控制台"),
@@ -61,19 +61,19 @@ DASHBOARD_PAGES = [
     ("/task-runs", "tasks", "Task Runs", "任务记录"),
     ("/logs", "logs", "Activity Logs", "活动日志"),
     ("/account", "account", "Account & Security", "账号与安全"),
-    ("/refer", "referral", "Refer & Earn", "Refer & Earn"),
+    ("/refer", "referral", "Refer & Earn", "邀请奖励"),
     ("/billing", "billing", "Lucas Beta", "Lucas Beta"),
     ("/billing/success", "billing", "Lucas Beta", "Lucas Beta"),
     ("/billing/cancel", "billing", "Lucas Beta", "Lucas Beta"),
 ]
 ADMIN_PAGES = [
-    ("/admin", "dashboard", "Total users", "Total users"),
+    ("/admin", "dashboard", "Total users", "用户总数"),
     ("/admin/users", "users", EMAIL, EMAIL),
-    ("/admin/usage", "usage", "Success rate", "Success rate"),
-    ("/admin/nodes", "nodes", "No nodes.", "No nodes."),
-    ("/admin/operations", "operations", "No operations.", "No operations."),
+    ("/admin/usage", "usage", "Success rate", "成功率"),
+    ("/admin/nodes", "nodes", "No nodes.", "暂无节点。"),
+    ("/admin/operations", "operations", "No operations.", "暂无操作。"),
     ("/admin/subscriptions", "subscriptions", EMAIL, EMAIL),
-    ("/admin/system", "system", "healthy", "healthy"),
+    ("/admin/system", "system", "healthy", "正常"),
 ]
 
 
@@ -323,8 +323,7 @@ def test_public_routes_render_content_without_errors_or_horizontal_overflow(
                 await navigate(cdp, session, server, path, selector)
                 expected = chinese if language == "zh-CN" and chinese else english
                 assert expected in await text_content(cdp, session, selector)
-                # Legacy information/legal pages are currently English-only;
-                # the localized landing, Pricing and guide must honor language.
+                # Every public page must honor the browser language.
                 assert await cdp.evaluate("document.documentElement.lang", session) == (
                     language if chinese else "en")
                 await assert_page(cdp, session, width, "main")

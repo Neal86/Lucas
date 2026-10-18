@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from .web_public_i18n import PUBLIC_I18N_SCRIPT
+
 
 def legal_html(title: str, body: str) -> str:
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/png" href="/assets/lucas-logo-square.png?v=20260908"><title>{title} · Lucas</title><style>body{{margin:0;background:#05070d;color:#e8edf7;font:16px/1.75 Inter,system-ui,sans-serif}}main{{max-width:860px;margin:auto;padding:56px 28px 90px}}a{{color:#91a7ff}}h1,h2{{color:#fff}}.muted{{color:#9aa4bb}}nav{{margin-bottom:48px}}section{{margin:32px 0}}</style></head><body><main><nav><a href="/">← Lucas</a></nav><h1>{title}</h1>{body}<p class="muted">Last updated: September 8, 2026</p></main></body></html>'''
+    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" type="image/png" href="/assets/lucas-logo-square.png?v=20260908"><title>{title} · Lucas</title><style>body{{margin:0;background:#05070d;color:#e8edf7;font:16px/1.75 Inter,system-ui,sans-serif}}main{{max-width:860px;margin:auto;padding:56px 28px 90px}}a{{color:#91a7ff}}h1,h2{{color:#fff}}.muted{{color:#9aa4bb}}nav{{margin-bottom:48px}}section{{margin:32px 0}}</style></head><body><main><nav><a href="/">← Lucas</a></nav><h1>{title}</h1>{body}<p class="muted">Last updated: September 8, 2026</p></main>{PUBLIC_I18N_SCRIPT}</body></html>'''
 
 
 def privacy_html() -> str:
