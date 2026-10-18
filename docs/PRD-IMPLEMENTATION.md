@@ -1446,3 +1446,39 @@ exception text, which can contain credential-bearing request URLs. Event sending
 and failure return semantics remain unchanged. Regression evidence uses only
 synthetic tokens, disposable SQLite stores and in-process HTTP fixtures; no live
 provider, credentials, production logs or devices are involved.
+
+
+### Admin operation-query regression (2026-10-18, source-only)
+
+LUC-B01/B02: the administrator operations endpoint orders task steps by
+`started_at DESC, id DESC` instead of random IDs alone. User/action SQL filters
+remain parameterized. The effective status (column first, then legacy
+`details.status`, then the existing missing-key `success` default) is matched
+before counting the result limit. Status-filtered queries stream their cursor
+and stop after enough matches, avoiding full result materialization and an
+optional SQLite JSON-extension dependency. Unfiltered queries keep SQL LIMIT.
+A sparse/no-match filter can still scan many rows; large-production query
+latency is not validated by these fixtures.
+
+The initial 16 isolated regressions in `tests/test_admin_operations_query.py` use the
+actual three named production functions compiled from AST, disposable real
+SQLite and in-process Starlette/HTTPX. Authentication is a synthetic fixture;
+this does not verify real token validation or gateway integration. Against the
+exact PR7 `4ccbcb0` source baseline, 12 pass and four fail; with the repair all
+16 pass (`python -m unittest discover -s tests -v` in the isolated patch tree).
+These cover reverse UUID/time ordering, stable timestamp ties, status-before-
+limit, legacy fallback/precedence, combined filters, bound query inputs, limit
+clamping, redaction, orphan owners and calling the authorization guard.
+
+No full repository regression, Windows device, real browser, staging or
+production acceptance was performed for this isolated patch. The paused
+security modules and plugin synchronization remain untouched. The patch does
+not establish complete PRD acceptance or a released fix.
+
+Independent review additionally reproduced a non-object JSON `details` value
+blocking status-filtered results when scanning older rows. The admin details
+reader now treats JSON arrays, null, booleans, numbers and strings as empty
+metadata, like malformed JSON. Two added real-SQLite/ASGI tests cover these
+cases, including a valid older match behind bad nonmatching rows. Final local
+result: 18 tests passed. This is read normalization only; stored data and
+request-body behavior are unchanged.

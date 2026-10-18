@@ -47,6 +47,8 @@ def _safe_details(raw: str | None) -> dict:
         data = json.loads(raw or "{}")
     except json.JSONDecodeError:
         return {}
+    if not isinstance(data, dict):
+        return {}
     blocked = {"password", "token", "access_token", "authorization", "cookie", "clipboard", "content", "command", "stdout", "stderr"}
     return {k: ("[redacted]" if k.lower() in blocked else v) for k, v in data.items()}
 
@@ -189,18 +191,40 @@ async def nodes(request: Request):
 
 async def operations(request: Request):
     try:
-        _admin(request); limit=max(1,min(int(request.query_params.get("limit","200")),1000)); user=request.query_params.get("user",""); action=request.query_params.get("action",""); status=request.query_params.get("status","")
-        sql="SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.operation_count,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"; params=[]
-        if user: sql+=" AND (u.email LIKE ? OR t.owner_id=?)"; params += [f"%{user}%",user]
-        if action: sql+=" AND t.action LIKE ?"; params.append(f"%{action}%")
-        sql+=" ORDER BY t.id DESC LIMIT ?"; params.append(limit)
-        with _db() as db: rows=db.execute(sql,params).fetchall()
-        out=[]
-        for r in rows:
-            d=dict(r); d["details"]=_safe_details(d.get("details")); d["status"]=d.get("status") or d["details"].get("status","success"); out.append(d)
-        if status: out=[d for d in out if d["status"]==status]
-        return JSONResponse({"operations":out})
-    except Exception as exc: return _error(exc)
+        _admin(request)
+        limit = max(1, min(int(request.query_params.get("limit", "200")), 1000))
+        user = request.query_params.get("user", "")
+        action = request.query_params.get("action", "")
+        status = request.query_params.get("status", "")
+        sql = "SELECT t.id,t.owner_id AS user_id,u.email,t.action,t.target,t.details,t.operation_count,t.started_at AS created_at,t.status FROM task_steps t LEFT JOIN users u ON u.id=t.owner_id WHERE 1=1"
+        params: list[object] = []
+        if user:
+            sql += " AND (u.email LIKE ? OR t.owner_id=?)"
+            params += [f"%{user}%", user]
+        if action:
+            sql += " AND t.action LIKE ?"
+            params.append(f"%{action}%")
+        sql += " ORDER BY t.started_at DESC, t.id DESC"
+        if not status:
+            sql += " LIMIT ?"
+            params.append(limit)
+        out = []
+        with _db() as db:
+            # Legacy rows fall back to details.status. Filter that effective
+            # value before counting the limit, without materializing all rows
+            # or requiring SQLite's optional JSON extension.
+            for row in db.execute(sql, params):
+                item = dict(row)
+                item["details"] = _safe_details(item.get("details"))
+                item["status"] = item.get("status") or item["details"].get("status", "success")
+                if status and item["status"] != status:
+                    continue
+                out.append(item)
+                if len(out) >= limit:
+                    break
+        return JSONResponse({"operations": out})
+    except Exception as exc:
+        return _error(exc)
 
 
 async def subscriptions(request: Request):
@@ -232,3 +256,4 @@ admin_routes = [
     Route("/api/admin/subscriptions", subscriptions, methods=["GET"]),
     Route("/api/admin/system", system, methods=["GET"]),
 ]
+
