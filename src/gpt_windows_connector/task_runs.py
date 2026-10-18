@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import time as _startup_clock
 import uuid
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -24,12 +25,32 @@ class TaskRunStore:
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=30)
         db.row_factory = sqlite3.Row
-        db.execute("PRAGMA journal_mode=WAL")
-        db.execute("PRAGMA busy_timeout=30000")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=0")
+            # Concurrent rollback-journal -> WAL transitions may return BUSY
+            # immediately without invoking SQLite's configured busy handler.
+            # Retry only that transition, outside any transaction, with the
+            # same bounded wait budget as ordinary connections. Disable the
+            # native wait only here so retries cannot multiply that budget.
+            deadline = _startup_clock.monotonic() + 30.0
+            while True:
+                try:
+                    db.execute("PRAGMA journal_mode=WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    code = getattr(exc, "sqlite_errorcode", None)
+                    remaining = deadline - _startup_clock.monotonic()
+                    if code is None or (code & 0xff) != sqlite3.SQLITE_BUSY or remaining <= 0:
+                        raise
+                    _startup_clock.sleep(min(0.01, remaining))
+            db.execute("PRAGMA busy_timeout=30000")
+            return db
+        except BaseException:
+            db.close()
+            raise
 
     def _init_db(self) -> None:
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
             db.executescript("""
             CREATE TABLE IF NOT EXISTS task_runs (
                 id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, node_id TEXT NOT NULL,
@@ -150,3 +171,4 @@ class TaskRunStore:
                     steps.append(sub)
                 item["steps"]=steps; out.append(item)
         return out
+

@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from gpt_windows_connector.web_smoke_routes import WEB_SMOKE_ROUTES
+from gpt_windows_connector.web_smoke_routes import WEB_SMOKE_ROUTES, expected_statuses
 
 
 def check(base_url: str) -> int:
@@ -30,10 +30,12 @@ def check(base_url: str) -> int:
             print(f"FAIL {path}: {exc}")
             continue
 
-        ok = status < 500 if expected is None else status == expected
-        print(f"{'PASS' if ok else 'FAIL'} {path}: HTTP {status}" + (f" expected {expected}" if expected is not None else ""))
+        allowed = expected_statuses(expected)
+        expected_label = "/".join(str(code) for code in sorted(allowed))
+        ok = status in allowed
+        print(f"{'PASS' if ok else 'FAIL'} {path}: HTTP {status} expected {expected_label}")
         if not ok:
-            failures.append(f"{path}: HTTP {status}, expected {expected if expected is not None else 'non-5xx'}")
+            failures.append(f"{path}: HTTP {status}, expected {expected_label}")
 
     if failures:
         print("\nRELEASE BLOCKED: web smoke test failed")
@@ -54,3 +56,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

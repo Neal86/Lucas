@@ -1,0 +1,9 @@
+# Explicit smoke HTTP status contract
+
+LUC-R02's conditional false-positive risk is directly confirmed in the existing decision: authentication-aware routes previously accepted every status below 500, including 404. This does not imply any deployed page was actually missing.
+
+Public routes retain exact 200 expectations. The existing ten billing/admin routes retain their authentication-aware classification, now allowing only rendered 200, ordinary redirects 301/302/303/307/308, or authentication/authorization denials 401/403. Missing-route 404, rate-limit 429, other unexpected responses, network errors and 5xx block this smoke gate. The route list is unchanged; no live request or deployment was performed.
+
+Five local tests execute the actual checker with synthetic HTTP response/error fixtures, covering every classification, success context cleanup, the explicit allowlist and rejected statuses. They do not establish route content, redirect destination correctness, actual authentication enforcement, staging health or production acceptance. urllib's existing redirect behavior is unchanged. Actual browser coverage and authorized staging checks remain separate release requirements.
+
+Exact candidate handler mapping (webapp.py at `bb355a7`): `/billing` calls `billing_page`; `/billing/success` and `/billing/cancel` delegate to it. Missing authentication returns 302 to `/dashboard`; authenticated requests render the dashboard shell with 200. All seven `/admin*` page routes call `admin_page`; absent authentication or a non-admin role returns 302 to `/dashboard`, while admin/super_admin renders the shell with 200. The current urllib client follows that redirect. The broader explicit redirect/401/403 allowlist preserves authentication-gateway responses without allowing arbitrary errors. A 200 shell or error page alone is still not content/authorization acceptance; the browser and deployment gates remain required.

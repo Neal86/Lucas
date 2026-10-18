@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from html import escape
 
+from .web_public_i18n import PUBLIC_I18N_SCRIPT
+
 
 def referral_html(summary: dict) -> str:
     code = escape(str(summary.get("code") or ""))
@@ -24,14 +26,14 @@ button,a.btn{{background:#5b7cff;color:#fff;border:0;border-radius:10px;padding:
 .row{{display:flex;gap:10px;align-items:center}} .row input{{flex:1}} @media(max-width:700px){{.grid{{grid-template-columns:1fr}}.row{{display:block}}.row button{{margin-top:10px;width:100%}}}}
 </style></head><body><main class="wrap">
 <a class="btn" href="/dashboard">← Dashboard</a>
-<div class="card"><h1>Refer & Earn</h1><p class="muted">Invite a friend to Lucas. When they become a paying customer, you earn <b>{reward:,} bonus Requests</b>.</p>
+<div class="card"><h1>Refer & Earn</h1><p class="muted">Invite a friend to Lucas. When they become a paying customer, you earn <b>{reward:,} <span>bonus Requests</span></b>.</p>
 <div class="row"><input id="refUrl" readonly value="{url}"><button onclick="copyRef()">Copy invite link</button></div>
 <p class="muted">Referral code: <b>{code}</b>. Rewards are issued once per referred user after their first successful paid invoice.</p></div>
 <div class="grid">
 <div class="card"><div class="muted">Paid referrals</div><div class="metric">{paid}</div></div>
 <div class="card"><div class="muted">Pending referrals</div><div class="metric">{pending}</div></div>
 <div class="card"><div class="muted">Requests earned</div><div class="metric">{earned:,}</div></div>
-</div></main><script>async function copyRef(){{const e=document.getElementById('refUrl');try{{await navigator.clipboard.writeText(e.value);event.target.textContent='Copied'}}catch{{e.select();document.execCommand('copy')}}}}</script></body></html>"""
+</div></main><script>async function copyRef(){{const e=document.getElementById('refUrl');try{{await navigator.clipboard.writeText(e.value);event.target.textContent=wt('Copied')}}catch{{e.select();document.execCommand('copy')}}}}</script>{PUBLIC_I18N_SCRIPT}</body></html>"""
 
 
 def dashboard_referral_html() -> str:

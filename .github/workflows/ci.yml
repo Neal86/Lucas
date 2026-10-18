@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging]
   pull_request:
-    branches: [main, staging, fix/history-response-ownership-20261016, fix/release-contract-20261016, fix/desktop-account-auth-20261017]
+    branches: [main, staging, fix/history-response-ownership-20261016, fix/release-contract-20261016, fix/desktop-account-auth-20261017, fix/confirmed-defects-20261017]
 
 jobs:
   test:

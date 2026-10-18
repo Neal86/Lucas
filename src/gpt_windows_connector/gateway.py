@@ -44,6 +44,7 @@ from .entitlements import ensure_node_active, ensure_node_capacity
 from .operation_admission import OperationAdmissionStore
 from .oauth import OAuthProvider
 from .registration_security import RegistrationSecurity, email_verification_enabled, send_verification_email
+from .api_inputs import read_json_object
 from . import login_policy
 from .desktop_account_routes import desktop_account_routes, DESKTOP_AUTH_PATHS
 from .task_runs import TaskRunStore
@@ -455,7 +456,7 @@ async def _verify_turnstile(request: Request, token: str) -> bool:
 
 async def auth_register(request: Request):
     try:
-        body = await request.json()
+        body = await read_json_object(request)
         email = str(body.get("email", "")).strip().lower()
         meta_event_id = str(body.get("meta_event_id") or f"register_{uuid.uuid4().hex}")[:200]
         if str(body.get("website", "")).strip():
@@ -486,7 +487,7 @@ async def auth_verify_email(request: Request):
     if not email_verification_enabled():
         return JSONResponse({"error": "Email verification is not configured"}, status_code=503)
     try:
-        body = await request.json()
+        body = await read_json_object(request)
         meta_event_id = str(body.get("meta_event_id") or f"verify_{uuid.uuid4().hex}")[:200]
         user_id = registration_security.verify(str(body.get("email", "")), str(body.get("code", "")))
         user = auth.get_user(user_id)
@@ -505,7 +506,7 @@ async def auth_resend_verification(request: Request):
     if not email_verification_enabled():
         return JSONResponse({"error": "Email verification is not configured"}, status_code=503)
     try:
-        body = await request.json()
+        body = await read_json_object(request)
         email = str(body.get("email", "")).strip().lower()
         if not _registration_rate_ok(request, email, resend=True):
             return JSONResponse({"error": "Too many verification requests. Try again later."}, status_code=429)
@@ -871,3 +872,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

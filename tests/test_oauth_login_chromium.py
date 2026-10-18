@@ -254,6 +254,31 @@ def login_server(tmp_path, monkeypatch):
             assert not thread.is_alive(), "Local OAuth HTTP server did not stop"
 
 
+async def wait_for_debugging_port(process, active_port, error_log):
+    # Chromium creates this file before completing its two-line contents.
+    # Keep the original 15-second budget, but wait for usable data, not existence.
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            pytest.fail("Chromium failed to start: " + error_log.read_text(encoding="utf-8", errors="replace")[-6000:])
+        try:
+            text = active_port.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            text = ""
+        lines = text.splitlines()
+        if (len(lines) >= 2 and lines[0].isascii() and lines[0].isdigit()
+                and 0 < int(lines[0]) <= 65535
+                and lines[1].startswith("/devtools/browser/")
+                and len(lines[1]) > len("/devtools/browser/")):
+            if process.poll() is not None:
+                pytest.fail("Chromium exited before its debugging endpoint was ready")
+            return lines[0]
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            await asyncio.sleep(min(0.1, remaining))
+    pytest.fail("Chromium did not expose its debugging endpoint")
+
+
 @asynccontextmanager
 async def chromium(tmp_path):
     profile = tmp_path / "chromium-profile"
@@ -273,14 +298,7 @@ async def chromium(tmp_path):
         ], stdout=subprocess.DEVNULL, stderr=stderr)
         try:
             active_port = profile / "DevToolsActivePort"
-            for _ in range(150):
-                if process.poll() is not None:
-                    pytest.fail("Chromium failed to start: " + error_log.read_text(errors="replace")[-6000:])
-                if active_port.exists():
-                    break
-                await asyncio.sleep(0.1)
-            assert active_port.exists(), "Chromium did not expose its debugging endpoint"
-            port = active_port.read_text().splitlines()[0]
+            port = await wait_for_debugging_port(process, active_port, error_log)
             async with httpx.AsyncClient(trust_env=False) as http:
                 version = (await http.get(f"http://127.0.0.1:{port}/json/version")).json()
             async with connect(version["webSocketDebuggerUrl"], max_size=32 * 1024 * 1024) as ws:
@@ -1412,3 +1430,4 @@ def test_dashboard_mode_change_during_registration_boot_suppresses_late_auth_me(
             assert await cdp.evaluate("document.getElementById('authError').textContent", session) == ""
 
     asyncio.run(run())
+

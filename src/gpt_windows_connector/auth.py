@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import time
 import uuid
-from contextlib import nullcontext
+from contextlib import closing, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -259,7 +259,9 @@ class AuthStore:
 
     def consume_oauth_state(self, state: str) -> None:
         digest = hashlib.sha256(state.encode()).hexdigest()
-        with self._connect() as db:
+        with closing(self._connect()) as db, db:
+            # Serialize the one-time read/delete across concurrent callbacks.
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT expires_at FROM oauth_states WHERE state_hash=?", (digest,)).fetchone()
             db.execute("DELETE FROM oauth_states WHERE state_hash=?", (digest,))
         if not row or float(row["expires_at"]) < time.time():
@@ -341,3 +343,4 @@ async def google_exchange_code(client_id: str, client_secret: str, redirect_uri:
         if info.get("email_verified") is False:
             raise PermissionError("Google email is not verified")
         return info
+
