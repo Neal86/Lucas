@@ -11,3 +11,9 @@ The transition from rollback journaling to WAL can fail immediately under simult
 Four tests pass. One exercises actual disposable SQLite, eight simultaneous constructors across 30 database files (240 constructors), verifying preserved sentinel data, singular schema columns, and WAL mode. This same test failed immediately against the previous exact initializer with the reported SQLITE_BUSY error. Three tests use explicitly synthetic connection/error/time probes to verify busy retry, timeout propagation, non-busy propagation and closing, and restoration of ordinary busy timeout.
 
 Tests extract only the three initializer methods from the actual source via AST. They do not import or validate authentication, Node permissions, providers or the complete application. Actual Windows/Linux complete regression and Chromium results must be established against the new published head. This document does not claim complete PRD acceptance.
+
+## Wall-clock compatibility follow-up
+
+The next hosted head `c511202` exposed three existing history tests that replace the module's business `time` object with `SimpleNamespace(time=...)`. Startup's monotonic budget and sleeping now use a separate `_startup_clock` reference, so business wall-clock freezing cannot replace or freeze the contention budget. Existing history assertions remain unchanged.
+
+Five initializer regressions pass after adding a real SQLite wall-clock-replacement case. A separate local AST harness executes four unchanged original test functions: the eight-thread additive migration test, late/earlier completion timing, caller transaction/replay, and nullable legacy-end behavior. All four pass. That harness uses an explicit empty-metadata sanitizer fixture and patch.object-backed attribute restoration; it does not import gateway/auth and is not the full identity/history test suite. Complete current-head hosted regression remains required.

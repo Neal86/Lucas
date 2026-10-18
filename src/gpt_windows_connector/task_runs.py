@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import time as _startup_clock
 import uuid
 from contextlib import closing, nullcontext
 from pathlib import Path
@@ -31,17 +32,17 @@ class TaskRunStore:
             # Retry only that transition, outside any transaction, with the
             # same bounded wait budget as ordinary connections. Disable the
             # native wait only here so retries cannot multiply that budget.
-            deadline = time.monotonic() + 30.0
+            deadline = _startup_clock.monotonic() + 30.0
             while True:
                 try:
                     db.execute("PRAGMA journal_mode=WAL")
                     break
                 except sqlite3.OperationalError as exc:
                     code = getattr(exc, "sqlite_errorcode", None)
-                    remaining = deadline - time.monotonic()
+                    remaining = deadline - _startup_clock.monotonic()
                     if code is None or (code & 0xff) != sqlite3.SQLITE_BUSY or remaining <= 0:
                         raise
-                    time.sleep(min(0.01, remaining))
+                    _startup_clock.sleep(min(0.01, remaining))
             db.execute("PRAGMA busy_timeout=30000")
             return db
         except BaseException:

@@ -7,6 +7,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -14,7 +15,7 @@ SOURCE = Path(__file__).parents[1] / 'src/gpt_windows_connector/task_runs.py'
 module = ast.parse(SOURCE.read_text(encoding='utf-8'))
 klass = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == 'TaskRunStore')
 klass.body = [node for node in klass.body if isinstance(node, ast.FunctionDef) and node.name in {'__init__', '_connect', '_init_db'}]
-namespace = {'Path': Path, 'sqlite3': sqlite3, 'time': time, 'closing': closing}
+namespace = {'Path': Path, 'sqlite3': sqlite3, 'time': time, '_startup_clock': time, 'closing': closing}
 exec(compile(ast.Module(body=[klass], type_ignores=[]), str(SOURCE), 'exec'), namespace)
 TaskRunStore = namespace['TaskRunStore']
 
@@ -50,6 +51,16 @@ class StartupTests(unittest.TestCase):
                 self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'wal')
             finally:
                 db.close()
+
+    def test_wall_clock_replacement_does_not_affect_startup_clock(self):
+        # Existing history tests freeze task_runs.time for duration assertions.
+        with patch.dict(namespace, {'time': SimpleNamespace(time=lambda: 1234)}):
+            TaskRunStore(self.path)
+        db = sqlite3.connect(self.path)
+        try:
+            self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'wal')
+        finally:
+            db.close()
 
     def connection_probe(self, failures):
         db = Mock()
