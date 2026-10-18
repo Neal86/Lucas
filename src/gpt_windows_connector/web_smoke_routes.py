@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 # Routes that render user-visible pages and must be checked before production.
-# expected_status=None means any non-5xx HTTP status is acceptable because the
-# page may legitimately redirect to sign-in or reject an unauthenticated user.
+# expected_status=None uses the explicit authentication-aware allowlist below.
+# Missing routes (404), malformed requests and rate limits must never pass.
 WEB_SMOKE_ROUTES: tuple[tuple[str, int | None], ...] = (
     ("/", 200),
     ("/features", 200),
@@ -33,3 +33,12 @@ WEB_SMOKE_ROUTES: tuple[tuple[str, int | None], ...] = (
     ("/admin/subscriptions", None),
     ("/admin/system", None),
 )
+
+
+
+AUTH_PAGE_STATUSES = frozenset({200, 301, 302, 303, 307, 308, 401, 403})
+
+
+def expected_statuses(expected: int | None) -> frozenset[int]:
+    """Public pages require their exact status; auth pages allow known gates."""
+    return AUTH_PAGE_STATUSES if expected is None else frozenset({expected})
