@@ -366,7 +366,10 @@ async def api_node_name(request: Request):
 
 async def api_request_node_access(request: Request):
     user = _auth_user(request)
-    body = await request.json()
+    try:
+        body = await read_json_object(request)
+    except ValueError:
+        return JSONResponse({"error": "invalid_request_body"}, status_code=400)
     node_id = str(body.get("node_id") or "").strip()
     connection_code = str(body.get("connection_code") or "").strip()
     if not node_id:
@@ -703,3 +706,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
