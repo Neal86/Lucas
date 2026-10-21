@@ -6,6 +6,13 @@ from gpt_windows_connector.auth import AuthStore
 from gpt_windows_connector.registration_security import RegistrationSecurity
 
 
+def test_staging_compose_allows_explicit_smtp_and_enforced_login_verification():
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.test.yml").read_text(encoding="utf-8")
+    assert 'GWC_BYPASS_LOGIN_VERIFICATION: ${GWC_BYPASS_LOGIN_VERIFICATION:-true}' in compose
+    for key in ("GWC_SMTP_HOST", "GWC_SMTP_PORT", "GWC_SMTP_USERNAME", "GWC_SMTP_PASSWORD", "GWC_SMTP_FROM", "GWC_SMTP_STARTTLS"):
+        assert f"${{{key}:-" in compose
+
+
 def test_login_verification_missing_challenge_is_rejected(tmp_path):
     db_path = tmp_path / "gateway.db"
     AuthStore(db_path, "test-secret")
