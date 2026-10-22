@@ -30,5 +30,9 @@ def test_full_access_keeps_focus_control_separate_from_true_danger_gates():
     assert policy["desktop_control"] == "allow"
     assert policy["git_push"] == "allow"
     assert security["foreground_confirmation"] is True
-    for key in ("software_install", "registry_system", "high_risk", "service_control"):
+    for key in ("registry_system", "high_risk", "service_control"):
         assert policy[key] == "always_ask"
+
+
+def test_full_access_allows_ordinary_software_install():
+    assert preset_security("full_access")["approval_policy"]["software_install"] == "allow"

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import ctypes
+import json
 import ipaddress
 import re
-import threading
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
 
 from .approval_details import describe_approval
 from .command_risk import is_disk_format_command
+from .approval_dialog import confirm_operation
+from .approval_queue import NODE_APPROVAL_QUEUE
 
 
 DEFAULT_SECURITY: dict[str, Any] = {
@@ -78,6 +79,7 @@ GIT_WRITE_METHODS = {"git.branch_create", "git.branch_switch", "git.add", "git.c
 NETWORK_METHODS = {"browser.navigate", "browser.new_page", "browser.reload", "browser.back", "browser.forward", "git.pull", "git.push"}
 
 HIGH_RISK_PATTERNS = [
+    r"\b(?:Format-Volume|Clear-Disk|Initialize-Disk|Remove-Partition|Set-Partition)\b",
     r"\breg(?:\.exe)?\s+(?:add|delete)\b", r"\bbcdedit\b", r"\bdiskpart\b",
     r"\bmanage-bde\b", r"\bnet\s+user\b", r"\bnet\s+localgroup\b", r"\bsc(?:\.exe)?\s+(?:delete|config)\b",
     r"\bSet-MpPreference\b", r"\bAdd-MpPreference\b", r"\bDisable-WindowsOptionalFeature\b",
@@ -180,7 +182,6 @@ def _host_allowed(host: str, allowed: list[str]) -> bool:
 class LocalSecurityPolicy:
     config: dict[str, Any]
     _approved: set[str] = field(default_factory=set)
-    _approval_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
         self.security = _merge_security(self.config.get("security"))
@@ -195,6 +196,17 @@ class LocalSecurityPolicy:
         return False
 
     def _category(self, method: str, params: dict[str, Any]) -> str:
+        # Inspect the entire command before routine categories, including process.start
+        # and install commands followed by a destructive command.
+        command = _command_text(method, params)
+        if command and (_matches(HIGH_RISK_PATTERNS, command) or is_disk_format_command(command) or _dangerous_recursive_delete(command)):
+            return "high_risk"
+        if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
+            return "registry_system"
+        if command and _matches(SERVICE_PATTERNS, command):
+            return "service_control"
+        if method == "files.delete" and _dangerous_recursive_delete("Remove-Item -Recurse " + str(params.get("path") or "")):
+            return "high_risk"
         if method == "browser.profile_action" and str(params.get("operation") or "").lower() in {"upload", "download"}:
             return "browser_transfer"
         if self._requires_foreground(method, params):
@@ -224,12 +236,6 @@ class LocalSecurityPolicy:
         command = _command_text(method, params)
         if command and _matches(SOFTWARE_INSTALL_PATTERNS, command):
             return "software_install"
-        if command and _matches(REGISTRY_SYSTEM_PATTERNS, command):
-            return "registry_system"
-        if command and (_matches(HIGH_RISK_PATTERNS, command) or is_disk_format_command(command) or _dangerous_recursive_delete(command)):
-            return "high_risk"
-        if command and _matches(SERVICE_PATTERNS, command):
-            return "service_control"
         if method == "shell.run":
             return "shell"
         return "shell"
@@ -253,10 +259,7 @@ class LocalSecurityPolicy:
         return (str(self.security.get("network_external", "ask")), "Network-capable operation")
 
     def _approval_key(self, category: str, method: str, params: dict[str, Any], summary: str) -> str:
-        command = _command_text(method, params).strip()
-        if command:
-            command = re.sub(r"\s+", " ", command)[:240]
-        return f"{category}|{method}|{command or summary}"
+        return json.dumps([category, method, params, summary], sort_keys=True, ensure_ascii=False, default=str)
 
     def _prompt(self, category: str, method: str, params: dict[str, Any], summary: str, audit_context: dict[str, Any] | None = None) -> bool:
         rules = str(self.security.get("rules_text") or "").strip()
@@ -289,8 +292,7 @@ class LocalSecurityPolicy:
             text += f"\n\n本地规则：\n{rules[:700]}"
         text += "\n\n是否允许这次操作？"
         try:
-            result = int(ctypes.windll.user32.MessageBoxW(None, text, title, 0x00000004 | 0x00000030 | 0x00040000 | 0x00010000))
-            return result == 6
+            return confirm_operation(title, text)
         except Exception:
             return False
 
@@ -303,19 +305,22 @@ class LocalSecurityPolicy:
         key = self._approval_key(category, method, params, summary)
         if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
             return
-        with self._approval_lock:
-            if decision != "always_ask" and self.security.get("remember_approvals", True) and key in self._approved:
-                return
-            if not self._prompt(category, method, params, summary, audit_context):
-                raise PermissionError(f"Denied locally: {summary}")
-            if decision != "always_ask" and self.security.get("remember_approvals", True):
-                self._approved.add(key)
+        context = audit_context or {}
+        identity = [context.get(k, "") for k in ("user_id", "client_id", "session_id")]
+        queue_key = json.dumps([identity, decision, self.security, key], sort_keys=True, default=str)
+        if not NODE_APPROVAL_QUEUE.confirm(queue_key, lambda: self._prompt(category, method, params, summary, audit_context)):
+            raise PermissionError(f"Denied locally: {summary}")
+        if decision != "always_ask" and self.security.get("remember_approvals", True):
+            self._approved.add(key)
 
     def authorize(self, method: str, params: dict[str, Any], audit_context: dict[str, Any] | None = None) -> None:
         category = self._category(method, params)
         category_decision = str(self.security.get("approval_policy", {}).get(category, "ask"))
+        if category in {"high_risk", "registry_system", "service_control"} and category_decision.lower() != "block":
+            category_decision = "always_ask"
         if category == "desktop_control":
-            category_decision = "always_ask" if bool(self.security.get("foreground_confirmation", True)) else "allow"
+            if category_decision.lower() != "block":
+                category_decision = "always_ask" if bool(self.security.get("foreground_confirmation", True)) else "allow"
         network = self._network_decision(method, params)
         summary_map = {
             "system_info": "读取系统或项目状态",

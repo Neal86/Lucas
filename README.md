@@ -109,3 +109,22 @@ The production deployment uses the included Dockerfile. Keep `GWC_DATA_DIR` on p
 - Require the latest `main` CI to pass on Windows and Ubuntu before deployment.
 
 Customer-facing Privacy, Terms, Refund, and Contact pages are linked from the Lucas website.
+
+### Local approval behavior (1.7.70)
+
+Full Access runs ordinary PowerShell, pip/npm/winget installation, project file
+creation/editing/deletion, Git, and background browser operations without approval.
+Foreground input follows the local Foreground Control Confirmation switch.
+Explicit local blocks, allowed folders, and domain restrictions remain enforced.
+Disk formatting, boot/registry/security configuration, service changes, and deleting
+system directories still require confirmation, including via process.start or
+commands chained after installation.
+
+All request executors in one Node share a FIFO approval queue. Identical pending
+approvals from the same user/client/session share the decision; different operations
+or identities do not. This coalesces approval prompts, not command execution.
+Closing the approval window with X, Escape, or No denies the operation; Yes allows it.
+An approval UI failure denies the operation. Previously saved per-user Full Access
+presets resolve to the current policy without clearing account/folder settings.
+Restart/update the Windows Node to apply these local changes; a gateway deploy alone
+does not update an already-running Node.

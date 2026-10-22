@@ -367,6 +367,7 @@ async def _serve_connection(
         async def execute_request(request_id: object, method: str, params: dict, actor: dict[str, object]) -> None:
             wall_started=time.time(); status="success"; error_type=None
             audit_context = {
+                "user_id": str(actor.get("user_id") or ""),
                 "source": str(actor.get("source") or "unknown"),
                 "client_id": str(actor.get("client_id") or ""),
                 "client_name": str(actor.get("client_name") or ""),

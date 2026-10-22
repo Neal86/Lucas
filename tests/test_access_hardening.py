@@ -16,7 +16,7 @@ def test_full_access_skips_routine_node_asks_but_keeps_hard_blocks_and_safety_ga
     assert effective["approval_policy"]["file_write"] == "allow"
     assert effective["approval_policy"]["file_delete"] == "block"
     assert effective["approval_policy"]["service_control"] == "always_ask"
-    assert effective["approval_policy"]["software_install"] == "always_ask"
+    assert effective["approval_policy"]["software_install"] == "allow"
     assert effective["network_external"] == "allow"
     assert effective["block_silent_network"] is False
     assert effective["foreground_confirmation"] is True

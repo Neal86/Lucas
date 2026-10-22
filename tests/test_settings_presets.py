@@ -12,7 +12,7 @@ def test_full_access_keeps_only_true_high_risk_safety_gates():
     assert preset["network_external"]=="allow" and preset["network_lan"]=="allow" and preset["block_silent_network"] is False
     for key in ("desktop_control","browser_transfer","git_push","file_write","file_delete","process_control","browser_control","git_write","background_control"):
         assert policy[key]=="allow"
-    for key in ("high_risk","software_install","registry_system","service_control"):
+    for key in ("high_risk","registry_system","service_control"):
         assert policy[key]=="always_ask"
 
 
@@ -29,3 +29,7 @@ def test_full_access_detects_with_git_push_allowed():
 
 def test_version_comparison_key():
     assert _version_key("1.7.0") > _version_key("1.6.2")
+
+
+def test_full_access_allows_ordinary_software_install():
+    assert PRESETS["完全访问权限"]["approval_policy"]["software_install"] == "allow"

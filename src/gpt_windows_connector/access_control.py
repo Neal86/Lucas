@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 _DECISION_RANK = {"allow": 0, "ask": 1, "always_ask": 2, "block": 3}
-_SAFETY_GATES = {"software_install", "registry_system", "high_risk", "service_control"}
+_SAFETY_GATES = {"registry_system", "high_risk", "service_control"}
 
 def _stricter_decision(a: object, b: object, default: str = "ask") -> str:
     left=str(a or default).lower(); right=str(b or default).lower(); left=left if left in _DECISION_RANK else default; right=right if right in _DECISION_RANK else default

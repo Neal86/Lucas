@@ -26,7 +26,7 @@ def test_full_access_allows_normal_actions_and_keeps_only_true_danger_guarded():
     assert policy["background_control"] == "allow"
     for key in ("desktop_control", "browser_transfer", "git_push", "file_write", "file_delete", "process_control", "browser_control", "git_write"):
         assert policy[key] == "allow"
-    for key in ("high_risk", "software_install", "registry_system", "service_control"):
+    for key in ("high_risk", "registry_system", "service_control"):
         assert policy[key] == "always_ask"
 
 
@@ -48,3 +48,7 @@ def test_prune_root_permanently_removes_user_grants(tmp_path):
     nested.mkdir(parents=True); other.mkdir(); store.upsert({"user_id": "u1"}, "full_access", [str(nested), str(other)])
     assert store.prune_root(str(root)) == 1
     record = store.get("u1"); assert record is not None and record["allowed_roots"] == [str(other)]
+
+
+def test_full_access_allows_ordinary_software_install():
+    assert preset_security("full_access")["approval_policy"]["software_install"] == "allow"
