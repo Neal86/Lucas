@@ -4,13 +4,17 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 
 def confirm_operation(title: str, text: str) -> bool:
     # Tk owns its main thread and interpreter in this short-lived helper process.
     # Node authorization itself runs in worker threads.
+    executable = Path(sys.executable)
+    if executable.name.lower() == "pythonw.exe":
+        executable = executable.with_name("python.exe")
     result = subprocess.run(
-        [sys.executable, "-m", "gpt_windows_connector.approval_dialog"],
+        [str(executable), "-m", "gpt_windows_connector.approval_dialog"],
         input=json.dumps({"title": title, "text": text}),
         text=True, encoding="utf-8", capture_output=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
