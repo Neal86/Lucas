@@ -137,3 +137,5 @@ only when supported by the local Node's current state. A real store URL opens th
 store; before publication the app shows an unpacked-install guide.
 The extension ZIP is available from the Download page. Store submission and
 configuration instructions are in [BROWSER_EXTENSION_PUBLISHING.md](docs/BROWSER_EXTENSION_PUBLISHING.md).
+
+Login verification keeps its challenge and resend cooldown across page refreshes. Its runtime is composed explicitly with the dashboard, so registration changes cannot drop login state declarations. Expired or missing challenges return to sign in.

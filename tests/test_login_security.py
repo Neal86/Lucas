@@ -15,12 +15,14 @@ def test_login_verification_missing_challenge_is_rejected(tmp_path):
 
 
 def test_login_verification_browser_state_recovery_contract():
-    source = (Path(__file__).resolve().parents[1] / "src" / "gpt_windows_connector" / "server.py").read_text(encoding="utf-8")
-    assert "sessionStorage.setItem('lucas_login_challenge'" in source
-    assert "window.addEventListener('load',restoreLoginChallenge)" in source
-    assert "Date.now()>=state.expiresAt" in source
-    assert "clearLoginChallenge()" in source
-    assert "if(!pendingLoginChallenge){authError(" in source
+    from gpt_windows_connector.web_login_runtime import LOGIN_SCRIPT
+
+    assert "sessionStorage.setItem('lucas_login_challenge'" in LOGIN_SCRIPT
+    assert "window.addEventListener('load',restoreLoginChallenge)" in LOGIN_SCRIPT
+    assert "Date.now()>=state.expiresAt" in LOGIN_SCRIPT
+    assert "clearLoginChallenge()" in LOGIN_SCRIPT
+    assert "if(!loginChallengeIsCurrent())return" in LOGIN_SCRIPT
+
 
 
 def test_login_verification_trusts_same_device_and_ip(tmp_path):

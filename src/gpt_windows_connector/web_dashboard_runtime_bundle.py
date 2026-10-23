@@ -3,6 +3,7 @@ from __future__ import annotations
 from .web_admin_runtime import ADMIN_SCRIPT
 from .web_billing_runtime import BILLING_SCRIPT
 from .web_core_runtime import CORE_SCRIPT
+from .web_login_runtime import LOGIN_SCRIPT
 from .web_onboarding_runtime import ONBOARDING_SCRIPT
 from .web_referral_runtime import REFERRAL_SCRIPT
 
@@ -14,6 +15,7 @@ DASHBOARD_RUNTIME_SCRIPT = (
     + BILLING_SCRIPT
     + REFERRAL_SCRIPT
     + CORE_SCRIPT
+    + LOGIN_SCRIPT
     + ONBOARDING_SCRIPT
     + ADMIN_SCRIPT
     + "</script>\n</body></html>"
