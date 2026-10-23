@@ -58,6 +58,8 @@ def public_info_page(slug: str) -> str:
     canonical = f"https://lucasmcp.com/{slug}"
     cards = "".join(f"<article><h2>{title}</h2><p>{body}</p></article>" for title, body in data["items"])
     download_cta = "<a class='primary' href='/download/Lucas-Node.bat'>Download Lucas Node</a>" if slug == "download" else "<a class='primary' href='/dashboard'>Get started</a>"
+    if slug == "download":
+        download_cta += "<a class='ghost' href='/download/Lucas-Browser-Bridge.zip'>Download browser extension (ZIP)</a>"
     schema = json.dumps({
         "@context": "https://schema.org",
         "@type": "WebPage",

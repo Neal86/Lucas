@@ -128,3 +128,12 @@ An approval UI failure denies the operation. Previously saved per-user Full Acce
 presets resolve to the current policy without clearing account/folder settings.
 Restart/update the Windows Node to apply these local changes; a gateway deploy alone
 does not update an already-running Node.
+
+### Browser installation and management (1.7.71)
+
+Open Settings > Browser to install, pair and manage Chrome, Edge or Chromium/ixBrowser
+connections. Lucas detects live extension connections and displays Manage/Connected
+only when supported by the local Node's current state. A real store URL opens the
+store; before publication the app shows an unpacked-install guide.
+The extension ZIP is available from the Download page. Store submission and
+configuration instructions are in [BROWSER_EXTENSION_PUBLISHING.md](docs/BROWSER_EXTENSION_PUBLISHING.md).

@@ -12,6 +12,7 @@ from typing import Any
 import websockets
 
 from .browser_profile_registry import registry
+from .browser_bridge_settings import BridgeSettingsEndpoint
 
 log = logging.getLogger("lucas.browser_bridge")
 DEFAULT_HOST = "127.0.0.1"
@@ -43,6 +44,7 @@ class BrowserBridgeServer:
         self.pending: dict[str, dict[str, Any]] = {}
         self.waiters: dict[str, asyncio.Future] = {}
         self._lock = asyncio.Lock()
+        self.local_settings = BridgeSettingsEndpoint(self, registry)
 
     async def start(self) -> None:
         if self.server is not None:
@@ -56,6 +58,7 @@ class BrowserBridgeServer:
             ping_timeout=30,
             origins=None,
         )
+        self.local_settings.activate()
         log.info("Browser Bridge listening on ws://%s:%s/bridge", self.host, self.port)
 
     async def stop(self) -> None:
@@ -70,6 +73,9 @@ class BrowserBridgeServer:
         path = getattr(request, "path", "/") if request is not None else "/"
         headers = getattr(request, "headers", {}) if request is not None else {}
         origin = str(headers.get("Origin") or headers.get("origin") or "")
+        if path == "/settings":
+            await self.local_settings.handle(websocket)
+            return
         if path.split("?", 1)[0] != "/bridge":
             await websocket.close(code=4404, reason="unknown path")
             return
@@ -90,7 +96,7 @@ class BrowserBridgeServer:
                 await websocket.close(code=4400, reason="bridge identity required")
                 return
             profile = registry.profile_for_bridge(installation_id)
-            paired = profile is not None
+            paired = profile is not None and bool(profile.get("enabled", True))
             client = BridgeClient(
                 installation_id=installation_id,
                 extension_id=extension_id,
@@ -168,7 +174,7 @@ class BrowserBridgeServer:
                 "profile_name": client.profile_name,
                 "profile_id": client.profile_id,
                 "alias": client.alias,
-                "paired": client.paired,
+                "paired": client.paired and profile is not None and bool(profile.get("enabled", True)),
                 "connected": True,
                 "connected_at": client.connected_at,
                 "last_seen": client.last_seen,
@@ -221,6 +227,7 @@ class BrowserBridgeServer:
             "bridge_installation_id": installation_id,
             "extension_id": client.extension_id,
             "last_seen": time.time(),
+            "enabled": True,
         })
         client.paired = True
         client.browser_type = str(profile.get("browser_type") or client.browser_type)
@@ -246,6 +253,9 @@ class BrowserBridgeServer:
             raise RuntimeError("Browser Bridge profile is not connected")
         if not client.paired:
             raise PermissionError("Browser Bridge is not paired with Lucas")
+        profile = registry.profile_for_bridge(client.installation_id)
+        if not profile or not profile.get("enabled", True):
+            raise PermissionError("Browser Bridge authorization was revoked locally")
         request_id = uuid.uuid4().hex
         loop = asyncio.get_running_loop()
         waiter = loop.create_future()

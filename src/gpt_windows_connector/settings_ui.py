@@ -85,7 +85,7 @@ def configure_gui(existing: dict[str, object]) -> dict[str, object] | None:
 
     language = system_language()
     T = lambda zh, en: tr(zh, en, language)
-    NAV_EN = {"常规":"General","账号与插件":"Account & Integrations","浏览器":"Browser Profiles","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","任务记录":"Task History","日志":"Logs","系统访问":"System Access"}
+    NAV_EN = {"常规":"General","账号与插件":"Account & Integrations","浏览器":"Browser","安全":"Security","用户与权限":"Users & Permissions","文件访问":"File Access","网络":"Network","任务记录":"Task History","日志":"Logs","系统访问":"System Access"}
     C = {
         "window":"#FFFFFF","sidebar":"#F3F3F3","sidebar_hover":"#EAEAEA","card":"#FFFFFF",
         "line":"#E5E5E5","text":"#1F1F1F","muted":"#6B6B6B","subtle":"#8A8A8A",

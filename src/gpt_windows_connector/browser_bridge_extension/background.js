@@ -1,5 +1,5 @@
 const BRIDGE_URL = "ws://127.0.0.1:8766/bridge";
-let socket = null, reconnectTimer = null, heartbeatTimer = null;
+let socket = null, reconnectTimer = null, heartbeatTimer = null, connecting = false;
 
 async function getSettings() {
   const stored = await chrome.storage.local.get(["installationId","browserType","profileName","profileId","alias","tags","groups"]);
@@ -10,7 +10,7 @@ async function getSettings() {
   return {
     installation_id: stored.installationId,
     extension_id: chrome.runtime.id,
-    browser_type: stored.browserType || "ixbrowser",
+    browser_type: stored.browserType || (/Edg\//.test(navigator.userAgent) ? "edge" : "chrome"),
     profile_name: stored.profileName || "",
     profile_id: stored.profileId || "",
     alias: stored.alias || "",
@@ -21,20 +21,22 @@ async function getSettings() {
 function badge(text,color){ chrome.action.setBadgeText({text:text||""}).catch(()=>{}); if(color) chrome.action.setBadgeBackgroundColor({color}).catch(()=>{}); }
 function scheduleReconnect(){ clearTimeout(reconnectTimer); reconnectTimer=setTimeout(connect,2500); }
 async function connect(){
-  if(socket && (socket.readyState===0 || socket.readyState===1)) return;
-  try { socket=new WebSocket(BRIDGE_URL); } catch(_) { scheduleReconnect(); return; }
+  if(connecting || (socket && (socket.readyState===0 || socket.readyState===1))) return;
+  connecting=true;
+  try { await chrome.storage.local.set({connected:false}); socket=new WebSocket(BRIDGE_URL); } catch(_) { connecting=false; scheduleReconnect(); return; }
+  connecting=false;
   socket.onopen=async()=>{ socket.send(JSON.stringify({type:"hello",...(await getSettings())})); badge("…","#64748b"); clearInterval(heartbeatTimer); heartbeatTimer=setInterval(()=>{if(socket?.readyState===1) socket.send(JSON.stringify({type:"heartbeat",time:Date.now()}));},20000); };
   socket.onmessage=async(event)=>{
     let m; try{m=JSON.parse(event.data);}catch(_){return;}
-    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({paired:!!m.paired,pairingCode:String(m.pairing_code||"")}); return; }
-    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({paired:true,pairingCode:""}); return; }
-    if(m.type==="heartbeat_ack") return;
+    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||"")}); return; }
+    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:""}); return; }
+    if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
     if(m.type!=="command") return;
     const id=String(m.id||"");
     try{ const result=await executeCommand(String(m.action||""),m.params||{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
     catch(error){ socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
   };
-  socket.onclose=()=>{ badge("×","#dc2626"); clearInterval(heartbeatTimer); scheduleReconnect(); };
+  socket.onclose=()=>{ chrome.storage.local.set({connected:false,pairingCode:""}).catch(()=>{}); badge("×","#dc2626"); clearInterval(heartbeatTimer); scheduleReconnect(); };
   socket.onerror=()=>{};
 }
 async function getTab(tabId){
@@ -105,5 +107,5 @@ async function executeCommand(action,p){
 }
 chrome.runtime.onInstalled.addListener(connect);
 chrome.runtime.onStartup.addListener(connect);
-chrome.storage.onChanged.addListener(()=>{if(socket?.readyState===1)socket.close(4002,"settings changed");});
+chrome.storage.onChanged.addListener((changes,area)=>{if(area!=="local")return;const fields=["browserType","profileName","profileId","alias","tags","groups"];if(fields.some(key=>key in changes)&&socket?.readyState===1)socket.close(4002,"settings changed");});
 connect();

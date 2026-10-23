@@ -9,6 +9,7 @@ WEB_SMOKE_ROUTES: tuple[tuple[str, int | None], ...] = (
     ("/how-it-works", 200),
     ("/security", 200),
     ("/download", 200),
+    ("/download/Lucas-Browser-Bridge.zip", 200),
     ("/docs/computer-node", 200),
     ("/pricing", 200),
     ("/privacy", 200),

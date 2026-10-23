@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import os
-import socket
-import subprocess
 from typing import Any
 
-from .browser_bridge_extension_files import prepare_extension
+from .settings_browser_setup_ui import build_browser_setup
 from .browser_profile_registry import registry
 
 
@@ -42,48 +39,7 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
             relief="flat", bd=0, padx=12, pady=7, cursor="hand2",
         )
 
-    section(T("Browser Bridge", "Browser Bridge"))
-    bridge_card = card()
-    extension_status = tk.StringVar(value=T("准备中…", "Preparing…"))
-    bridge_status = tk.StringVar(value=T("检测中…", "Checking…"))
-    extension_path = tk.StringVar(value="")
-
-    top = tk.Frame(bridge_card, bg=C["card"])
-    top.pack(fill="x", padx=18, pady=(14, 8))
-    tk.Label(top, text=T("Lucas Browser Bridge 扩展", "Lucas Browser Bridge extension"), font=(font, 10, "bold"), fg=C["text"], bg=C["card"]).pack(anchor="w")
-    tk.Label(top, textvariable=extension_status, font=(font, 9), fg=C["muted"], bg=C["card"]).pack(anchor="w", pady=(5, 0))
-    tk.Label(top, textvariable=extension_path, font=(font, 8), fg=C["subtle"], bg=C["card"], wraplength=720, justify="left").pack(anchor="w", pady=(3, 0))
-    tk.Label(top, textvariable=bridge_status, font=(font, 9, "bold"), fg=C["blue"], bg=C["card"]).pack(anchor="w", pady=(8, 0))
-    actions = tk.Frame(bridge_card, bg=C["card"])
-    actions.pack(fill="x", padx=18, pady=(0, 14))
-
-    def refresh_bridge():
-        try:
-            info = prepare_extension()
-            extension_path.set(str(info["path"]))
-            extension_status.set(T("扩展文件已就绪", "Extension files are ready"))
-        except Exception as exc:
-            extension_status.set(T("扩展准备失败：", "Extension preparation failed: ") + str(exc))
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.25)
-        try:
-            ok = sock.connect_ex(("127.0.0.1", 8766)) == 0
-        finally:
-            sock.close()
-        bridge_status.set(T("本地 Bridge 服务已运行", "Local Bridge service is running") if ok else T("本地 Bridge 服务未运行；启动/重启 Lucas Node 后会自动运行", "Local Bridge service is not running; restart Lucas Node to start it"))
-
-    def open_extension_folder():
-        try:
-            info = prepare_extension()
-            if os.name == "nt":
-                os.startfile(info["path"])
-            else:
-                subprocess.Popen(["xdg-open", info["path"]])
-        except Exception:
-            pass
-
-    button(actions, T("刷新", "Refresh"), refresh_bridge).pack(side="left")
-    button(actions, T("打开扩展文件夹", "Open extension folder"), open_extension_folder, primary=True).pack(side="left", padx=(8, 0))
+    build_browser_setup(tk=tk, parent=body, colors=C, font=font, translate=T, on_change=lambda: refresh_profiles())
 
     section(T("Browser Profiles", "Browser Profiles"))
     profile_card = card()
@@ -277,7 +233,6 @@ def build_browser_page(*, tk, parent, colors: dict[str, str], font: str, transla
         font=(font, 8), fg=C["muted"], bg=C["window"], wraplength=760, justify="left",
     ).pack(anchor="w", pady=(0, 20))
 
-    refresh_bridge()
     refresh_profiles()
     refresh_policies()
     return frame

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .web_browser_extension import download_browser_extension
+
 import json
 import os
 import sqlite3
@@ -628,6 +630,7 @@ routes = [
     Route("/how-it-works", how_it_works_page, methods=["GET"]),
     Route("/security", security_page, methods=["GET"]),
     Route("/download", download_page, methods=["GET"]),
+    Route("/download/Lucas-Browser-Bridge.zip", download_browser_extension, methods=["GET"]),
     Route("/docs/computer-node", computer_node_docs_page, methods=["GET"]),
     Route("/pricing", pricing_page, methods=["GET"]),
     Route("/privacy", privacy_page, methods=["GET"]),
