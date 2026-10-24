@@ -227,7 +227,14 @@ class NodeRegistry:
                 async with node.send_lock:
                     await node.websocket.send_json(payload)
             remaining = max(0.1, timeout - (time.monotonic() - started))
-            result = await asyncio.wait_for(future, timeout=remaining)
+            try:
+                result = await asyncio.wait_for(future, timeout=remaining)
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(
+                    f"Lucas RPC timed out after {timeout:.1f}s: node={node_id}, method={method}, "
+                    f"request_id={request_id}. The node did not return a response; "
+                    "check the node's pending approval, shell job state, and connection logs."
+                ) from exc
             log.info(
                 "RPC complete request_id=%s user_id=%s node_id=%s method=%s ok=true duration_ms=%d focus_candidate=%s",
                 request_id, user_id, node_id, method, round((time.monotonic() - started) * 1000), focus,
