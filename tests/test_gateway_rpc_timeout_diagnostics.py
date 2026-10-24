@@ -11,8 +11,11 @@ class FakeSocket:
         self.last_payload = payload
 
 
-@pytest.mark.asyncio
-async def test_rpc_timeout_identifies_node_method_and_cleans_pending():
+def test_rpc_timeout_identifies_node_method_and_cleans_pending():
+    asyncio.run(_check_timeout())
+
+
+async def _check_timeout():
     registry = NodeRegistry()
     registry.nodes["node-test"] = NodeConnection(
         node_id="node-test", name="test", allowed_roots=[], websocket=FakeSocket()

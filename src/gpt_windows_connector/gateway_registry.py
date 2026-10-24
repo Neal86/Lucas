@@ -264,4 +264,5 @@ class NodeRegistry:
         if message.get("ok"):
             future.set_result(message.get("result"))
         else:
-            future.set_exception(RuntimeError(message.get("error") or "Node execution failed"))
+            from .execution_errors import RemoteExecutionError
+            future.set_exception(RemoteExecutionError(message.get("error") or "Node execution failed", message.get("error_code") or "NODE_EXECUTION_FAILED"))

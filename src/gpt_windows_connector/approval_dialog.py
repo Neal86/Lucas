@@ -7,6 +7,9 @@ import sys
 from pathlib import Path
 
 
+APPROVAL_TIMEOUT_SECONDS = 45
+
+
 def confirm_operation(title: str, text: str) -> bool:
     # Tk owns its main thread and interpreter in this short-lived helper process.
     # Node authorization itself runs in worker threads.
@@ -18,6 +21,7 @@ def confirm_operation(title: str, text: str) -> bool:
         input=json.dumps({"title": title, "text": text}),
         text=True, encoding="utf-8", capture_output=True,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=APPROVAL_TIMEOUT_SECONDS,
     )
     return result.returncode == 0 and result.stdout.strip() == "allow"
 
@@ -41,6 +45,7 @@ def _show_dialog(title: str, text: str) -> bool:
 
         root.protocol("WM_DELETE_WINDOW", finish)
         root.bind("<Escape>", lambda event: finish())
+        root.after(APPROVAL_TIMEOUT_SECONDS * 1000, finish)
         details = scrolledtext.ScrolledText(root, wrap="word", padx=16, pady=16)
         details.insert("1.0", text)
         details.configure(state="disabled")
