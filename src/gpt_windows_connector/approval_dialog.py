@@ -23,6 +23,8 @@ def confirm_operation(title: str, text: str) -> bool:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         timeout=APPROVAL_TIMEOUT_SECONDS,
     )
+    if result.returncode == 2:
+        raise TimeoutError("APPROVAL_TIMEOUT: local approval expired; command was not executed")
     return result.returncode == 0 and result.stdout.strip() == "allow"
 
 
@@ -32,6 +34,7 @@ def _show_dialog(title: str, text: str) -> bool:
 
     root = tk.Tk()
     allowed = False
+    expired = False
     try:
         root.title(title)
         root.geometry("680x560")
@@ -45,7 +48,12 @@ def _show_dialog(title: str, text: str) -> bool:
 
         root.protocol("WM_DELETE_WINDOW", finish)
         root.bind("<Escape>", lambda event: finish())
-        root.after(APPROVAL_TIMEOUT_SECONDS * 1000, finish)
+        def expire() -> None:
+            nonlocal expired
+            expired = True
+            finish()
+
+        root.after(APPROVAL_TIMEOUT_SECONDS * 1000, expire)
         details = scrolledtext.ScrolledText(root, wrap="word", padx=16, pady=16)
         details.insert("1.0", text)
         details.configure(state="disabled")
@@ -57,6 +65,8 @@ def _show_dialog(title: str, text: str) -> bool:
         tk.Button(buttons, text="Yes / 允许", command=lambda: finish(True), width=16).pack(side="right", padx=12)
         deny.focus_set()
         root.mainloop()
+        if expired:
+            raise TimeoutError("APPROVAL_TIMEOUT")
         return allowed
     finally:
         try:
@@ -69,6 +79,9 @@ if __name__ == "__main__":
     try:
         payload = json.load(sys.stdin)
         print("allow" if _show_dialog(payload["title"], payload["text"]) else "deny")
+    except TimeoutError:
+        print("timeout")
+        sys.exit(2)
     except Exception:
         print("deny")
         sys.exit(1)

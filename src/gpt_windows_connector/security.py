@@ -297,6 +297,8 @@ class LocalSecurityPolicy:
             return confirm_operation(title, text)
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError("APPROVAL_TIMEOUT: local approval expired; command was not executed") from exc
+        except TimeoutError:
+            raise
         except Exception:
             return False
 

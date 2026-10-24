@@ -64,6 +64,12 @@ def test_duplicate_approval_key_ignores_transport_request_id():
     assert policy._approval_key('shell', 'shell.run', {'command': 'test', '_request_id': 'a'}, '') == policy._approval_key('shell', 'shell.run', {'command': 'test', '_request_id': 'b'}, '')
 
 
+def test_dialog_expiry_is_not_misreported_as_user_denial(monkeypatch):
+    monkeypatch.setattr(approval_dialog.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=2, stdout='timeout'))
+    with pytest.raises(TimeoutError, match='APPROVAL_TIMEOUT'):
+        LocalSecurityPolicy({})._prompt('shell', 'shell.run', {}, 'test')
+
+
 def test_worker_launch_failure_persists_and_never_reexecutes(tmp_path, monkeypatch):
     monkeypatch.setattr(shell, 'JOB_ROOT', tmp_path / 'jobs')
     calls = []
