@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import time
+import psutil
 from pathlib import Path
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -53,6 +54,7 @@ def run(spec_path: Path) -> int:
             proc = subprocess.Popen(
                 _command(str(spec.get("command") or ""), shell_type),
                 cwd=workspace,
+                stdin=subprocess.DEVNULL,
                 stdout=stdout,
                 stderr=stderr,
                 text=True,
@@ -66,6 +68,16 @@ def run(spec_path: Path) -> int:
                 exit_code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
+                try:
+                    children = psutil.Process(proc.pid).children(recursive=True)
+                    for child in reversed(children):
+                        try:
+                            child.kill()
+                        except psutil.NoSuchProcess:
+                            pass
+                    psutil.wait_procs(children, timeout=3)
+                except psutil.NoSuchProcess:
+                    pass
                 proc.kill()
                 exit_code = proc.wait(timeout=10)
     except Exception as exc:

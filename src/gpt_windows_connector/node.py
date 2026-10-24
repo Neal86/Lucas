@@ -393,7 +393,8 @@ async def _serve_connection(
             except Exception as exc:
                 status="failed"; error_type=type(exc).__name__
                 log.exception("Execution failed: %s", method)
-                response = {"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                from .execution_errors import execution_error_code
+                response = {"type": "response", "id": request_id, "ok": False, "error": f"{type(exc).__name__}: {exc}", "error_code": execution_error_code(exc)}
             wall_ended=time.time()
             try:
                 workspace=str(params.get("workspace") or "")

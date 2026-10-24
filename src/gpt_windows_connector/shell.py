@@ -160,7 +160,7 @@ def cleanup_jobs(*, force: bool = False, now: float | None = None) -> dict[str, 
 
 
 def _state_alive(state: dict | None) -> bool:
-    if not state:
+    if not state or state.get("state") == "completed":
         return False
     for key in ("child_pid", "pid"):
         try:
@@ -206,13 +206,21 @@ def run_powershell(workspace: Path, command: str, timeout: int = 120, shell_type
             "request_id": str(_request_id), "workspace": str(workspace), "command": command,
             "shell_type": shell_type, "timeout": timeout, "fingerprint": fingerprint, "created_at": time.time(),
         }
+        for log_name in ("stdout.log", "stderr.log"):
+            (job_dir / log_name).touch()
         _atomic_json(spec_path, spec)
         _atomic_json(state_path, {"state": "launching", "created_at": spec["created_at"]})
-        subprocess.Popen(
-            [sys.executable, "-m", "gpt_windows_connector.shell_job", str(spec_path)],
-            cwd=workspace, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB, close_fds=True, shell=False,
-        )
+        try:
+            subprocess.Popen(
+                [sys.executable, "-m", "gpt_windows_connector.shell_job", str(spec_path)],
+                cwd=workspace, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB, close_fds=True, shell=False,
+            )
+        except Exception as exc:
+            result = {"exit_code": None, "stdout": "", "stderr": "", "shell": shell_type, "timed_out": False, "error": f"WORKER_START_FAILED: {type(exc).__name__}: {exc}", "started_at": spec["created_at"], "ended_at": time.time()}
+            _atomic_json(result_path, result)
+            _atomic_json(state_path, {"state": "completed", "ended_at": result["ended_at"]})
+            return result
 
     deadline = time.monotonic() + timeout + 15
     while time.monotonic() < deadline:
@@ -224,7 +232,10 @@ def run_powershell(workspace: Path, command: str, timeout: int = 120, shell_type
         if state and state.get("state") == "completed":
             time.sleep(0.05)
             continue
-        if existing and state and not _state_alive(state) and time.time() - float(state.get("started_at") or state.get("created_at") or 0) > 3:
-            raise RuntimeError("Durable shell job was interrupted before producing a result; command was not re-executed")
+        if state and not _state_alive(state) and time.time() - float(state.get("started_at") or state.get("created_at") or 0) > 3:
+            result = {"exit_code": None, "stdout": (job_dir / "stdout.log").read_text(encoding="utf-8", errors="replace") if (job_dir / "stdout.log").exists() else "", "stderr": (job_dir / "stderr.log").read_text(encoding="utf-8", errors="replace") if (job_dir / "stderr.log").exists() else "", "shell": shell_type, "timed_out": False, "error": "WORKER_INTERRUPTED: command outcome unknown; command was not re-executed", "started_at": state.get("started_at"), "ended_at": time.time()}
+            _atomic_json(result_path, result)
+            _atomic_json(state_path, {"state": "completed", "ended_at": result["ended_at"]})
+            return result
         time.sleep(0.1)
     raise TimeoutError(f"Durable shell job did not publish a result within {timeout + 15}s")

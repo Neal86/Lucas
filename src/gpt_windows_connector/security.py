@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import ipaddress
 import re
+import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -259,7 +260,8 @@ class LocalSecurityPolicy:
         return (str(self.security.get("network_external", "ask")), "Network-capable operation")
 
     def _approval_key(self, category: str, method: str, params: dict[str, Any], summary: str) -> str:
-        return json.dumps([category, method, params, summary], sort_keys=True, ensure_ascii=False, default=str)
+        public_params = {k: v for k, v in params.items() if not k.startswith("_")}
+        return json.dumps([category, method, public_params, summary], sort_keys=True, ensure_ascii=False, default=str)
 
     def _prompt(self, category: str, method: str, params: dict[str, Any], summary: str, audit_context: dict[str, Any] | None = None) -> bool:
         rules = str(self.security.get("rules_text") or "").strip()
@@ -293,6 +295,10 @@ class LocalSecurityPolicy:
         text += "\n\n是否允许这次操作？"
         try:
             return confirm_operation(title, text)
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("APPROVAL_TIMEOUT: local approval expired; command was not executed") from exc
+        except TimeoutError:
+            raise
         except Exception:
             return False
 
