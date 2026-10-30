@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .task_titles import display_task_title
+
 
 class TaskRunStore:
     """SQLite-backed Lucas task/subtask timing store."""
@@ -113,5 +115,5 @@ class TaskRunStore:
                     try: sub["details"]=json.loads(sub.get("details") or "{}")
                     except Exception: sub["details"]={}
                     steps.append(sub)
-                item["steps"]=steps; out.append(item)
+                item["steps"]=steps\n                item["title"]=display_task_title(item.get("title"), steps)\n                out.append(item)
         return out
