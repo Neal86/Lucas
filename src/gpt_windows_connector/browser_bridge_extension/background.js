@@ -72,6 +72,7 @@ async function getTab(tabId,taskKey){
   return chrome.tabs.get(found[0]);
 }
 chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
+ if(m?.type==="lucas_tab_state_query" && sender.tab?.id){sendResponse({state:tabStates.get(sender.tab.id)||null});return;}
  if(m?.type!=="lucas_human_takeover" || !sender.tab?.id)return;
  setPaused(sender.tab.id,true).then(()=>sendResponse({ok:true})).catch(e=>sendResponse({ok:false,error:e.message}));
  return true;
