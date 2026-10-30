@@ -23,13 +23,10 @@ from .task_runs import TaskRunStore
 from .browser_bridge_server import ensure_started as ensure_browser_bridge_started
 from .browser_bridge_extension_files import prepare_extension as prepare_browser_bridge_extension
 
-APP_NAME = "Lucas"
-CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME
-CONFIG_FILE = CONFIG_DIR / "node-config.json"
-LOG_FILE = CONFIG_DIR / "lucas-node.log"
-STATUS_FILE = CONFIG_DIR / "node-status.json"
-TASK_RUNS_FILE = CONFIG_DIR / "task-runs.db"
-ACCESS_FILE = CONFIG_DIR / "node-access.json"
+from .settings_constants import (
+    APP_NAME, CONFIG_DIR, CONFIG_FILE, LOG_FILE, STATUS_FILE,
+    TASK_RUNS_FILE, ACCESS_FILE,
+)
 DEVICE_CREDENTIAL_FILE = CONFIG_DIR / "node-device-credential.json"
 DEVICE_ID_FILE = CONFIG_DIR / "node-device-id.txt"
 local_task_runs = TaskRunStore(TASK_RUNS_FILE)
