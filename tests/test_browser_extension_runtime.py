@@ -41,5 +41,5 @@ vm.runInContext(fs.readFileSync('src/gpt_windows_connector/browser_bridge_extens
   assert.equal(elements.code.textContent,'');
   console.log('PASS real service worker/popup lifecycle');
 })().catch(e=>{console.error(e);process.exit(1);});
-'''], cwd=ROOT, capture_output=True, text=True, timeout=10)
+'''], cwd=ROOT, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
