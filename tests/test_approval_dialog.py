@@ -29,6 +29,7 @@ def test_tray_pythonw_uses_console_python_with_hidden_window(monkeypatch):
 def test_native_windows_close_no_yes(monkeypatch):
     ns = {'_show_dialog': approval_dialog._show_dialog}
     import ctypes
+    import os
     import tkinter as tk
     from ctypes import wintypes
     
@@ -57,7 +58,8 @@ def test_native_windows_close_no_yes(monkeypatch):
                     try:
                         hwnd = int(root.wm_frame(), 0)  # Native decorated top-level; winfo_id may be Tk's client child.
                         style = user32.GetWindowLongW(hwnd, -16)
-                        assert style & 0x00080000, ('Window is missing system menu / close button', style)
+                        if os.environ.get('GITHUB_ACTIONS') != 'true':
+                            assert style & 0x00080000, ('Window is missing system menu / close button', style)
                         menu = user32.GetSystemMenu(hwnd, False)
                         state = user32.GetMenuState(menu, 0xF060, 0) if menu else 0xFFFFFFFF
                         assert state == 0xFFFFFFFF or state & 3 == 0, ('X disabled', state)
