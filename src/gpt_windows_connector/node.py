@@ -487,9 +487,6 @@ async def _serve_connection(
             log.warning("Node session disconnected reason=%s error=%s", reason, exc)
             raise NodeSessionDisconnected(f"{reason}: {exc}") from exc
         finally:
-            # Do not cancel work on a transport disconnect. Long PowerShell/build
-            # operations keep running and publish their cached result through the
-            # next WebSocket session. Only detach this specific dead sender.
             clear_active_sender(send_json)
 
 
@@ -510,11 +507,6 @@ async def run_node() -> None:
         _apply_config(config)
         settings = NodeSettings.from_env()
         primary = settings.gateway_ws_url.rstrip("/") or DEFAULT_GATEWAY
-        # Keep the Node process alive across ordinary WebSocket/network failures.
-        # Killing and respawning the process turns a sub-second transport blip into a
-        # visible offline window and can make an AI session believe local control was
-        # lost. Try direct first, then IPv4, then the system proxy, and retry in this
-        # same process with a short bounded backoff.
         strategies = [
             ("direct", False, None),
             ("direct-ipv4", True, None),
