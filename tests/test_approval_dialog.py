@@ -55,7 +55,7 @@ def test_native_windows_close_no_yes(monkeypatch):
                 root = original_tk()
                 def drive():
                     try:
-                        hwnd = user32.GetAncestor(root.winfo_id(), 2)
+                        hwnd = int(root.wm_frame(), 0)  # Native decorated top-level; winfo_id may be Tk's client child.
                         style = user32.GetWindowLongW(hwnd, -16)
                         assert style & 0x00080000, ('Window is missing system menu / close button', style)
                         menu = user32.GetSystemMenu(hwnd, False)
