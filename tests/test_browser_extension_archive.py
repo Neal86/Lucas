@@ -14,7 +14,7 @@ def test_upload_zip_is_reproducible_and_has_manifest_at_root():
         assert set(archive.namelist()) == set(EXTENSION_FILES)
         assert archive.testzip() is None
         manifest = json.loads(archive.read('manifest.json'))
-        assert manifest['version'] == '1.1.0'
+        assert manifest['version'] == '1.2.0'
         assert manifest['manifest_version'] == 3
         for icon in manifest['icons'].values():
             assert archive.read(icon).startswith(b'\x89PNG')

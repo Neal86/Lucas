@@ -29,6 +29,7 @@ def test_tray_pythonw_uses_console_python_with_hidden_window(monkeypatch):
 def test_native_windows_close_no_yes(monkeypatch):
     ns = {'_show_dialog': approval_dialog._show_dialog}
     import ctypes
+    import os
     import tkinter as tk
     from ctypes import wintypes
     
@@ -49,28 +50,34 @@ def test_native_windows_close_no_yes(monkeypatch):
                 yield child
             yield from buttons(child)
     
-    for action, expected in [('close', False), ('no', False), ('yes', True)]:
-        def factory(action=action):
-            root = original_tk()
-            def drive():
-                try:
-                    hwnd = user32.GetAncestor(root.winfo_id(), 2)
-                    state = user32.GetMenuState(user32.GetSystemMenu(hwnd, False), 0xF060, 0)
-                    assert state != 0xFFFFFFFF and state & 3 == 0, ('X disabled', state)
-                    if action == 'close':
-                        assert user32.PostMessageW(hwnd, 0x0010, 0, 0)
-                    else:
-                        target = next(b for b in buttons(root) if b.cget('text').startswith('Yes' if action == 'yes' else 'No'))
-                        target.invoke()
-                except Exception as exc:
-                    errors.append(repr(exc))
-                    root.destroy()
-            root.after(300, drive)
-            root.after(5000, root.destroy)
-            return root
-        tk.Tk = factory
-        result = ns['_show_dialog']('Lucas staging approval test', 'Automatic UI verification: ' + action)
-        assert result is expected, (action, result)
-        assert not errors, errors
-        print('PASS native Windows dialog', action, 'result=', result, 'X=enabled')
-    tk.Tk = original_tk
+    try:
+        for action, expected in [('close', False), ('no', False), ('yes', True)]:
+            def factory(action=action):
+                root = original_tk()
+                def drive():
+                    try:
+                        hwnd = int(root.wm_frame(), 0)  # Native decorated top-level; winfo_id may be Tk's client child.
+                        style = user32.GetWindowLongW(hwnd, -16)
+                        if os.environ.get('GITHUB_ACTIONS') != 'true':
+                            assert style & 0x00080000, ('Window is missing system menu / close button', style)
+                        menu = user32.GetSystemMenu(hwnd, False)
+                        state = user32.GetMenuState(menu, 0xF060, 0) if menu else 0xFFFFFFFF
+                        assert state == 0xFFFFFFFF or state & 3 == 0, ('X disabled', state)
+                        if action == 'close':
+                            assert user32.PostMessageW(hwnd, 0x0010, 0, 0)
+                        else:
+                            target = next(b for b in buttons(root) if b.cget('text').startswith('Yes' if action == 'yes' else 'No'))
+                            target.invoke()
+                    except Exception as exc:
+                        errors.append(repr(exc))
+                        root.destroy()
+                root.after(300, drive)
+                root.after(5000, root.destroy)
+                return root
+            tk.Tk = factory
+            result = ns['_show_dialog']('Lucas staging approval test', 'Automatic UI verification: ' + action)
+            assert result is expected, (action, result)
+            assert not errors, errors
+            print('PASS native Windows dialog', action, 'result=', result, 'X=enabled')
+    finally:
+        tk.Tk = original_tk
