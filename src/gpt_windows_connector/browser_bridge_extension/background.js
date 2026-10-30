@@ -33,7 +33,7 @@ async function connect(){
     if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
     if(m.type!=="command") return;
     const id=String(m.id||"");
-    try{ const result=await executeCommand(String(m.action||""),m.params||{}); await recordBrowserAudit("ai",String(m.action||""),m.params||{},"ok"); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
+    try{ const result=await executeCommand(String(m.action||""),m.params||{}); await recordBrowserAudit("ai",String(m.action||""),m.params||{},"ok").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
     catch(error){ await recordBrowserAudit("ai",String(m.action||""),m.params||{},"error").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
   };
   socket.onclose=()=>{ chrome.storage.local.set({connected:false,pairingCode:""}).catch(()=>{}); badge("×","#dc2626"); clearInterval(heartbeatTimer); scheduleReconnect(); };
