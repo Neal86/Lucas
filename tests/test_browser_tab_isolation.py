@@ -31,3 +31,11 @@ def test_claim_and_resume_require_confirmation():
     assert 'operation == "claim_tab"' in ROUTER
     assert 'operation_params.get("user_confirmed") is not True' in ROUTER
     assert 'p.user_confirmed!==true' in BG
+
+
+def test_audit_records_only_operation_metadata():
+    assert "recordBrowserAudit" in BG
+    assert "lucasAudit" in BG
+    assert 'recordBrowserAudit("human","takeover"' in BG
+    assert 'recordBrowserAudit("ai"' in BG
+    assert "page contents, user input or authentication secrets" in BG
