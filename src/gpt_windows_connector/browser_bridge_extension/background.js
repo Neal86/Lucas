@@ -33,8 +33,8 @@ async function connect(){
     if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
     if(m.type!=="command") return;
     const id=String(m.id||"");
-    try{ const result=await executeCommand(String(m.action||""),m.params||{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
-    catch(error){ socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
+    try{ const result=await executeCommand(String(m.action||""),m.params||{}); await recordBrowserAudit("ai",String(m.action||""),m.params||{},"ok"); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
+    catch(error){ await recordBrowserAudit("ai",String(m.action||""),m.params||{},"error").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
   };
   socket.onclose=()=>{ chrome.storage.local.set({connected:false,pairingCode:""}).catch(()=>{}); badge("×","#dc2626"); clearInterval(heartbeatTimer); scheduleReconnect(); };
   socket.onerror=()=>{};
@@ -43,6 +43,13 @@ async function connect(){
 const tabStates = new Map();
 const INERT_ACTIONS = new Set(["tabs.list","tab.status","tab.open","tab.claim","tab.release","tab.resume"]);
 const taskOf = p => String(p.task_key || "").trim();
+async function recordBrowserAudit(source, action, params, status) {
+  // Store metadata only, never page contents, user input or authentication secrets.
+  const snapshot=await chrome.storage.local.get(["lucasAudit"]);
+  const events=Array.isArray(snapshot.lucasAudit)?snapshot.lucasAudit:[];
+  const entry={at:Date.now(),source,action,task_key:taskOf(params),tab_id:params?.tab_id??null,status};
+  await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry]});
+}
 function owns(tabId, taskKey) {
   const state=tabStates.get(Number(tabId));
   if (!state) throw new Error("Tab is not claimed by Lucas; open an AI tab or explicitly claim a tab");
@@ -74,7 +81,7 @@ async function getTab(tabId,taskKey){
 chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
  if(m?.type==="lucas_tab_state_query" && sender.tab?.id){sendResponse({state:tabStates.get(sender.tab.id)||null});return;}
  if(m?.type!=="lucas_human_takeover" || !sender.tab?.id)return;
- setPaused(sender.tab.id,true).then(()=>sendResponse({ok:true})).catch(e=>sendResponse({ok:false,error:e.message}));
+ setPaused(sender.tab.id,true).then(async()=>{await recordBrowserAudit("human","takeover",{tab_id:sender.tab.id,task_key:tabStates.get(sender.tab.id)?.task_key},"ok");sendResponse({ok:true});}).catch(e=>sendResponse({ok:false,error:e.message}));
  return true;
 });
 chrome.tabs.onRemoved.addListener(tabId=>{
