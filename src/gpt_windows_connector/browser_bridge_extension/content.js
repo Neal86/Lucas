@@ -158,6 +158,31 @@
     throw new Error("Unsupported content command: " + action);
   }
 
+  // Human-visible state and takeover control; no synthetic mouse/keyboard input.
+  let lucasOverlay = null;
+  function updateLucasOverlay(state) {
+    if (!state) { lucasOverlay?.remove(); lucasOverlay=null; return; }
+    if (!lucasOverlay) {
+      lucasOverlay=document.createElement("div");
+      lucasOverlay.id="lucas-ai-tab-indicator";
+      lucasOverlay.style.cssText="position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#10213d;color:#fff;border:1px solid #4c89ed;border-radius:10px;padding:10px 12px;font:13px system-ui;box-shadow:0 4px 22px #0005;display:flex;align-items:center;gap:10px";
+      const label=document.createElement("span");label.id="lucas-ai-tab-label";lucasOverlay.appendChild(label);
+      const takeover=document.createElement("button");takeover.textContent="接管 / Take over";
+      takeover.style.cssText="background:#fff;color:#10213d;border:0;border-radius:6px;padding:6px 8px;cursor:pointer";
+      takeover.onclick=()=>chrome.runtime.sendMessage({type:"lucas_human_takeover"},response=>{if(!response?.ok)label.textContent="Lucas: "+(response?.error||"Unable to pause");});
+      lucasOverlay.appendChild(takeover);
+      (document.body||document.documentElement).appendChild(lucasOverlay);
+    }
+    const label=lucasOverlay.querySelector("#lucas-ai-tab-label");
+    label.textContent=state.paused?"Lucas · 人工接管中":"Lucas · AI 正在操作";
+    const takeover=lucasOverlay.querySelector("button");
+    takeover.disabled=!!state.paused;takeover.style.opacity=state.paused?".5":"1";
+  }
+  chrome.runtime.onMessage.addListener(message=>{
+    if(message?.type==="lucas_tab_state")updateLucasOverlay(message.state);
+  });
+  chrome.runtime.sendMessage({type:"lucas_tab_state_query"},response=>updateLucasOverlay(response?.state||null)).catch(()=>{});
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== "lucas_command") return;
     run(message.action, message.params || {})
