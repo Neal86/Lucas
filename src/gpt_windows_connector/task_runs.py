@@ -115,5 +115,7 @@ class TaskRunStore:
                     try: sub["details"]=json.loads(sub.get("details") or "{}")
                     except Exception: sub["details"]={}
                     steps.append(sub)
-                item["steps"]=steps\n                item["title"]=display_task_title(item.get("title"), steps)\n                out.append(item)
+                item["steps"]=steps
+                item["title"]=display_task_title(item.get("title"), steps)
+                out.append(item)
         return out
