@@ -11,9 +11,10 @@ const fs=require('fs'), vm=require('vm'), assert=require('assert');
 const storage={}, listeners=[], sockets=[];
 let closed=0;
 const chrome={
-  runtime:{id:'a'.repeat(32),onInstalled:{addListener(){}},onStartup:{addListener(){}},openOptionsPage(){}},
-  storage:{local:{async get(keys){return Object.fromEntries(keys.filter(k=>k in storage).map(k=>[k,storage[k]]));},async set(values){const changes={};for(const [k,v] of Object.entries(values)){if(storage[k]!==v)changes[k]={oldValue:storage[k],newValue:v};storage[k]=v;}for(const listener of listeners)listener(changes,'local');}},onChanged:{addListener(fn){listeners.push(fn);}}},
+  runtime:{id:'a'.repeat(32),onInstalled:{addListener(){}},onStartup:{addListener(){}},onMessage:{addListener(){}},openOptionsPage(){}},
+  storage:{local:{async get(keys){const names=Array.isArray(keys)?keys:[keys];return Object.fromEntries(names.filter(k=>k in storage).map(k=>[k,storage[k]]));},async set(values){const changes={};for(const [k,v] of Object.entries(values)){if(storage[k]!==v)changes[k]={oldValue:storage[k],newValue:v};storage[k]=v;}for(const listener of listeners)listener(changes,'local');}},onChanged:{addListener(fn){listeners.push(fn);}}},
   action:{async setBadgeText(){},async setBadgeBackgroundColor(){}},
+  tabs:{onRemoved:{addListener(){}},async query(){return[];}},
 };
 class Socket{constructor(){this.readyState=0;sockets.push(this);}send(value){this.sent=value;}close(){closed++;this.readyState=3;this.onclose?.();}}
 const elements={};for(const id of ['status','profile','code','options'])elements[id]={textContent:'',className:''};
