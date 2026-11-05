@@ -134,6 +134,7 @@
     if (action === "page.wait") {
       const deadline = Date.now() + Math.min(Math.max(Number(params.timeout_ms || 15000), 250), 120000);
       while (Date.now() < deadline) {
+        if(!currentLucasState || currentLucasState.paused)throw new Error("AI tab is paused or released");
         let ok = false;
         if (params.selector) ok = !!document.querySelector(params.selector);
         else if (params.text) ok = String(document.body && document.body.innerText || "").toLowerCase().includes(String(params.text).toLowerCase());
@@ -160,23 +161,33 @@
 
   // Human-visible state and takeover control; no synthetic mouse/keyboard input.
   let lucasOverlay = null;
+  let currentLucasState = null;
   function updateLucasOverlay(state) {
+    currentLucasState=state;
     if (!state) { lucasOverlay?.remove(); lucasOverlay=null; return; }
     if (!lucasOverlay) {
       lucasOverlay=document.createElement("div");
       lucasOverlay.id="lucas-ai-tab-indicator";
       lucasOverlay.style.cssText="position:fixed;right:16px;bottom:16px;z-index:2147483647;background:#10213d;color:#fff;border:1px solid #4c89ed;border-radius:10px;padding:10px 12px;font:13px system-ui;box-shadow:0 4px 22px #0005;display:flex;align-items:center;gap:10px";
       const label=document.createElement("span");label.id="lucas-ai-tab-label";lucasOverlay.appendChild(label);
-      const takeover=document.createElement("button");takeover.textContent="接管 / Take over";
-      takeover.style.cssText="background:#fff;color:#10213d;border:0;border-radius:6px;padding:6px 8px;cursor:pointer";
-      takeover.onclick=()=>chrome.runtime.sendMessage({type:"lucas_human_takeover"},response=>{if(!response?.ok)label.textContent="Lucas: "+(response?.error||"Unable to pause");});
-      lucasOverlay.appendChild(takeover);
+      for(const [text,type] of [["Pause AI","lucas_human_pause"],["接管 / Take over","lucas_human_takeover"],["Resume AI","lucas_human_resume"]]){
+        const button=document.createElement("button");button.textContent=text;button.dataset.action=type;
+        button.style.cssText="background:#fff;color:#10213d;border:0;border-radius:6px;padding:6px 8px;cursor:pointer";
+        button.onclick=event=>{
+          if(!event.isTrusted)return;
+          button.disabled=true;
+          chrome.runtime.sendMessage({type},response=>{if(!response?.ok){label.textContent="Lucas: "+(response?.error||"Unable to update tab");button.disabled=false;}});
+        };
+        lucasOverlay.appendChild(button);
+      }
       (document.body||document.documentElement).appendChild(lucasOverlay);
     }
     const label=lucasOverlay.querySelector("#lucas-ai-tab-label");
-    label.textContent=state.paused?"Lucas · 人工接管中":"Lucas · AI 正在操作";
-    const takeover=lucasOverlay.querySelector("button");
-    takeover.disabled=!!state.paused;takeover.style.opacity=state.paused?".5":"1";
+    label.textContent=state.paused?(state.control==="human"?"Lucas · Human Control":"Lucas · AI Paused"):"Lucas · AI Running";
+    for(const button of lucasOverlay.querySelectorAll("button")){
+      button.hidden=button.dataset.action==="lucas_human_resume"?!state.paused:state.paused;
+      button.disabled=false;
+    }
   }
   chrome.runtime.onMessage.addListener(message=>{
     if(message?.type==="lucas_tab_state")updateLucasOverlay(message.state);
@@ -185,6 +196,7 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || message.type !== "lucas_command") return;
+    if(!currentLucasState || currentLucasState.paused || currentLucasState.task_key!==message.params?.task_key){sendResponse({ok:false,error:"AI tab is paused, released or belongs to another task"});return;}
     run(message.action, message.params || {})
       .then(result => sendResponse({ ok: true, result }))
       .catch(error => sendResponse({ ok: false, error: (error.name || "Error") + ": " + (error.message || String(error)) }));

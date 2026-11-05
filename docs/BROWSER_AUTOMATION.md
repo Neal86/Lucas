@@ -1,5 +1,8 @@
 # Lucas Browser Automation Architecture
 
+The final Browser Bridge requirements are in [BROWSER_BRIDGE_PRD_FINAL.md](BROWSER_BRIDGE_PRD_FINAL.md).
+Its read-only Popup and no-CDP Bridge requirements override older conflicting descriptions below.
+
 Lucas exposes one browser automation surface to GPT, Claude, Gemini and other MCP clients. The MCP client does not need to know whether the target browser is a Lucas-managed Chrome profile or an ixBrowser profile.
 
 ## Design goals

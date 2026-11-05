@@ -11,7 +11,7 @@ Browser Bridge 1.1.0 adds reliable connection status and Lucas extension icons.
 3. Install/enable the extension in the browser profile you intend to control.
 4. Lucas detects the live connection within a few seconds and shows Manage.
 5. Select Manage > Pair. Enter the six-digit code shown in that browser's
-   extension popup. Only then does the browser show Connected and accept commands.
+   extension Options page. Only then does the browser show Connected and accept commands.
 6. Manage > Disconnect revokes authorization without deleting the profile or
    changing agent policies. Reconnecting requires a fresh pairing code.
 
@@ -71,7 +71,7 @@ Lucas Browser Bridge connects your browser to Lucas running on your computer.
 Use your existing browser sessions for tasks such as reading pages, entering
 text, clicking controls, managing tabs and downloading files. Install Lucas Node,
 open its Browser settings and pair this browser using the code in the extension
-popup. Browser connections and authorizations are managed on your computer.
+Options page. Browser connections and authorizations are managed on your computer.
 
 Permission explanations (reflecting the actual code):
 
@@ -102,4 +102,4 @@ The Settings process uses an authenticated loopback WebSocket at `/settings` on
 the existing bridge port. A random per-start token is stored only in the local
 Lucas configuration directory. Browser Origin headers are rejected on this path;
 the path is not exposed as an MCP action. Pairing still requires the code from
-the extension popup. Status never returns that code or the settings token.
+the extension Options page. Status never returns that code or the settings token.

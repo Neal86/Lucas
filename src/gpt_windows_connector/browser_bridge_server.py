@@ -39,6 +39,7 @@ class BrowserBridgeServer:
     def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> None:
         self.host = host
         self.port = int(port)
+        self.node_id = ""
         self.server = None
         self.clients: dict[str, BridgeClient] = {}
         self.pending: dict[str, dict[str, Any]] = {}
@@ -132,6 +133,7 @@ class BrowserBridgeServer:
                     }
             await websocket.send(json.dumps({
                 "type": "hello_ack",
+                "node_id": self.node_id,
                 "paired": paired,
                 "installation_id": installation_id,
                 "profile": profile,
@@ -143,6 +145,15 @@ class BrowserBridgeServer:
                 client.last_seen = time.time()
                 if message.get("type") == "heartbeat":
                     await websocket.send(json.dumps({"type": "heartbeat_ack", "time": time.time()}))
+                    continue
+                if message.get("type") == "audit":
+                    if client.paired:
+                        event = message.get("event") or {}
+                        # Whitelist bounded metadata; never log arbitrary extension/page payloads.
+                        safe = {key: str(event.get(key, ""))[:200] for key in
+                                ("at", "source", "action", "task_key", "tab_id", "status")}
+                        log.info("Browser audit installation=%s event=%s", client.installation_id,
+                                 json.dumps(safe, ensure_ascii=False))
                     continue
                 if message.get("type") != "response":
                     continue
@@ -184,7 +195,7 @@ class BrowserBridgeServer:
 
     def list_pending(self) -> list[dict[str, Any]]:
         # The pairing code is deliberately shown only inside the local browser
-        # extension popup. Remote MCP clients may discover a pending bridge, but
+        # extension Options page. Remote MCP clients may discover a pending bridge, but
         # cannot read the proof-of-presence code from Lucas itself.
         values = []
         for raw in self.pending.values():
@@ -211,7 +222,7 @@ class BrowserBridgeServer:
         expected = str(pending.get("pairing_code") or "")
         supplied = str(pairing_code or "").strip()
         if not supplied:
-            raise PermissionError("Browser Bridge pairing code is required. Read it from the local extension popup.")
+            raise PermissionError("Browser Bridge pairing code is required. Read it from the extension Options page.")
         if not secrets.compare_digest(supplied, expected):
             raise PermissionError("Browser Bridge pairing code does not match")
         client = self.clients.get(installation_id)
@@ -235,7 +246,7 @@ class BrowserBridgeServer:
         client.profile_id = str(profile.get("profile_id") or client.profile_id)
         self.pending.pop(installation_id, None)
         try:
-            await client.websocket.send(json.dumps({"type": "paired", "profile": profile}, ensure_ascii=False))
+            await client.websocket.send(json.dumps({"type": "paired", "profile": profile, "node_id": self.node_id}, ensure_ascii=False))
         except Exception:
             pass
         return profile
@@ -275,7 +286,8 @@ class BrowserBridgeServer:
 bridge_server = BrowserBridgeServer()
 
 
-async def ensure_started(port: int = DEFAULT_PORT) -> BrowserBridgeServer:
+async def ensure_started(port: int = DEFAULT_PORT, *, node_id: str = "") -> BrowserBridgeServer:
+    bridge_server.node_id = node_id
     if bridge_server.server is None:
         bridge_server.port = int(port or DEFAULT_PORT)
         await bridge_server.start()

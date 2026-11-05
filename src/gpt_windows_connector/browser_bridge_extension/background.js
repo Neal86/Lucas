@@ -28,8 +28,8 @@ async function connect(){
   socket.onopen=async()=>{ socket.send(JSON.stringify({type:"hello",...(await getSettings())})); badge("…","#64748b"); clearInterval(heartbeatTimer); heartbeatTimer=setInterval(()=>{if(socket?.readyState===1) socket.send(JSON.stringify({type:"heartbeat",time:Date.now()}));},20000); };
   socket.onmessage=async(event)=>{
     let m; try{m=JSON.parse(event.data);}catch(_){return;}
-    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||"")}); return; }
-    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:""}); return; }
+    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||""),nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
+    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:"",nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
     if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
     if(m.type!=="command") return;
     const id=String(m.id||"");
@@ -41,14 +41,23 @@ async function connect(){
 }
 // A tab is owned by one Lucas task only. Never silently use the human's active tab.
 const tabStates = new Map();
-const INERT_ACTIONS = new Set(["tabs.list","tab.status","tab.open","tab.claim","tab.release","tab.resume"]);
 const taskOf = p => String(p.task_key || "").trim();
-async function recordBrowserAudit(source, action, params, status) {
+let auditQueue=Promise.resolve();
+function recordBrowserAudit(source, action, params, status) {
   // Store metadata only, never page contents, user input or authentication secrets.
-  const snapshot=await chrome.storage.local.get(["lucasAudit"]);
-  const events=Array.isArray(snapshot.lucasAudit)?snapshot.lucasAudit:[];
   const entry={at:Date.now(),source,action,task_key:taskOf(params),tab_id:params?.tab_id??null,status};
-  await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry]});
+  auditQueue=auditQueue.catch(()=>{}).then(async()=>{
+    const snapshot=await chrome.storage.local.get(["lucasAudit"]);
+    const events=Array.isArray(snapshot.lucasAudit)?snapshot.lucasAudit:[];
+    await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry]});
+    if(socket?.readyState===1)socket.send(JSON.stringify({type:"audit",event:entry}));
+  });
+  return auditQueue;
+}
+async function persistTabStates(){
+  const states=Object.fromEntries(tabStates);
+  if(chrome.storage.session)await chrome.storage.session.set({lucasTabStates:states});
+  await chrome.storage.local.set({lucasTabStates:states});
 }
 function owns(tabId, taskKey) {
   const state=tabStates.get(Number(tabId));
@@ -58,18 +67,22 @@ function owns(tabId, taskKey) {
   return state;
 }
 async function registerTab(tabId,taskKey){
+  await tabStateReady;
   if(!taskKey) throw new Error("task_key is required");
   const existing=tabStates.get(Number(tabId));
   if(existing && existing.task_key!==taskKey) throw new Error("Tab already belongs to another task");
-  tabStates.set(Number(tabId),{task_key:taskKey,paused:false});
-  await chrome.storage.local.set({lucasTabStates:Object.fromEntries(tabStates)});
+  if(existing) return; // Reclaiming must never clear a human pause.
+  tabStates.set(Number(tabId),{task_key:taskKey,paused:false,control:"ai"});
+  await persistTabStates();
   await chrome.tabs.sendMessage(Number(tabId),{type:"lucas_tab_state",state:{task_key:taskKey,paused:false}}).catch(()=>{});
 }
-async function setPaused(tabId,paused) {
+async function setPaused(tabId,paused,control="human") {
+  await tabStateReady;
   const state=tabStates.get(Number(tabId));
   if(!state) throw new Error("Tab has no Lucas task");
   state.paused=!!paused;
-  await chrome.storage.local.set({lucasTabStates:Object.fromEntries(tabStates)});
+  state.control=paused?control:"ai";
+  await persistTabStates();
   await chrome.tabs.sendMessage(Number(tabId),{type:"lucas_tab_state",state}).catch(()=>{});
 }
 async function getTab(tabId,taskKey){
@@ -79,22 +92,31 @@ async function getTab(tabId,taskKey){
   return chrome.tabs.get(found[0]);
 }
 chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
- if(m?.type==="lucas_tab_state_query" && sender.tab?.id){sendResponse({state:tabStates.get(sender.tab.id)||null});return;}
- if(m?.type!=="lucas_human_takeover" || !sender.tab?.id)return;
- setPaused(sender.tab.id,true).then(async()=>{await recordBrowserAudit("human","takeover",{tab_id:sender.tab.id,task_key:tabStates.get(sender.tab.id)?.task_key},"ok");sendResponse({ok:true});}).catch(e=>sendResponse({ok:false,error:e.message}));
- return true;
+ const tabId=sender.tab?.id;
+ if(!tabId)return;
+ if(m?.type==="lucas_tab_state_query"){
+   tabStateReady.then(()=>sendResponse({state:tabStates.get(tabId)||null}));return true;
+ }
+ const actions={lucas_human_takeover:"takeover",lucas_human_pause:"pause",lucas_human_resume:"resume"};
+ const action=actions[m?.type];if(!action)return;
+ // Content messages carry only the sender's tab, never a supplied/global tab ID.
+ setPaused(tabId,action!=="resume",action==="pause"?"paused":"human").then(async()=>{
+   await recordBrowserAudit("human",action,{tab_id:tabId,task_key:tabStates.get(tabId)?.task_key},"ok");sendResponse({ok:true});
+ }).catch(e=>sendResponse({ok:false,error:e.message}));return true;
 });
 chrome.tabs.onRemoved.addListener(tabId=>{
- if(tabStates.delete(tabId))chrome.storage.local.set({lucasTabStates:Object.fromEntries(tabStates)}).catch(()=>{});
+ if(tabStates.delete(tabId))persistTabStates().catch(()=>{});
 });
-chrome.storage.local.get(["lucasTabStates"]).then(x=>{
- for(const [id,state] of Object.entries(x.lucasTabStates||{}))if(state?.task_key)tabStates.set(Number(id),state);
- chrome.tabs.query({}).then(tabs=>{
-   const existing=new Set(tabs.map(t=>t.id));
-   for(const id of tabStates.keys())if(!existing.has(id))tabStates.delete(id);
-   chrome.storage.local.set({lucasTabStates:Object.fromEntries(tabStates)}).catch(()=>{});
- });
-});
+// Session storage survives worker restarts, but not browser restarts where tab IDs
+// may be reused. Never restore ownership from persistent local storage alone.
+const tabStateReady=(async()=>{
+ const saved=chrome.storage.session?await chrome.storage.session.get(["lucasTabStates"]):{};
+ const tabs=await chrome.tabs.query({});const existing=new Set(tabs.map(t=>t.id));
+ for(const [id,state] of Object.entries(saved.lucasTabStates||{})){
+   if(existing.has(Number(id)) && state?.task_key)tabStates.set(Number(id),state);
+ }
+ await persistTabStates();
+})();
 async function runInTab(tabId,func,args=[]){
   const out=await chrome.scripting.executeScript({target:{tabId:Number(tabId)},func,args});
   return out?.[0]?.result;
@@ -141,8 +163,9 @@ function hoverTarget(target){const el=findTarget(target,false);el.scrollIntoView
 function pressTarget(target,key){const el=target?findTarget(target,true):(document.activeElement||document.body);el.focus?.({preventScroll:true});["keydown","keyup"].forEach(type=>el.dispatchEvent(new KeyboardEvent(type,{key:String(key),bubbles:true,cancelable:true})));if(String(key)==="Enter"&&el.form?.requestSubmit)el.form.requestSubmit();return{target:target||null,key:String(key),url:location.href};}
 function uploadFiles(target,files){const el=findTarget(target,true);if(!(el instanceof HTMLInputElement)||el.type!=="file")throw new Error("Matched element is not a file input");const dt=new DataTransfer();for(const item of files||[]){const bytes=Uint8Array.from(atob(item.base64),c=>c.charCodeAt(0));dt.items.add(new File([bytes],item.name||"upload.bin",{type:item.type||"application/octet-stream"}));}el.files=dt.files;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return{target,files:dt.files.length};}
 async function waitCondition(tabId,p){const deadline=Date.now()+Math.min(Math.max(Number(p.timeout_ms||15000),250),120000);while(Date.now()<deadline){const ok=await runInTab(tabId,(selector,text,urlContains)=>{if(selector)return!!document.querySelector(selector);if(text)return String(document.body?.innerText||"").toLowerCase().includes(String(text).toLowerCase());if(urlContains)return location.href.includes(String(urlContains));return document.readyState==="complete"||document.readyState==="interactive";},[p.selector||null,p.text||null,p.url_contains||null]);if(ok)return{waited:true};await new Promise(r=>setTimeout(r,250));}throw new Error("Timeout waiting for page condition");}
-async function pageCommand(tabId,action,p){const response=await chrome.tabs.sendMessage(tabId,{type:"lucas_command",action,params:p||{}});if(!response||!response.ok)throw new Error(response?.error||"Browser Bridge content runtime unavailable");return response.result;}
+async function pageCommand(tabId,action,p){owns(tabId,taskOf(p));const response=await chrome.tabs.sendMessage(tabId,{type:"lucas_command",action,params:p||{}});if(!response||!response.ok)throw new Error(response?.error||"Browser Bridge content runtime unavailable");return response.result;}
 async function executeCommand(action,p){
+  await tabStateReady;
   if(action==="ping")return{ok:true,time:Date.now()};
   const taskKey=taskOf(p);
   if(action==="tabs.list"){const tabs=await chrome.tabs.query({});return tabs.map(t=>({id:t.id,window_id:t.windowId,active:!!t.active,title:t.title||"",url:t.url||"",status:t.status||"",lucas:tabStates.get(t.id)||null}));}
@@ -155,6 +178,7 @@ async function executeCommand(action,p){
   }
   if(action==="tab.claim"){
     if(!Number.isInteger(Number(p.tab_id))||!taskKey)throw new Error("Explicit tab_id and task_key required");
+    if(p.user_confirmed!==true)throw new Error("Explicit human confirmation required to claim tab");
     const t=await chrome.tabs.get(Number(p.tab_id));
     if(!t)throw new Error("Tab not found");
     await registerTab(t.id,taskKey);
@@ -163,7 +187,7 @@ async function executeCommand(action,p){
   if(action==="tab.release"){
     owns(p.tab_id,taskKey);
     tabStates.delete(Number(p.tab_id));
-    await chrome.storage.local.set({lucasTabStates:Object.fromEntries(tabStates)});
+    await persistTabStates();
     await chrome.tabs.sendMessage(Number(p.tab_id),{type:"lucas_tab_state",state:null}).catch(()=>{});
     return{released:true,tab_id:Number(p.tab_id)};
   }

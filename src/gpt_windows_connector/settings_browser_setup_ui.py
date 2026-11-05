@@ -72,8 +72,8 @@ def build_browser_setup(*, tk, parent, colors, font, translate, on_change):
         win.geometry("620x360")
         win.transient(frame.winfo_toplevel())
         text = T(
-            "扩展商店版本尚未配置。现在可以通过本地安装使用：\n\n1. 在目标浏览器中打开扩展管理页。\n2. 开启“开发者模式”。\n3. 点击“加载已解压的扩展程序”，选择下方文件夹。\n4. 返回 Lucas，点击“管理”，输入扩展弹窗显示的配对码。",
-            "A store listing is not configured yet. You can install locally now:\n\n1. Open the extensions page in your target browser.\n2. Enable Developer mode.\n3. Choose Load unpacked and select the folder below.\n4. Return to Lucas, select Manage, and enter the code shown in the extension popup.",
+            "扩展商店版本尚未配置。现在可以通过本地安装使用：\n\n1. 在目标浏览器中打开扩展管理页。\n2. 开启“开发者模式”。\n3. 点击“加载已解压的扩展程序”，选择下方文件夹。\n4. 返回 Lucas，点击“管理”，输入扩展 Options 页面显示的配对码。",
+            "A store listing is not configured yet. You can install locally now:\n\n1. Open the extensions page in your target browser.\n2. Enable Developer mode.\n3. Choose Load unpacked and select the folder below.\n4. Return to Lucas, select Manage, and enter the code shown in the extension Options page.",
         )
         if listing:
             text = T("请在目标浏览器或 Profile 中打开下方商店链接，安装扩展后返回 Lucas 配对。", "Open the store link below in your target browser/profile, install the extension, then return to Lucas to pair.")
@@ -101,7 +101,7 @@ def build_browser_setup(*, tk, parent, colors, font, translate, on_change):
         win.title(T("管理浏览器连接", "Manage browser connections"))
         win.geometry("640x350")
         win.transient(frame.winfo_toplevel())
-        tk.Label(win, text=T("选择要授权或断开连接的浏览器。配对码在浏览器的 Lucas 扩展弹窗里。", "Select a browser connection. The pairing code is in its Lucas extension popup."), justify="left", wraplength=590, font=(font, 10)).pack(anchor="w", padx=20, pady=16)
+        tk.Label(win, text=T("选择要授权或断开连接的浏览器。配对码在浏览器的 Lucas 扩展 Options 页面里。", "Select a browser connection. The pairing code is in its Lucas extension Options page."), justify="left", wraplength=590, font=(font, 10)).pack(anchor="w", padx=20, pady=16)
         items = tk.Listbox(win, height=7, exportselection=False, font=(font, 10))
         items.pack(fill="both", expand=True, padx=20)
         records = []
@@ -131,7 +131,7 @@ def build_browser_setup(*, tk, parent, colors, font, translate, on_change):
             client = chosen()
             if not client or client.get("paired"):
                 return
-            code = simpledialog.askstring(T("配对浏览器", "Pair browser"), T("输入浏览器 Lucas 扩展弹窗里的六位配对码：", "Enter the six-digit code from the Lucas extension popup:"), parent=win)
+            code = simpledialog.askstring(T("配对浏览器", "Pair browser"), T("输入浏览器 Lucas 扩展 Options 页面里的六位配对码：", "Enter the six-digit code from the Lucas extension Options page:"), parent=win)
             if code is not None:
                 request("pair", changed, installation_id=client["installation_id"], pairing_code=code.strip())
         def disconnect():

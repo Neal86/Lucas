@@ -498,7 +498,7 @@ async def run_node() -> None:
     except Exception:
         log.exception("Could not prepare Browser Bridge extension")
     try:
-        await ensure_browser_bridge_started(int(config.get("browser_bridge_port") or 8766))
+        await ensure_browser_bridge_started(int(config.get("browser_bridge_port") or 8766), node_id=str(config.get("node_id") or ""))
     except OSError as exc:
         log.error("Browser Bridge server could not start: %s", exc)
     delay = 1.0

@@ -21,7 +21,7 @@ def test_bridge_creates_background_tabs_and_binds_task():
 
 def test_human_takeover_pauses_ai_and_does_not_close_tab():
     assert 'lucas_human_takeover' in BG
-    assert 'setPaused(sender.tab.id,true)' in BG
+    assert 'setPaused(tabId,action!=="resume"' in BG
     assert 'if (state.paused) throw new Error' in BG
     assert 'lucas-ai-tab-indicator' in CONTENT
     assert '接管 / Take over' in CONTENT
@@ -36,6 +36,6 @@ def test_claim_and_resume_require_confirmation():
 def test_audit_records_only_operation_metadata():
     assert "recordBrowserAudit" in BG
     assert "lucasAudit" in BG
-    assert 'recordBrowserAudit("human","takeover"' in BG
+    assert 'recordBrowserAudit("human",action' in BG
     assert 'recordBrowserAudit("ai"' in BG
     assert "page contents, user input or authentication secrets" in BG
