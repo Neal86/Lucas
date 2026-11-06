@@ -28,23 +28,119 @@ async function connect(){
   socket.onopen=async()=>{ socket.send(JSON.stringify({type:"hello",...(await getSettings())})); badge("…","#64748b"); clearInterval(heartbeatTimer); heartbeatTimer=setInterval(()=>{if(socket?.readyState===1) socket.send(JSON.stringify({type:"heartbeat",time:Date.now()}));},20000); };
   socket.onmessage=async(event)=>{
     let m; try{m=JSON.parse(event.data);}catch(_){return;}
-    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||"")}); return; }
-    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:""}); return; }
-    if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
+    if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||""),nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
+    if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:"",nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
+    if(m.type==="heartbeat_ack"){
+      await chrome.storage.local.set({connected:true,lastSeen:Date.now()});
+      const saved=await chrome.storage.local.get(["lucasAuditOutbox"]);
+      for(const entry of (saved.lucasAuditOutbox||[]).slice(0,100))
+        if(socket?.readyState===1)socket.send(JSON.stringify({type:"audit",event:entry}));
+      return;
+    }
+    if(m.type==="audit_ack"){
+      auditQueue=auditQueue.catch(()=>{}).then(async()=>{
+        const saved=await chrome.storage.local.get(["lucasAuditOutbox"]);
+        await chrome.storage.local.set({lucasAuditOutbox:(saved.lucasAuditOutbox||[]).filter(e=>e.event_id!==m.event_id)});
+      });await auditQueue;return;
+    }
     if(m.type!=="command") return;
     const id=String(m.id||"");
-    try{ const result=await executeCommand(String(m.action||""),m.params||{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
-    catch(error){ socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
+    try{ const result=await executeCommand(String(m.action||""),m.params||{}); await recordBrowserAudit("ai",String(m.action||""),m.params||{},"ok").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
+    catch(error){ await recordBrowserAudit("ai",String(m.action||""),m.params||{},"error").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:false,error:(error?.name||"Error")+": "+(error?.message||String(error))})); }
   };
   socket.onclose=()=>{ chrome.storage.local.set({connected:false,pairingCode:""}).catch(()=>{}); badge("×","#dc2626"); clearInterval(heartbeatTimer); scheduleReconnect(); };
   socket.onerror=()=>{};
 }
-async function getTab(tabId){
-  if(tabId!=null) return chrome.tabs.get(Number(tabId));
-  const tabs=await chrome.tabs.query({lastFocusedWindow:true});
-  const usable=tabs.filter(t=>/^https?:|^file:|^chrome-extension:/.test(t.url||""));
-  return usable.find(t=>t.active)||usable[0]||tabs[0];
+// A tab is owned by one Lucas task only. Never silently use the human's active tab.
+const tabStates = new Map();
+const pendingClaims = new Map();
+const taskOf = p => String(p.task_key || "").trim();
+let auditQueue=Promise.resolve();
+function recordBrowserAudit(source, action, params, status) {
+  // Store metadata only, never page contents, user input or authentication secrets.
+  const entry={event_id:crypto.randomUUID(),at:Date.now(),source,action,task_key:taskOf(params),tab_id:params?.tab_id??null,status};
+  auditQueue=auditQueue.catch(()=>{}).then(async()=>{
+    const snapshot=await chrome.storage.local.get(["lucasAudit","lucasAuditOutbox"]);
+    const events=Array.isArray(snapshot.lucasAudit)?snapshot.lucasAudit:[];
+    await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry],lucasAuditOutbox:[...(snapshot.lucasAuditOutbox||[]),entry]});
+    if(socket?.readyState===1)socket.send(JSON.stringify({type:"audit",event:entry}));
+  });
+  return auditQueue;
 }
+async function persistTabStates(){
+  const states=Object.fromEntries(tabStates);
+  if(chrome.storage.session)await chrome.storage.session.set({lucasTabStates:states});
+  await chrome.storage.local.set({lucasTabStates:states});
+}
+function owns(tabId, taskKey) {
+  const state=tabStates.get(Number(tabId));
+  if (!state) throw new Error("Tab is not claimed by Lucas; open an AI tab or explicitly claim a tab");
+  if (!taskKey || state.task_key!==taskKey) throw new Error("Tab belongs to another Lucas task");
+  if (state.paused) throw new Error("Human takeover active: AI commands are paused");
+  return state;
+}
+async function registerTab(tabId,taskKey){
+  await tabStateReady;
+  if(!taskKey) throw new Error("task_key is required");
+  const existing=tabStates.get(Number(tabId));
+  if(existing && existing.task_key!==taskKey) throw new Error("Tab already belongs to another task");
+  if(existing) return; // Reclaiming must never clear a human pause.
+  tabStates.set(Number(tabId),{task_key:taskKey,paused:false,control:"ai"});
+  await persistTabStates();
+  await chrome.tabs.sendMessage(Number(tabId),{type:"lucas_tab_state",state:{task_key:taskKey,paused:false}}).catch(()=>{});
+}
+async function setPaused(tabId,paused,control="human") {
+  await tabStateReady;
+  const state=tabStates.get(Number(tabId));
+  if(!state) throw new Error("Tab has no Lucas task");
+  state.paused=!!paused;
+  state.control=paused?control:"ai";
+  await persistTabStates();
+  await chrome.tabs.sendMessage(Number(tabId),{type:"lucas_tab_state",state}).catch(()=>{});
+}
+async function getTab(tabId,taskKey){
+  if(tabId!=null){owns(Number(tabId),taskKey);return chrome.tabs.get(Number(tabId));}
+  const found=[...tabStates].find(([id,state])=>state.task_key===taskKey && !state.paused);
+  if(!found) throw new Error("No active AI tab for this task; use tab.open first");
+  return chrome.tabs.get(found[0]);
+}
+chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
+ const tabId=sender.tab?.id;
+ if(!tabId)return;
+ if(m?.type==="lucas_tab_state_query"){
+   tabStateReady.then(()=>sendResponse({state:tabStates.get(tabId)||null}));return true;
+ }
+ if(m?.type==="lucas_claim_decision"){
+   const pending=pendingClaims.get(tabId);
+   if(!pending || pending.nonce!==m.nonce || pending.expires<Date.now()){sendResponse({ok:false,error:"Approval expired"});return;}
+   pendingClaims.delete(tabId);
+   (async()=>{
+     if(m.approved===true)await registerTab(tabId,pending.task_key);
+     await recordBrowserAudit("human","claim",{tab_id:tabId,task_key:pending.task_key},m.approved===true?"ok":"denied");
+     sendResponse({ok:true});
+   })().catch(e=>sendResponse({ok:false,error:e.message}));return true;
+ }
+ const actions={lucas_human_takeover:"takeover",lucas_human_pause:"pause",lucas_human_resume:"resume"};
+ const action=actions[m?.type];if(!action)return;
+ // Content messages carry only the sender's tab, never a supplied/global tab ID.
+ setPaused(tabId,action!=="resume",action==="pause"?"paused":"human").then(async()=>{
+   await recordBrowserAudit("human",action,{tab_id:tabId,task_key:tabStates.get(tabId)?.task_key},"ok");sendResponse({ok:true});
+ }).catch(e=>sendResponse({ok:false,error:e.message}));return true;
+});
+chrome.tabs.onRemoved.addListener(tabId=>{
+ pendingClaims.delete(tabId);
+ if(tabStates.delete(tabId))persistTabStates().catch(()=>{});
+});
+// Session storage survives worker restarts, but not browser restarts where tab IDs
+// may be reused. Never restore ownership from persistent local storage alone.
+const tabStateReady=(async()=>{
+ const saved=chrome.storage.session?await chrome.storage.session.get(["lucasTabStates"]):{};
+ const tabs=await chrome.tabs.query({});const existing=new Set(tabs.map(t=>t.id));
+ for(const [id,state] of Object.entries(saved.lucasTabStates||{})){
+   if(existing.has(Number(id)) && state?.task_key)tabStates.set(Number(id),state);
+ }
+ await persistTabStates();
+})();
 async function runInTab(tabId,func,args=[]){
   const out=await chrome.scripting.executeScript({target:{tabId:Number(tabId)},func,args});
   return out?.[0]?.result;
@@ -91,13 +187,53 @@ function hoverTarget(target){const el=findTarget(target,false);el.scrollIntoView
 function pressTarget(target,key){const el=target?findTarget(target,true):(document.activeElement||document.body);el.focus?.({preventScroll:true});["keydown","keyup"].forEach(type=>el.dispatchEvent(new KeyboardEvent(type,{key:String(key),bubbles:true,cancelable:true})));if(String(key)==="Enter"&&el.form?.requestSubmit)el.form.requestSubmit();return{target:target||null,key:String(key),url:location.href};}
 function uploadFiles(target,files){const el=findTarget(target,true);if(!(el instanceof HTMLInputElement)||el.type!=="file")throw new Error("Matched element is not a file input");const dt=new DataTransfer();for(const item of files||[]){const bytes=Uint8Array.from(atob(item.base64),c=>c.charCodeAt(0));dt.items.add(new File([bytes],item.name||"upload.bin",{type:item.type||"application/octet-stream"}));}el.files=dt.files;el.dispatchEvent(new Event("input",{bubbles:true}));el.dispatchEvent(new Event("change",{bubbles:true}));return{target,files:dt.files.length};}
 async function waitCondition(tabId,p){const deadline=Date.now()+Math.min(Math.max(Number(p.timeout_ms||15000),250),120000);while(Date.now()<deadline){const ok=await runInTab(tabId,(selector,text,urlContains)=>{if(selector)return!!document.querySelector(selector);if(text)return String(document.body?.innerText||"").toLowerCase().includes(String(text).toLowerCase());if(urlContains)return location.href.includes(String(urlContains));return document.readyState==="complete"||document.readyState==="interactive";},[p.selector||null,p.text||null,p.url_contains||null]);if(ok)return{waited:true};await new Promise(r=>setTimeout(r,250));}throw new Error("Timeout waiting for page condition");}
-async function pageCommand(tabId,action,p){const response=await chrome.tabs.sendMessage(tabId,{type:"lucas_command",action,params:p||{}});if(!response||!response.ok)throw new Error(response?.error||"Browser Bridge content runtime unavailable");return response.result;}
+async function pageCommand(tabId,action,p){owns(tabId,taskOf(p));const response=await chrome.tabs.sendMessage(tabId,{type:"lucas_command",action,params:p||{}});if(!response||!response.ok)throw new Error(response?.error||"Browser Bridge content runtime unavailable");return response.result;}
 async function executeCommand(action,p){
+  await tabStateReady;
   if(action==="ping")return{ok:true,time:Date.now()};
-  if(action==="tabs.list"){const tabs=await chrome.tabs.query({});return tabs.map(t=>({id:t.id,window_id:t.windowId,active:!!t.active,title:t.title||"",url:t.url||"",status:t.status||""}));}
-  if(action==="tab.open"){const t=await chrome.tabs.create({url:p.url||"about:blank",active:false});return{id:t.id,window_id:t.windowId,url:t.url||p.url||"about:blank",title:t.title||""};}
-  if(action==="tab.close"){await chrome.tabs.remove(Number(p.tab_id));return{closed:true,tab_id:Number(p.tab_id)};}
-  const tab=await getTab(p.tab_id); if(!tab?.id)throw new Error("No usable browser tab found"); const tabId=tab.id;
+  const taskKey=taskOf(p);
+  if(action==="tabs.list"){const tabs=await chrome.tabs.query({});return tabs.map(t=>({id:t.id,window_id:t.windowId,active:!!t.active,title:t.title||"",url:t.url||"",status:t.status||"",lucas:tabStates.get(t.id)||null}));}
+  if(action==="tab.status")return{tabs:Object.fromEntries(tabStates)};
+  if(action==="tab.open"){
+    if(!taskKey)throw new Error("task_key required for AI tabs");
+    const t=await chrome.tabs.create({url:p.url||"about:blank",active:false});
+    await registerTab(t.id,taskKey);
+    return{id:t.id,window_id:t.windowId,url:t.url||p.url||"about:blank",title:t.title||"",ai_owned:true,task_key:taskKey};
+  }
+  if(action==="tab.claim"){
+    if(!Number.isInteger(Number(p.tab_id))||!taskKey)throw new Error("Explicit tab_id and task_key required");
+    if(p.user_confirmed!==true)throw new Error("Explicit human confirmation required to claim tab");
+    const t=await chrome.tabs.get(Number(p.tab_id));
+    if(!t)throw new Error("Tab not found");
+    const existing=tabStates.get(t.id);
+    if(existing){
+      if(existing.task_key!==taskKey)throw new Error("Tab belongs to another task");
+    }else{
+      const previous=pendingClaims.get(t.id);
+      if(previous && previous.expires>Date.now() && previous.task_key!==taskKey)throw new Error("Another task is awaiting local approval");
+      const pending=previous?.expires>Date.now()?previous:{task_key:taskKey,nonce:crypto.randomUUID(),expires:Date.now()+120000};
+      pendingClaims.set(t.id,pending);
+      await chrome.tabs.sendMessage(t.id,{type:"lucas_claim_request",...pending});
+      return{claimed:false,requires_user_action:true,action_type:"browser_tab_approval",tab_id:t.id,message:"Click Allow AI in the target tab, then retry claim_tab"};
+    }
+    return{claimed:true,tab_id:t.id,task_key:taskKey};
+  }
+  if(action==="tab.release"){
+    owns(p.tab_id,taskKey);
+    tabStates.delete(Number(p.tab_id));
+    await persistTabStates();
+    await chrome.tabs.sendMessage(Number(p.tab_id),{type:"lucas_tab_state",state:null}).catch(()=>{});
+    return{released:true,tab_id:Number(p.tab_id)};
+  }
+  if(action==="tab.resume"){
+    const state=tabStates.get(Number(p.tab_id));
+    if(!state || !taskKey || state.task_key!==taskKey)throw new Error("Task does not own tab");
+    if(p.user_confirmed!==true)throw new Error("Explicit human confirmation required to resume");
+    if(state.paused)throw new Error("Resume requires a local click on Resume AI in this tab");
+    return{resumed:true,tab_id:Number(p.tab_id)};
+  }
+  const tab=await getTab(p.tab_id,taskKey); if(!tab?.id)throw new Error("No AI-owned browser tab found"); const tabId=tab.id;
+  if(action==="tab.close"){await chrome.tabs.remove(tabId);return{closed:true,tab_id:tabId};}
   if(action==="tab.navigate"){const t=await chrome.tabs.update(tabId,{url:String(p.url)});return{tab_id:tabId,url:t.url||p.url};}
   if(action==="tab.reload"){await chrome.tabs.reload(tabId);return{tab_id:tabId,reloaded:true};}
   if(action==="tab.back"||action==="tab.forward"){await chrome.scripting.executeScript({target:{tabId},func:action==="tab.back"?()=>history.back():()=>history.forward()});return{tab_id:tabId,action};}

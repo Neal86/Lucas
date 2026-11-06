@@ -52,7 +52,7 @@ def test_dashboard_browser_smoke():
             with sync_playwright() as pw:
                 browser = pw.chromium.launch(headless=True)
                 page = browser.new_page()
-                page.on("pageerror", lambda e: errors.append(str(e)))
+                page.on("pageerror", lambda e: errors.append(getattr(e, "stack", None) or str(e)))
                 page.goto(base + "/dashboard", wait_until="domcontentloaded")
 
                 result = page.evaluate("""async()=>{const r=await fetch('/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:'e2e-admin@example.com',password:'A-very-long-test-password-123',name:'E2E Admin'})});return [r.status,await r.text()]}""")

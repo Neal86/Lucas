@@ -17,6 +17,10 @@ from .config import resolve_in_workspace
 
 BRIDGE_OPERATION_MAP = {
     "pages": "tabs.list",
+    "tab_status": "tab.status",
+    "claim_tab": "tab.claim",
+    "release_tab": "tab.release",
+    "resume_tab": "tab.resume",
     "new_page": "tab.open",
     "navigate": "tab.navigate",
     "inspect": "page.snapshot",
@@ -418,6 +422,13 @@ async def profile_action(
         if not action:
             raise ValueError(f"Operation {operation} is not supported by Browser Bridge")
         bridge_params = _bridge_params(operation, operation_params)
+        # Bind all commands to the originating task; never fall back to the human's active tab.
+        if not task_key:
+            raise ValueError("Browser Bridge operations require a stable task_key")
+        bridge_params["task_key"] = task_key
+        # Claiming an existing human tab requires explicit user intent.
+        if operation == "claim_tab" and operation_params.get("user_confirmed") is not True:
+            raise PermissionError("Explicit user confirmation is required to claim an existing tab")
         if operation == "upload":
             if workspace is None:
                 raise PermissionError("Browser upload requires a project workspace")
