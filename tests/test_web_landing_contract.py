@@ -40,7 +40,7 @@ def test_mobile_header_is_pinned_to_viewport():
 
 
 def test_fixed_mobile_header_does_not_cover_hero():
-    assert ".hero{padding:112px 20px 62px!important}" in LANDING_BODY_STYLE
+    assert ".hero{padding:112px 20px 32px!important}" in LANDING_BODY_STYLE
 
 
 def test_landing_is_composed_from_modules():
@@ -57,3 +57,39 @@ def test_public_home_does_not_slice_landing_out_of_dashboard():
     source = Path(webapp.__file__).read_text(encoding="utf-8")
     assert "landing = LANDING_HTML" in source
     assert "DASHBOARD_HTML.index('\\n<div id=\"auth\"'" not in source
+
+
+def test_hero_connects_web_ai_to_computers():
+    from html.parser import HTMLParser
+    from gpt_windows_connector.web_landing_hero import LANDING_HERO_HTML
+
+    class HeadingParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_heading = False
+            self.parts = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "h1":
+                self.in_heading = True
+            elif tag == "br" and self.in_heading:
+                self.parts.append(" ")
+
+        def handle_endtag(self, tag):
+            if tag == "h1":
+                self.in_heading = False
+
+        def handle_data(self, data):
+            if self.in_heading:
+                self.parts.append(data)
+
+    parser = HeadingParser()
+    parser.feed(LANDING_HERO_HTML)
+    assert "".join(parser.parts) == "Connect Your Web AI to Your Computers"
+
+
+def test_hero_to_capabilities_spacing_is_compact():
+    assert "padding:120px 28px 32px" in LANDING_BODY_STYLE
+    assert "margin:35px 0 0;" in LANDING_BODY_STYLE
+    assert "#capabilities.landing-section{padding-top:32px}" in LANDING_BODY_STYLE
+    assert "#capabilities.landing-section{padding-top:24px!important}" in LANDING_BODY_STYLE
