@@ -60,3 +60,25 @@ No production branch, deployment configuration, volume or database was changed.
 
 CI results for the new commit must be checked after push. A draft PR is work in
 progress; none of the blocked gates can be counted as final acceptance.
+
+## Continuation: local consent and audit replay
+
+- Existing-tab claim now returns requires_user_action and displays Allow AI / Deny
+  inside only the target page. A short-lived nonce binds the content-script reply
+  to the sender Tab and task. A trusted local click is required; a remote boolean
+  alone grants no ownership. Other-task pending requests are rejected.
+- Remote resume no longer clears a pause, even with user_confirmed=true. The
+  user must click Resume AI in that Tab. Repeated same-task claim preserves pause.
+- Metadata events now have IDs and a persistent local outbox. Heartbeats replay
+  up to 100 pending events; Node acknowledges after logging; only acknowledged
+  IDs are removed. Delivery is at least once (duplicates after an ACK loss are
+  possible). This is not a transactional audit database or Dashboard integration.
+- Runtime regressions verify unapproved claims cannot operate a Tab, wrong nonce
+  is rejected, local approval permits claim, remote resume cannot bypass pause,
+  and acknowledgement removes only its matching outbox event.
+- Full local suite: 285 passed, 5 skipped. Compile and JS runtime passed.
+- Latest N20630 attempt returned APPROVAL_TIMEOUT (local approval expired;
+  command not executed), audit f11e2a8cc446439a8f84feec989ff65a. The previous
+  offline finding is historical; no true browser acceptance was performed.
+- Dashboard management and restored-browser original-task reconciliation remain
+  open. Staging remains behind the required real-browser acceptance gate.

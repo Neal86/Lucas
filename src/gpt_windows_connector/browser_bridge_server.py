@@ -151,9 +151,10 @@ class BrowserBridgeServer:
                         event = message.get("event") or {}
                         # Whitelist bounded metadata; never log arbitrary extension/page payloads.
                         safe = {key: str(event.get(key, ""))[:200] for key in
-                                ("at", "source", "action", "task_key", "tab_id", "status")}
+                                ("event_id", "at", "source", "action", "task_key", "tab_id", "status")}
                         log.info("Browser audit installation=%s event=%s", client.installation_id,
                                  json.dumps(safe, ensure_ascii=False))
+                        await websocket.send(json.dumps({"type": "audit_ack", "event_id": safe["event_id"]}))
                     continue
                 if message.get("type") != "response":
                     continue

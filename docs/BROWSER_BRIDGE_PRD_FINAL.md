@@ -67,3 +67,12 @@ run CI, interface and automated tests; run N20630 acceptance and fix regressions
 then deploy/verify Staging; deliver commits, PR and evidence. Unit API doubles are
 permitted for regression tests but never replace browser acceptance. Do not claim
 final completion while any mandatory acceptance or implementation gap remains.
+
+### Local consent and delivery semantics
+
+A remote claim requests approval on the target page and returns a structured
+requires_user_action response until the user clicks Allow AI there. Approval is
+bound to a short-lived nonce, sender Tab and task. A caller-supplied boolean alone
+is insufficient. A paused Tab can resume only through its trusted local button.
+Audit metadata persists in a local outbox until Node acknowledgement; retries can
+produce duplicate records with the same event ID (at-least-once delivery).

@@ -30,7 +30,19 @@ async function connect(){
     let m; try{m=JSON.parse(event.data);}catch(_){return;}
     if(m.type==="hello_ack"){ badge(m.paired?"L":"!",m.paired?"#16a34a":"#d97706"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:!!m.paired,pairingCode:String(m.pairing_code||""),nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
     if(m.type==="paired"){ badge("L","#16a34a"); await chrome.storage.local.set({connected:true,lastSeen:Date.now(),paired:true,pairingCode:"",nodeId:m.node_id||null,bridgeProfile:m.profile||null}); return; }
-    if(m.type==="heartbeat_ack"){await chrome.storage.local.set({connected:true,lastSeen:Date.now()});return;}
+    if(m.type==="heartbeat_ack"){
+      await chrome.storage.local.set({connected:true,lastSeen:Date.now()});
+      const saved=await chrome.storage.local.get(["lucasAuditOutbox"]);
+      for(const entry of (saved.lucasAuditOutbox||[]).slice(0,100))
+        if(socket?.readyState===1)socket.send(JSON.stringify({type:"audit",event:entry}));
+      return;
+    }
+    if(m.type==="audit_ack"){
+      auditQueue=auditQueue.catch(()=>{}).then(async()=>{
+        const saved=await chrome.storage.local.get(["lucasAuditOutbox"]);
+        await chrome.storage.local.set({lucasAuditOutbox:(saved.lucasAuditOutbox||[]).filter(e=>e.event_id!==m.event_id)});
+      });await auditQueue;return;
+    }
     if(m.type!=="command") return;
     const id=String(m.id||"");
     try{ const result=await executeCommand(String(m.action||""),m.params||{}); await recordBrowserAudit("ai",String(m.action||""),m.params||{},"ok").catch(()=>{}); socket.send(JSON.stringify({type:"response",id,ok:true,result})); }
@@ -41,15 +53,16 @@ async function connect(){
 }
 // A tab is owned by one Lucas task only. Never silently use the human's active tab.
 const tabStates = new Map();
+const pendingClaims = new Map();
 const taskOf = p => String(p.task_key || "").trim();
 let auditQueue=Promise.resolve();
 function recordBrowserAudit(source, action, params, status) {
   // Store metadata only, never page contents, user input or authentication secrets.
-  const entry={at:Date.now(),source,action,task_key:taskOf(params),tab_id:params?.tab_id??null,status};
+  const entry={event_id:crypto.randomUUID(),at:Date.now(),source,action,task_key:taskOf(params),tab_id:params?.tab_id??null,status};
   auditQueue=auditQueue.catch(()=>{}).then(async()=>{
-    const snapshot=await chrome.storage.local.get(["lucasAudit"]);
+    const snapshot=await chrome.storage.local.get(["lucasAudit","lucasAuditOutbox"]);
     const events=Array.isArray(snapshot.lucasAudit)?snapshot.lucasAudit:[];
-    await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry]});
+    await chrome.storage.local.set({lucasAudit:[...events.slice(-199),entry],lucasAuditOutbox:[...(snapshot.lucasAuditOutbox||[]),entry]});
     if(socket?.readyState===1)socket.send(JSON.stringify({type:"audit",event:entry}));
   });
   return auditQueue;
@@ -97,6 +110,16 @@ chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
  if(m?.type==="lucas_tab_state_query"){
    tabStateReady.then(()=>sendResponse({state:tabStates.get(tabId)||null}));return true;
  }
+ if(m?.type==="lucas_claim_decision"){
+   const pending=pendingClaims.get(tabId);
+   if(!pending || pending.nonce!==m.nonce || pending.expires<Date.now()){sendResponse({ok:false,error:"Approval expired"});return;}
+   pendingClaims.delete(tabId);
+   (async()=>{
+     if(m.approved===true)await registerTab(tabId,pending.task_key);
+     await recordBrowserAudit("human","claim",{tab_id:tabId,task_key:pending.task_key},m.approved===true?"ok":"denied");
+     sendResponse({ok:true});
+   })().catch(e=>sendResponse({ok:false,error:e.message}));return true;
+ }
  const actions={lucas_human_takeover:"takeover",lucas_human_pause:"pause",lucas_human_resume:"resume"};
  const action=actions[m?.type];if(!action)return;
  // Content messages carry only the sender's tab, never a supplied/global tab ID.
@@ -105,6 +128,7 @@ chrome.runtime.onMessage.addListener((m,sender,sendResponse)=>{
  }).catch(e=>sendResponse({ok:false,error:e.message}));return true;
 });
 chrome.tabs.onRemoved.addListener(tabId=>{
+ pendingClaims.delete(tabId);
  if(tabStates.delete(tabId))persistTabStates().catch(()=>{});
 });
 // Session storage survives worker restarts, but not browser restarts where tab IDs
@@ -181,7 +205,17 @@ async function executeCommand(action,p){
     if(p.user_confirmed!==true)throw new Error("Explicit human confirmation required to claim tab");
     const t=await chrome.tabs.get(Number(p.tab_id));
     if(!t)throw new Error("Tab not found");
-    await registerTab(t.id,taskKey);
+    const existing=tabStates.get(t.id);
+    if(existing){
+      if(existing.task_key!==taskKey)throw new Error("Tab belongs to another task");
+    }else{
+      const previous=pendingClaims.get(t.id);
+      if(previous && previous.expires>Date.now() && previous.task_key!==taskKey)throw new Error("Another task is awaiting local approval");
+      const pending=previous?.expires>Date.now()?previous:{task_key:taskKey,nonce:crypto.randomUUID(),expires:Date.now()+120000};
+      pendingClaims.set(t.id,pending);
+      await chrome.tabs.sendMessage(t.id,{type:"lucas_claim_request",...pending});
+      return{claimed:false,requires_user_action:true,action_type:"browser_tab_approval",tab_id:t.id,message:"Click Allow AI in the target tab, then retry claim_tab"};
+    }
     return{claimed:true,tab_id:t.id,task_key:taskKey};
   }
   if(action==="tab.release"){
@@ -195,7 +229,7 @@ async function executeCommand(action,p){
     const state=tabStates.get(Number(p.tab_id));
     if(!state || !taskKey || state.task_key!==taskKey)throw new Error("Task does not own tab");
     if(p.user_confirmed!==true)throw new Error("Explicit human confirmation required to resume");
-    await setPaused(p.tab_id,false);
+    if(state.paused)throw new Error("Resume requires a local click on Resume AI in this tab");
     return{resumed:true,tab_id:Number(p.tab_id)};
   }
   const tab=await getTab(p.tab_id,taskKey); if(!tab?.id)throw new Error("No AI-owned browser tab found"); const tabId=tab.id;

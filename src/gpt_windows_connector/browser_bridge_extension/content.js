@@ -189,6 +189,27 @@
       button.disabled=false;
     }
   }
+  let claimNotice=null;
+  chrome.runtime.onMessage.addListener(message=>{
+    if(message?.type!=="lucas_claim_request")return;
+    claimNotice?.remove();
+    const host=document.createElement("div");claimNotice=host;
+    host.style.cssText="position:fixed;right:16px;top:16px;z-index:2147483647";
+    const panel=host.attachShadow({mode:"closed"});
+    const box=document.createElement("div");box.style.cssText="background:#10213d;color:white;padding:16px;border-radius:12px;font:14px system-ui";
+    const label=document.createElement("p");label.textContent="Lucas requests permission to control this tab for task: "+message.task_key;box.appendChild(label);
+    for(const [text,approved] of [["Allow AI",true],["Deny",false]]){
+      const button=document.createElement("button");button.textContent=text;
+      button.onclick=event=>{
+        if(!event.isTrusted || Date.now()>message.expires)return;
+        chrome.runtime.sendMessage({type:"lucas_claim_decision",nonce:message.nonce,approved},response=>{
+          if(response?.ok)host.remove();else label.textContent=response?.error||"Approval failed";
+        });
+      };box.appendChild(button);
+    }
+    panel.appendChild(box);(document.body||document.documentElement).appendChild(host);
+    setTimeout(()=>host.remove(),Math.max(0,message.expires-Date.now()));
+  });
   chrome.runtime.onMessage.addListener(message=>{
     if(message?.type==="lucas_tab_state")updateLucasOverlay(message.state);
   });
